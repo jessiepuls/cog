@@ -2,12 +2,15 @@ from __future__ import annotations
 
 import time
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, ClassVar
+from collections.abc import Sequence
+from pathlib import Path
+from typing import TYPE_CHECKING, ClassVar, Literal
 
 from cog.core.context import ExecutionContext
 from cog.core.errors import StageError
 from cog.core.item import Item
 from cog.core.outcomes import Outcome, StageResult
+from cog.core.preflight import PreflightCheck
 from cog.core.runner import ResultEvent, RunResult
 from cog.core.stage import Stage
 
@@ -19,7 +22,7 @@ class Workflow(ABC):
     name: ClassVar[str]
     queue_label: ClassVar[str]  # "agent-ready" / "needs-refinement"
     supports_headless: ClassVar[bool]  # no default — subclasses declare
-    preflight_checks: ClassVar[list] = []
+    preflight_checks: ClassVar[Sequence[PreflightCheck]] = ()
     content_widget_cls: ClassVar[type[Widget] | None] = None
 
     @abstractmethod
@@ -50,6 +53,18 @@ class Workflow(ABC):
         self, ctx: ExecutionContext, error: Exception, results: list[StageResult]
     ) -> None:
         return
+
+    async def write_report(
+        self,
+        ctx: ExecutionContext,
+        results: list[StageResult],
+        outcome: Literal["success", "noop", "error"],
+        *,
+        error: Exception | None = None,
+    ) -> Path | None:
+        """Default: no report. Workflows override to write a markdown file to
+        project_state_dir(ctx.project_dir) / 'reports' / '<ts>-<workflow>-<item>.md'."""
+        return None
 
 
 class StageExecutor:

@@ -3,7 +3,7 @@
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from cog.preflight import PreflightResult
+from cog.core.preflight import PreflightResult
 from tests.fakes import NullContentWidget
 
 
@@ -23,7 +23,7 @@ class _RefuseHeadlessWorkflow(_FakeWorkflow):
 
 
 def _error_result() -> PreflightResult:
-    return PreflightResult(name="check", ok=False, level="error", message="missing tool")
+    return PreflightResult(check="host_tool", ok=False, level="error", message="missing tool")
 
 
 async def test_build_and_run_preflight_failure_returns_one(tmp_path: Path) -> None:
@@ -92,7 +92,6 @@ async def test_build_and_run_preselects_item_when_item_id_given(tmp_path: Path) 
         patch("cog.ui.wire.JsonFileStateCache") as mock_cache_cls,
         patch("cog.ui.wire.TelemetryWriter"),
         patch("cog.ui.wire.project_state_dir", return_value=tmp_path / ".cog"),
-        patch("cog.ui.wire.project_slug", return_value="test"),
         patch("cog.ui.app.run_textual", new=AsyncMock(side_effect=_fake_run_textual)),
     ):
         mock_tracker = AsyncMock()
@@ -133,7 +132,6 @@ async def test_build_and_run_wires_full_stack(tmp_path: Path) -> None:
         patch("cog.ui.wire.JsonFileStateCache", return_value=cache_mock),
         patch("cog.ui.wire.TelemetryWriter"),
         patch("cog.ui.wire.project_state_dir", return_value=tmp_path / ".cog"),
-        patch("cog.ui.wire.project_slug", return_value="test"),
         patch("cog.ui.app.run_textual", run_textual_mock),
     ):
         code = await build_and_run(

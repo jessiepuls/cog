@@ -28,6 +28,7 @@ name = "cog"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "rich" },
     { name = "textual" },
     { name = "typer" },
 ]
@@ -42,6 +43,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "rich" },
     { name = "textual", specifier = ">=0.80,<1.0" },
     { name = "typer" },
 ]

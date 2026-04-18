@@ -5,11 +5,12 @@ import tempfile
 from pathlib import Path
 
 from cog.core.context import ExecutionContext
+from cog.core.preflight import PreflightResult, print_results, run_checks
 from cog.core.workflow import Workflow
-from cog.preflight import PreflightResult, print_results, run_checks
 from cog.runners.claude_cli import ClaudeCliRunner
 from cog.runners.docker_sandbox import DockerSandbox
-from cog.state import JsonFileStateCache, project_slug, project_state_dir
+from cog.state import JsonFileStateCache
+from cog.state_paths import project_state_dir
 from cog.telemetry import TelemetryWriter
 from cog.trackers.github import GitHubIssueTracker
 
@@ -48,7 +49,7 @@ async def build_and_run(
 
         host = GitHubGitHost(project_dir)
         await cache.recover_from_remote(tracker, host, workflow_cls.queue_label)
-    _telemetry = TelemetryWriter(state_dir, project=project_slug(project_dir))
+    telemetry = TelemetryWriter(state_dir)
 
     workflow = workflow_cls(runner=runner, tracker=tracker)  # type: ignore[call-arg]
 
@@ -58,6 +59,7 @@ async def build_and_run(
         tmp_dir=tmp_dir,
         state_cache=cache,
         headless=headless,
+        telemetry=telemetry,
     )
 
     if item_id is not None:
