@@ -1,5 +1,6 @@
 from collections.abc import AsyncIterator, Sequence
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -61,6 +62,51 @@ class FakeProc:
     async def communicate(self, input: bytes | None = None) -> tuple[bytes, bytes]:
         self.received_stdin = input
         return self.stdout, self.stderr
+
+
+def make_item(**overrides: Any) -> Item:
+    """Factory for Item with sensible defaults. Pass keyword args to override."""
+    defaults: dict[str, Any] = {
+        "tracker_id": "github/owner/repo",
+        "item_id": "42",
+        "title": "Test issue",
+        "body": "Issue body text.",
+        "labels": ("agent-ready",),
+        "comments": (),
+        "updated_at": datetime(2024, 1, 1, tzinfo=UTC),
+        "url": "https://github.com/owner/repo/issues/42",
+    }
+    defaults.update(overrides)
+    return Item(**defaults)
+
+
+class FailingRunner(AgentRunner):
+    """Raises exc from stream(), simulating a runner crash."""
+
+    def __init__(self, exc: Exception | None = None) -> None:
+        self._exc = exc or RuntimeError("runner failed")
+
+    async def stream(self, prompt: str, *, model: str) -> AsyncIterator[RunEvent]:
+        raise self._exc
+        yield  # type: ignore[misc]
+
+
+class ExitNonZeroRunner(AgentRunner):
+    """Returns a RunResult with the given non-zero exit status."""
+
+    def __init__(self, exit_status: int = 1) -> None:
+        self._exit_status = exit_status
+
+    async def stream(self, prompt: str, *, model: str) -> AsyncIterator[RunEvent]:
+        yield ResultEvent(
+            result=RunResult(
+                final_message="non-zero exit",
+                total_cost_usd=0.0,
+                exit_status=self._exit_status,
+                stream_json_path=Path("/dev/null"),
+                duration_seconds=0.0,
+            )
+        )
 
 
 class FakeSubprocessRegistry:

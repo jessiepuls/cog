@@ -1,6 +1,7 @@
 import time
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
+from dataclasses import replace
 from pathlib import Path
 from typing import ClassVar, Literal
 
@@ -64,10 +65,11 @@ class StageExecutor:
     """Runs one workflow iteration against an ExecutionContext."""
 
     async def run(self, workflow: Workflow, ctx: ExecutionContext) -> list[StageResult]:
-        item = await workflow.select_item(ctx)
-        if item is None:
-            return []
-        ctx.item = item
+        if ctx.item is None:
+            item = await workflow.select_item(ctx)
+            if item is None:
+                return []
+            ctx.item = item
         results: list[StageResult] = []
         try:
             await workflow.pre_stages(ctx)
@@ -86,12 +88,30 @@ class StageExecutor:
 
     async def _run_stage(self, stage: Stage, ctx: ExecutionContext) -> StageResult:
         start = time.monotonic()
+        error: Exception | None = None
+        run_result = None
         try:
             prompt = stage.prompt_source(ctx)
             run_result = await stage.runner.run(prompt, model=stage.model)
         except Exception as e:
-            raise StageError(stage, cause=e) from e
+            if not stage.tolerate_failure:
+                raise StageError(stage, cause=e) from e
+            error = e
         duration = time.monotonic() - start
+
+        if run_result is None:
+            # Runner raised and tolerate_failure=True
+            return StageResult(
+                stage=stage,
+                duration_seconds=duration,
+                cost_usd=0.0,
+                exit_status=-1,
+                final_message="",
+                stream_json_path=Path("/dev/null"),
+                commits_created=0,
+                error=error,
+            )
+
         stage_result = StageResult(
             stage=stage,
             duration_seconds=duration,
@@ -100,7 +120,10 @@ class StageExecutor:
             final_message=run_result.final_message,
             stream_json_path=run_result.stream_json_path,
             commits_created=0,  # stub: git integration lands in #13
+            error=None,
         )
         if run_result.exit_status != 0:
-            raise StageError(stage, stage_result)
+            if not stage.tolerate_failure:
+                raise StageError(stage, stage_result)
+            stage_result = replace(stage_result, error=StageError(stage, stage_result))
         return stage_result
