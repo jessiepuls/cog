@@ -31,6 +31,8 @@ class StreamJsonParseError(RunnerError):
     """Claude emitted a line that wasn't parseable JSON or had unexpected shape."""
 
 
+class TrackerError(Exception):
+    """Non-zero exit or parse failure from an issue tracker."""
 class SandboxError(Exception):
     """Base for sandbox failures."""
 
