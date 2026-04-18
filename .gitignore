@@ -12,3 +12,4 @@ dist/
 .uv/
 .uv_python/
 .uv_cache/
+.uv-bin/
