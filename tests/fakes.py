@@ -1,5 +1,6 @@
 from collections.abc import AsyncIterator, Sequence
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -8,6 +9,32 @@ from textual.widget import Widget
 
 from cog.core.item import Item
 from cog.core.runner import AgentRunner, ResultEvent, RunEvent, RunResult
+
+_EPOCH = datetime(2024, 1, 1, tzinfo=UTC)
+
+
+def make_item(
+    *,
+    tracker_id: str = "github/org/repo",
+    item_id: str = "1",
+    title: str = "Test item",
+    body: str = "",
+    labels: tuple[str, ...] = (),
+    created_at: datetime | None = None,
+    updated_at: datetime | None = None,
+    url: str = "https://github.com/org/repo/issues/1",
+) -> Item:
+    return Item(
+        tracker_id=tracker_id,
+        item_id=item_id,
+        title=title,
+        body=body,
+        labels=labels,
+        comments=(),
+        created_at=created_at or _EPOCH,
+        updated_at=updated_at or _EPOCH,
+        url=url,
+    )
 
 
 class EchoRunner(AgentRunner):

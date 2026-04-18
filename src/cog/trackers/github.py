@@ -128,6 +128,7 @@ class GitHubIssueTracker(IssueTracker):
             body=record["body"] or "",
             labels=tuple(lbl["name"] for lbl in record.get("labels", [])),
             comments=comments,
+            created_at=datetime.fromisoformat(record["createdAt"].replace("Z", "+00:00")),
             updated_at=datetime.fromisoformat(record["updatedAt"].replace("Z", "+00:00")),
             url=record["url"],
         )

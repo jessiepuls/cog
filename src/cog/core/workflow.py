@@ -6,8 +6,9 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar, Literal
 
+import cog.git as git
 from cog.core.context import ExecutionContext
-from cog.core.errors import StageError
+from cog.core.errors import GitError, StageError
 from cog.core.item import Item
 from cog.core.outcomes import Outcome, StageResult
 from cog.core.preflight import PreflightCheck
@@ -93,6 +94,12 @@ class StageExecutor:
         return results
 
     async def _run_stage(self, stage: Stage, ctx: ExecutionContext) -> StageResult:
+        head_before: str | None = None
+        try:
+            head_before = await git.current_head_sha(ctx.project_dir)
+        except GitError:
+            pass  # not a git repo; commits_created stays 0
+
         start = time.monotonic()
         run_result: RunResult | None = None
         try:
@@ -106,6 +113,14 @@ class StageExecutor:
             raise StageError(stage, cause=e) from e
         assert run_result is not None, "runner must emit a ResultEvent before finishing"
         duration = time.monotonic() - start
+
+        commits_created = 0
+        if head_before is not None:
+            try:
+                commits_created = await git.commits_between(ctx.project_dir, head_before)
+            except GitError:
+                pass  # counting failed; leave 0
+
         stage_result = StageResult(
             stage=stage,
             duration_seconds=duration,
@@ -113,7 +128,7 @@ class StageExecutor:
             exit_status=run_result.exit_status,
             final_message=run_result.final_message,
             stream_json_path=run_result.stream_json_path,
-            commits_created=0,  # stub: git integration lands in #13
+            commits_created=commits_created,
         )
         if run_result.exit_status != 0:
             raise StageError(stage, stage_result)

@@ -17,6 +17,7 @@ def make_item(item_id: str) -> Item:
         body="",
         labels=(),
         comments=(),
+        created_at=datetime(2024, 1, 1, tzinfo=UTC),
         updated_at=datetime(2024, 1, 1, tzinfo=UTC),
         url=f"https://github.com/jessiepuls/cog/issues/{item_id}",
     )

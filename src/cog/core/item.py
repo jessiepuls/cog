@@ -17,5 +17,6 @@ class Item:
     body: str
     labels: tuple[str, ...]
     comments: tuple[Comment, ...]
+    created_at: datetime
     updated_at: datetime
     url: str

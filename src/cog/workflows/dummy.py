@@ -24,6 +24,7 @@ class DummyWorkflow(Workflow):
             body="",
             labels=(),
             comments=(),
+            created_at=datetime.now(UTC),
             updated_at=datetime.now(UTC),
             url="",
         )
