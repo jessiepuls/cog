@@ -67,3 +67,21 @@ async def test_tool_use_only_cost():
 async def test_tool_use_only_final_message_empty():
     result = await _get_result("tool_use_only.jsonl")
     assert result.final_message == ""
+
+
+async def test_no_result_record_falls_back_to_returncode():
+    """When the stream has no result record, exit_status comes from proc.returncode."""
+    result = await _get_result("no_result_record.jsonl", returncode=2)
+    assert result.exit_status == 2
+
+
+async def test_no_result_record_cost_is_zero():
+    """When the stream has no result record, cost defaults to 0."""
+    result = await _get_result("no_result_record.jsonl")
+    assert result.total_cost_usd == 0.0
+
+
+async def test_no_result_record_final_message_from_last_text():
+    """When the stream has no result record, final_message is the last assistant text."""
+    result = await _get_result("no_result_record.jsonl")
+    assert result.final_message == "Partial output before crash."

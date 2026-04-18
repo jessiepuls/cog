@@ -1,0 +1,2 @@
+{"type":"system","subtype":"init","apiKeySource":"environment","cwd":"/work","model":"claude-sonnet-4-5","permissionMode":"bypassPermissions","tools":["Bash"]}
+{"type":"assistant","message":{"id":"msg_01","type":"message","role":"assistant","content":[{"type":"text","text":"Partial output before crash."}],"model":"claude-sonnet-4-5","stop_reason":"end_turn","stop_sequence":null,"usage":{"input_tokens":10,"output_tokens":5}}}
