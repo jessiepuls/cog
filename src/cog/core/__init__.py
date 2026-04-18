@@ -10,6 +10,7 @@ from cog.core.errors import (
 from cog.core.host import GitHost, PullRequest
 from cog.core.item import Comment, Item
 from cog.core.outcomes import Outcome, StageResult
+from cog.core.reports import ReportWriter
 from cog.core.runner import (
     AgentRunner,
     AssistantTextEvent,
@@ -34,6 +35,7 @@ __all__ = [
     "Item",
     "Outcome",
     "PullRequest",
+    "ReportWriter",
     "ResultEvent",
     "RunEvent",
     "RunResult",

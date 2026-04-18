@@ -1,7 +1,8 @@
 import time
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
-from typing import ClassVar
+from pathlib import Path
+from typing import ClassVar, Literal
 
 from cog.core.context import ExecutionContext
 from cog.core.errors import StageError
@@ -45,6 +46,18 @@ class Workflow(ABC):
         self, ctx: ExecutionContext, error: Exception, results: list[StageResult]
     ) -> None:
         return
+
+    async def write_report(
+        self,
+        ctx: ExecutionContext,
+        results: list[StageResult],
+        outcome: Literal["success", "noop", "error"],
+        *,
+        error: Exception | None = None,
+    ) -> Path | None:
+        """Default: no report. Workflows override to write a markdown file to
+        project_state_dir(ctx.project_dir) / 'reports' / '<ts>-<workflow>-<item>.md'."""
+        return None
 
 
 class StageExecutor:
