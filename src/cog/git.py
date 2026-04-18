@@ -57,3 +57,12 @@ async def merge_ff_only(project_dir: Path, ref: str) -> None:
 async def create_branch(project_dir: Path, name: str, start_point: str = "HEAD") -> None:
     """`git checkout -b <name> <start_point>`. Raises GitError if branch already exists."""
     await _run(["git", "checkout", "-b", name, start_point], project_dir)
+
+
+async def log_short_shas(project_dir: Path, revision_range: str) -> list[str]:
+    """`git log --format=%h --no-merges <range>` → list of short SHAs (oldest-first empty ok)."""
+    result = await _run(
+        ["git", "log", "--format=%h", "--no-merges", revision_range],
+        project_dir,
+    )
+    return [s for s in result.splitlines() if s]

@@ -44,14 +44,14 @@ async def build_and_run(
     state_dir = project_state_dir(project_dir)
     cache = JsonFileStateCache(state_dir / "state.json")
     cache.load()
-    if cache.was_corrupt() or cache.is_empty():
-        from cog.hosts.github import GitHubGitHost
+    from cog.hosts.github import GitHubGitHost
 
-        host = GitHubGitHost(project_dir)
+    host = GitHubGitHost(project_dir)
+    if cache.was_corrupt() or cache.is_empty():
         await cache.recover_from_remote(tracker, host, workflow_cls.queue_label)
     telemetry = TelemetryWriter(state_dir)
 
-    workflow = workflow_cls(runner=runner, tracker=tracker)  # type: ignore[call-arg]
+    workflow = workflow_cls(runner=runner, tracker=tracker, host=host)  # type: ignore[call-arg]
 
     tmp_dir = Path(tempfile.mkdtemp(prefix="cog-"))
     ctx = ExecutionContext(

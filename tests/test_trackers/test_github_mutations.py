@@ -81,3 +81,60 @@ async def test_update_body_with_title(
     assert "New Title" in call
     proc = registry._procs[-1]
     assert proc.received_stdin == b"new body text"
+
+
+async def test_ensure_label_argv(
+    registry: FakeSubprocessRegistry, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    registry.expect(
+        (
+            "gh",
+            "label",
+            "create",
+            "agent-abandoned",
+            "--color",
+            "ededed",
+            "--description",
+            "Cog attempted this but made no changes",
+            "--force",
+        )
+    )
+    tracker = make_tracker(registry, tmp_path, monkeypatch)
+    await tracker.ensure_label(
+        "agent-abandoned",
+        color="ededed",
+        description="Cog attempted this but made no changes",
+    )
+    expected = (
+        "gh",
+        "label",
+        "create",
+        "agent-abandoned",
+        "--color",
+        "ededed",
+        "--description",
+        "Cog attempted this but made no changes",
+        "--force",
+    )
+    assert expected in registry.calls
+
+
+async def test_ensure_label_idempotent(
+    registry: FakeSubprocessRegistry, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """--force makes it succeed on existing labels. Verify argv contains --force."""
+    expected_argv = (
+        "gh",
+        "label",
+        "create",
+        "my-label",
+        "--color",
+        "cccccc",
+        "--description",
+        "",
+        "--force",
+    )
+    registry.expect(expected_argv)
+    tracker = make_tracker(registry, tmp_path, monkeypatch)
+    await tracker.ensure_label("my-label")
+    assert "--force" in registry.calls[-1]
