@@ -3,6 +3,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from textual.app import ComposeResult
+from textual.widget import Widget
+
 from cog.core.item import Item
 from cog.core.runner import AgentRunner, ResultEvent, RunEvent, RunResult
 
@@ -20,6 +23,16 @@ class EchoRunner(AgentRunner):
                 duration_seconds=0.0,
             )
         )
+
+
+class NullContentWidget(Widget):
+    """Minimal Widget implementing emit; used in wire/run-screen smoke tests."""
+
+    def compose(self) -> ComposeResult:
+        return iter([])
+
+    async def emit(self, event: RunEvent) -> None:
+        pass
 
 
 class InMemoryStateCache:
