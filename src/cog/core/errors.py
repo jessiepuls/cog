@@ -29,3 +29,15 @@ class RunnerTimeoutError(RunnerError):
 
 class StreamJsonParseError(RunnerError):
     """Claude emitted a line that wasn't parseable JSON or had unexpected shape."""
+
+
+class SandboxError(Exception):
+    """Base for sandbox failures."""
+
+
+class DockerUnavailableError(SandboxError):
+    """docker daemon unreachable (`docker info` failed or binary missing)."""
+
+
+class DockerImageBuildError(SandboxError):
+    """`docker build` exited non-zero."""
