@@ -1,16 +1,22 @@
+from __future__ import annotations
+
 import time
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
 from dataclasses import replace
 from pathlib import Path
-from typing import ClassVar, Literal
+from typing import TYPE_CHECKING, ClassVar, Literal
 
 from cog.core.context import ExecutionContext
 from cog.core.errors import StageError
 from cog.core.item import Item
 from cog.core.outcomes import Outcome, StageResult
 from cog.core.preflight import PreflightCheck
+from cog.core.runner import ResultEvent, RunResult, StageEndEvent, StageStartEvent
 from cog.core.stage import Stage
+
+if TYPE_CHECKING:
+    from textual.widget import Widget
 
 
 class Workflow(ABC):
@@ -18,6 +24,7 @@ class Workflow(ABC):
     queue_label: ClassVar[str]  # "agent-ready" / "needs-refinement"
     supports_headless: ClassVar[bool]  # no default — subclasses declare
     preflight_checks: ClassVar[Sequence[PreflightCheck]] = ()
+    content_widget_cls: ClassVar[type[Widget] | None] = None
 
     @abstractmethod
     async def select_item(self, ctx: ExecutionContext) -> Item | None:
@@ -87,12 +94,19 @@ class StageExecutor:
         return results
 
     async def _run_stage(self, stage: Stage, ctx: ExecutionContext) -> StageResult:
+        sink = ctx.event_sink
+        if sink is not None:
+            await sink.emit(StageStartEvent(stage_name=stage.name, model=stage.model))
         start = time.monotonic()
         error: Exception | None = None
-        run_result = None
+        run_result: RunResult | None = None
         try:
             prompt = stage.prompt_source(ctx)
-            run_result = await stage.runner.run(prompt, model=stage.model)
+            async for event in stage.runner.stream(prompt, model=stage.model):
+                if isinstance(event, ResultEvent):
+                    run_result = event.result
+                elif sink is not None:
+                    await sink.emit(event)
         except Exception as e:
             if not stage.tolerate_failure:
                 raise StageError(stage, cause=e) from e
@@ -101,7 +115,7 @@ class StageExecutor:
 
         if run_result is None:
             # Runner raised and tolerate_failure=True
-            return StageResult(
+            stage_result = StageResult(
                 stage=stage,
                 duration_seconds=duration,
                 cost_usd=0.0,
@@ -111,6 +125,15 @@ class StageExecutor:
                 commits_created=0,
                 error=error,
             )
+            if sink is not None:
+                await sink.emit(
+                    StageEndEvent(
+                        stage_name=stage.name,
+                        cost_usd=0.0,
+                        exit_status=-1,
+                    )
+                )
+            return stage_result
 
         stage_result = StageResult(
             stage=stage,
@@ -122,6 +145,14 @@ class StageExecutor:
             commits_created=0,  # stub: git integration lands in #13
             error=None,
         )
+        if sink is not None:
+            await sink.emit(
+                StageEndEvent(
+                    stage_name=stage.name,
+                    cost_usd=run_result.total_cost_usd,
+                    exit_status=run_result.exit_status,
+                )
+            )
         if run_result.exit_status != 0:
             if not stage.tolerate_failure:
                 raise StageError(stage, stage_result)

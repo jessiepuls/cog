@@ -1,11 +1,24 @@
 from collections.abc import AsyncIterator, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from textual.app import ComposeResult
+from textual.widget import Widget
+
 from cog.core.item import Item
 from cog.core.runner import AgentRunner, ResultEvent, RunEvent, RunResult
+
+
+@dataclass
+class RecordingEventSink:
+    """Captures emitted events for assertion in tests."""
+
+    events: list[RunEvent] = field(default_factory=list)
+
+    async def emit(self, event: RunEvent) -> None:
+        self.events.append(event)
 
 
 class EchoRunner(AgentRunner):
@@ -21,6 +34,16 @@ class EchoRunner(AgentRunner):
                 duration_seconds=0.0,
             )
         )
+
+
+class NullContentWidget(Widget):
+    """Minimal Widget implementing emit; used in wire/run-screen smoke tests."""
+
+    def compose(self) -> ComposeResult:
+        return iter([])
+
+    async def emit(self, event: RunEvent) -> None:
+        pass
 
 
 class InMemoryStateCache:

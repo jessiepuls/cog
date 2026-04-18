@@ -30,7 +30,20 @@ class ResultEvent:
     result: RunResult
 
 
-RunEvent = AssistantTextEvent | ToolUseEvent | ResultEvent
+@dataclass(frozen=True)
+class StageStartEvent:
+    stage_name: str
+    model: str
+
+
+@dataclass(frozen=True)
+class StageEndEvent:
+    stage_name: str
+    cost_usd: float
+    exit_status: int
+
+
+RunEvent = AssistantTextEvent | ToolUseEvent | ResultEvent | StageStartEvent | StageEndEvent
 
 
 class AgentRunner(ABC):
