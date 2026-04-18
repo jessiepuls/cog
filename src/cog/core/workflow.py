@@ -9,6 +9,7 @@ from cog.core.errors import StageError
 from cog.core.item import Item
 from cog.core.outcomes import Outcome, StageResult
 from cog.core.preflight import PreflightCheck
+from cog.core.runner import ResultEvent, StageEndEvent, StageStartEvent
 from cog.core.stage import Stage
 
 
@@ -85,12 +86,21 @@ class StageExecutor:
         return results
 
     async def _run_stage(self, stage: Stage, ctx: ExecutionContext) -> StageResult:
+        sink = ctx.event_sink
+        if sink is not None:
+            await sink.emit(StageStartEvent(stage_name=stage.name, model=stage.model))
         start = time.monotonic()
         try:
             prompt = stage.prompt_source(ctx)
-            run_result = await stage.runner.run(prompt, model=stage.model)
+            run_result = None
+            async for event in stage.runner.stream(prompt, model=stage.model):
+                if isinstance(event, ResultEvent):
+                    run_result = event.result
+                elif sink is not None:
+                    await sink.emit(event)
         except Exception as e:
             raise StageError(stage, cause=e) from e
+        assert run_result is not None, "runner must emit a ResultEvent before finishing"
         duration = time.monotonic() - start
         stage_result = StageResult(
             stage=stage,
@@ -101,6 +111,14 @@ class StageExecutor:
             stream_json_path=run_result.stream_json_path,
             commits_created=0,  # stub: git integration lands in #13
         )
+        if sink is not None:
+            await sink.emit(
+                StageEndEvent(
+                    stage_name=stage.name,
+                    cost_usd=run_result.total_cost_usd,
+                    exit_status=run_result.exit_status,
+                )
+            )
         if run_result.exit_status != 0:
             raise StageError(stage, stage_result)
         return stage_result

@@ -86,3 +86,36 @@ def test_doctor_output_goes_to_stderr(monkeypatch, tmp_path):
     result = runner.invoke(app, ["doctor", "--project-dir", str(tmp_path)])
     assert len(captured) == 1  # print_results was called with the check results
     assert result.output == ""  # nothing written directly to stdout
+
+
+# --- ralph subcommand ---
+
+
+def test_cog_ralph_headless_forwards_flag(monkeypatch, tmp_path):
+    calls: list[dict] = []
+
+    async def fake_build_and_run(**kwargs: Any) -> int:
+        calls.append(kwargs)
+        return 0
+
+    monkeypatch.setattr("cog.cli.build_and_run", fake_build_and_run)
+    result = runner.invoke(app, ["ralph", "--project-dir", str(tmp_path), "--headless"])
+    assert result.exit_code == 0
+    assert len(calls) == 1
+    assert calls[0]["headless"] is True
+
+
+def test_cog_ralph_keyboard_interrupt_exits_130(monkeypatch, tmp_path):
+    import asyncio
+    import inspect
+
+    def raise_keyboard_interrupt(coro: Any) -> None:
+        # Close the coroutine to prevent ResourceWarning about unawaited coroutine
+        if inspect.iscoroutine(coro):
+            coro.close()
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(asyncio, "run", raise_keyboard_interrupt)
+    result = runner.invoke(app, ["ralph", "--project-dir", str(tmp_path), "--headless"])
+    assert result.exit_code == 130
+    assert "aborted." in result.output or "aborted." in (result.stderr or "")

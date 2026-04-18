@@ -1,10 +1,20 @@
 from collections.abc import AsyncIterator, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from cog.core.item import Item
 from cog.core.runner import AgentRunner, ResultEvent, RunEvent, RunResult
+
+
+@dataclass
+class RecordingEventSink:
+    """Captures emitted events for assertion in tests."""
+
+    events: list[RunEvent] = field(default_factory=list)
+
+    async def emit(self, event: RunEvent) -> None:
+        self.events.append(event)
 
 
 class EchoRunner(AgentRunner):
