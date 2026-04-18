@@ -1,0 +1,28 @@
+/* Cog TUI stylesheet */
+
+Screen {
+    background: $surface;
+}
+
+#run-footer {
+    height: 1;
+    background: $panel;
+    color: $text-muted;
+    padding: 0 1;
+}
+
+#result-panel {
+    height: 3;
+    background: $panel;
+    border: solid $accent;
+    padding: 0 1;
+    content-align: center middle;
+}
+
+LogPaneWidget {
+    height: 1fr;
+}
+
+ChatPaneWidget {
+    height: 1fr;
+}
