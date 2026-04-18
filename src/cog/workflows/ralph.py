@@ -6,10 +6,10 @@ import cog.git as git
 from cog.core.context import ExecutionContext
 from cog.core.item import Item
 from cog.core.outcomes import Outcome, StageResult
+from cog.core.runner import AgentRunner
 from cog.core.stage import Stage
 from cog.core.tracker import IssueTracker
 from cog.core.workflow import Workflow
-from cog.runners.claude_cli import ClaudeCliRunner
 
 _PRIORITY_RE = re.compile(r"^p(\d+)$")
 _SLUG_RE = re.compile(r"[^a-z0-9-]+")
@@ -37,7 +37,7 @@ class RalphWorkflow(Workflow):
     queue_label = "agent-ready"
     supports_headless = True
 
-    def __init__(self, runner: ClaudeCliRunner, tracker: IssueTracker) -> None:
+    def __init__(self, runner: AgentRunner, tracker: IssueTracker) -> None:
         self._runner = runner
         self._tracker = tracker
         self._processed_this_loop: set[tuple[str, str]] = set()
