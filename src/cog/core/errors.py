@@ -1,0 +1,19 @@
+from cog.core.outcomes import StageResult
+from cog.core.stage import Stage
+
+
+class WorkflowError(Exception):
+    pass
+
+
+class StageError(WorkflowError):
+    def __init__(
+        self,
+        stage: Stage,
+        result: StageResult | None = None,
+        cause: Exception | None = None,
+    ) -> None:
+        self.stage = stage
+        self.result = result
+        self.cause = cause
+        super().__init__(f"stage {stage.name!r} failed")
