@@ -31,7 +31,6 @@ async def run_textual(workflow: Workflow, ctx: ExecutionContext, *, loop: bool) 
 
 async def _run_main_menu(project_dir: Path) -> None:
     from cog.trackers.github import GitHubIssueTracker
-    from cog.ui import WORKFLOWS
     from cog.ui.screens.main_menu import MainMenuScreen
 
     tracker = GitHubIssueTracker(project_dir)
@@ -45,6 +44,5 @@ async def _run_main_menu(project_dir: Path) -> None:
             "Use `cog ralph` or `cog refine` subcommands instead."
         )
 
-    _ = WORKFLOWS  # referenced for side-effect of import
     app = CogApp(MainMenuScreen(project_dir, tracker, run_screen_factory=_run_screen_factory))
     await app.run_async()

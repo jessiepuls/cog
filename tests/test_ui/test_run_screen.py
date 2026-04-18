@@ -4,6 +4,7 @@ import asyncio
 from datetime import UTC, datetime
 from pathlib import Path
 
+import pytest
 from textual.app import App, ComposeResult
 
 from cog.core.context import ExecutionContext
@@ -134,16 +135,32 @@ async def test_run_screen_clock_advances(tmp_path: Path) -> None:
 
 
 async def test_run_screen_cost_accumulates_from_result_events(tmp_path: Path) -> None:
-    workflow = _FakeWorkflow(EchoRunner())
+    from collections.abc import AsyncIterator
+
+    from cog.core.runner import AgentRunner, RunEvent
+
+    class _CostRunner(AgentRunner):
+        """Runner that yields a ResultEvent with non-zero cost."""
+
+        async def stream(self, prompt: str, *, model: str) -> AsyncIterator[RunEvent]:
+            yield ResultEvent(
+                result=RunResult(
+                    final_message="done",
+                    total_cost_usd=0.05,
+                    exit_status=0,
+                    stream_json_path=Path("/dev/null"),
+                    duration_seconds=1.0,
+                )
+            )
+
+    workflow = _FakeWorkflow(_CostRunner())
     ctx = _ctx(tmp_path)
     async with _make_app(workflow, ctx).run_test(headless=True) as pilot:
         for _ in range(5):
             await pilot.pause()
         screen = pilot.app.query_one(RunScreen)
-        # EchoRunner completes with cost=0.0 — verify the sink processed the result event
-        # by checking state reached completed (proving the event pipeline worked end-to-end)
         assert screen._state == "completed"
-        assert screen._cumulative_cost == 0.0
+        assert screen._cumulative_cost == pytest.approx(0.05)
 
 
 async def test_run_screen_ctrl_c_cancels_worker(tmp_path: Path) -> None:
