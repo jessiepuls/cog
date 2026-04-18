@@ -1,5 +1,7 @@
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Sequence
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from cog.core.item import Item
 from cog.core.runner import AgentRunner, ResultEvent, RunEvent, RunResult
@@ -47,3 +49,54 @@ class InMemoryStateCache:
 
     def save(self) -> None:
         pass
+
+
+@dataclass
+class FakeProc:
+    stdout: bytes
+    stderr: bytes = b""
+    returncode: int = 0
+
+    async def communicate(self, input: bytes | None = None) -> tuple[bytes, bytes]:
+        return self.stdout, self.stderr
+
+
+class FakeSubprocessRegistry:
+    """Maps argv tuples to FakeProc results.
+
+    Tests register expected invocations; an unexpected argv raises a clear error.
+    """
+
+    def __init__(self) -> None:
+        self._expectations: dict[tuple[str, ...], FakeProc] = {}
+        self._calls: list[tuple[str, ...]] = []
+
+    def expect(
+        self,
+        argv: Sequence[str],
+        *,
+        stdout: bytes = b"",
+        stderr: bytes = b"",
+        returncode: int = 0,
+    ) -> None:
+        self._expectations[tuple(argv)] = FakeProc(
+            stdout=stdout, stderr=stderr, returncode=returncode
+        )
+
+    @property
+    def calls(self) -> list[tuple[str, ...]]:
+        return list(self._calls)
+
+    async def create_subprocess_exec(
+        self,
+        *argv: str,
+        cwd: Any = None,
+        stdin: Any = None,
+        stdout: Any = None,
+        stderr: Any = None,
+    ) -> FakeProc:
+        key = tuple(argv)
+        self._calls.append(key)
+        if key not in self._expectations:
+            raise AssertionError(f"Unexpected subprocess call: {key!r}")
+        return self._expectations[key]

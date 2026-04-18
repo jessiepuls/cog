@@ -4,6 +4,7 @@ from cog.core.errors import (
     RunnerTimeoutError,
     StageError,
     StreamJsonParseError,
+    TrackerError,
     WorkflowError,
 )
 from cog.core.host import GitHost, PullRequest
@@ -45,6 +46,7 @@ __all__ = [
     "StageResult",
     "StateCache",
     "StreamJsonParseError",
+    "TrackerError",
     "ToolUseEvent",
     "Workflow",
     "WorkflowError",
