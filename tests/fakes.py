@@ -56,8 +56,10 @@ class FakeProc:
     stdout: bytes
     stderr: bytes = b""
     returncode: int = 0
+    received_stdin: bytes | None = None
 
     async def communicate(self, input: bytes | None = None) -> tuple[bytes, bytes]:
+        self.received_stdin = input
         return self.stdout, self.stderr
 
 
@@ -70,6 +72,7 @@ class FakeSubprocessRegistry:
     def __init__(self) -> None:
         self._expectations: dict[tuple[str, ...], FakeProc] = {}
         self._calls: list[tuple[str, ...]] = []
+        self._procs: list[FakeProc] = []
 
     def expect(
         self,
@@ -99,4 +102,6 @@ class FakeSubprocessRegistry:
         self._calls.append(key)
         if key not in self._expectations:
             raise AssertionError(f"Unexpected subprocess call: {key!r}")
-        return self._expectations[key]
+        proc = self._expectations[key]
+        self._procs.append(proc)
+        return proc

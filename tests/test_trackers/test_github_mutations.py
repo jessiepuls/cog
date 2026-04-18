@@ -65,6 +65,8 @@ async def test_update_body_via_stdin(
     assert "--body-file" in call
     assert "-" in call
     assert "--title" not in call
+    proc = registry._procs[-1]
+    assert proc.received_stdin == b"new body text"
 
 
 async def test_update_body_with_title(
@@ -76,3 +78,5 @@ async def test_update_body_with_title(
     call = next(c for c in registry.calls if "edit" in c and "--body-file" in c)
     assert "--title" in call
     assert "New Title" in call
+    proc = registry._procs[-1]
+    assert proc.received_stdin == b"new body text"

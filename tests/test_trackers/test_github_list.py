@@ -18,13 +18,6 @@ LIST_BASE_ARGV = (
     "--json",
     LIST_FIELDS,
 )
-REPO_ARGV = ("gh", "repo", "view", "--json", "nameWithOwner")
-
-
-def make_tracker(registry: FakeSubprocessRegistry, tmp_path: Path) -> GitHubIssueTracker:
-    tracker = GitHubIssueTracker(tmp_path)
-    tracker._create_subprocess_exec = registry.create_subprocess_exec  # type: ignore[attr-defined]
-    return tracker
 
 
 async def list_by_label(
