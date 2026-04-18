@@ -26,7 +26,7 @@ def _make_record(outcome: TelemetryOutcome = "success") -> TelemetryRecord:
 
 async def test_writer_creates_file_on_first_write(tmp_path):
     state_dir = tmp_path / "state"
-    writer = TelemetryWriter(state_dir, project="proj")
+    writer = TelemetryWriter(state_dir)
     assert not (state_dir / "runs.jsonl").exists()
 
     await writer.write(_make_record())
@@ -36,7 +36,7 @@ async def test_writer_creates_file_on_first_write(tmp_path):
 
 async def test_writer_appends_as_separate_lines(tmp_path):
     state_dir = tmp_path / "state"
-    writer = TelemetryWriter(state_dir, project="proj")
+    writer = TelemetryWriter(state_dir)
 
     await writer.write(_make_record("success"))
     await writer.write(_make_record("no-op"))
@@ -47,7 +47,7 @@ async def test_writer_appends_as_separate_lines(tmp_path):
 
 async def test_writer_json_shape_round_trips(tmp_path):
     state_dir = tmp_path / "state"
-    writer = TelemetryWriter(state_dir, project="proj")
+    writer = TelemetryWriter(state_dir)
     record = _make_record()
 
     await writer.write(record)
@@ -69,7 +69,7 @@ async def test_writer_json_shape_round_trips(tmp_path):
 
 async def test_writer_disk_error_warns_no_raise(tmp_path, capsys):
     state_dir = tmp_path / "state"
-    writer = TelemetryWriter(state_dir, project="proj")
+    writer = TelemetryWriter(state_dir)
 
     with patch.object(writer, "_append", side_effect=OSError("disk full")):
         # Should not raise
@@ -82,7 +82,7 @@ async def test_writer_disk_error_warns_no_raise(tmp_path, capsys):
 async def test_writer_acquires_flock(tmp_path):
     state_dir = tmp_path / "state"
     state_dir.mkdir(parents=True)
-    writer = TelemetryWriter(state_dir, project="proj")
+    writer = TelemetryWriter(state_dir)
     # Pre-create the file so _append opens it
     (state_dir / "runs.jsonl").touch()
 
@@ -97,7 +97,7 @@ async def test_writer_acquires_flock(tmp_path):
 async def test_writer_fsyncs(tmp_path):
     state_dir = tmp_path / "state"
     state_dir.mkdir(parents=True)
-    writer = TelemetryWriter(state_dir, project="proj")
+    writer = TelemetryWriter(state_dir)
     (state_dir / "runs.jsonl").touch()
 
     with patch("os.fsync") as mock_fsync:

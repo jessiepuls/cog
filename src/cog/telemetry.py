@@ -84,9 +84,8 @@ class TelemetryRecord:
 
 
 class TelemetryWriter:
-    def __init__(self, state_dir: Path, *, project: str) -> None:
+    def __init__(self, state_dir: Path) -> None:
         self._path = state_dir / "runs.jsonl"
-        self._project = project
 
     async def write(self, record: TelemetryRecord) -> None:
         self._path.parent.mkdir(parents=True, exist_ok=True)
