@@ -8,9 +8,45 @@ from textual.app import ComposeResult
 from textual.widget import Widget
 
 from cog.core.item import Comment, Item
+from cog.core.outcomes import StageResult
 from cog.core.runner import AgentRunner, ResultEvent, RunEvent, RunResult
+from cog.core.stage import Stage
 
 _EPOCH = datetime(2024, 1, 1, tzinfo=UTC)
+
+_DUMMY_STAGE = Stage(
+    name="build",
+    prompt_source=lambda _: "hello",
+    model="claude-sonnet-4-6",
+    runner=None,  # type: ignore[arg-type]
+)
+
+
+def make_stage_result(
+    stage_name: str = "build",
+    *,
+    cost: float = 0.0,
+    commits: int = 0,
+    final_message: str = "",
+    error: Exception | None = None,
+    duration: float = 0.0,
+) -> StageResult:
+    stage = Stage(
+        name=stage_name,
+        prompt_source=lambda _: "hello",
+        model="claude-sonnet-4-6",
+        runner=None,  # type: ignore[arg-type]
+    )
+    return StageResult(
+        stage=stage,
+        duration_seconds=duration,
+        cost_usd=cost,
+        exit_status=0,
+        final_message=final_message,
+        stream_json_path=Path("/dev/null"),
+        commits_created=commits,
+        error=error,
+    )
 
 
 def make_item(

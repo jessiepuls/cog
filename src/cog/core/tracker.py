@@ -27,3 +27,13 @@ class IssueTracker(ABC):
 
     @abstractmethod
     async def update_body(self, item: Item, body: str, *, title: str | None = None) -> None: ...
+
+    @abstractmethod
+    async def ensure_label(
+        self,
+        name: str,
+        *,
+        color: str = "cccccc",
+        description: str = "",
+    ) -> None:
+        """Create the label if it doesn't exist. Idempotent — safe to call repeatedly."""

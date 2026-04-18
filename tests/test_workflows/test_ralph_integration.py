@@ -9,11 +9,18 @@ from unittest.mock import AsyncMock
 import pytest
 
 from cog.core.context import ExecutionContext
+from cog.core.host import GitHost
 from cog.core.stage import Stage
 from cog.core.tracker import IssueTracker
 from cog.core.workflow import StageExecutor
 from cog.workflows.ralph import RalphWorkflow
 from tests.fakes import EchoRunner, InMemoryStateCache, make_item
+
+
+@pytest.fixture(autouse=True)
+def _writable_state_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Point XDG_STATE_HOME at a writable temp dir so write_report doesn't fail."""
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
 
 
 def _git(*args: str, cwd: Path) -> None:
@@ -89,8 +96,9 @@ async def test_end_to_end_with_real_git(git_env: Path) -> None:
 
     tracker_mock = AsyncMock(spec=IssueTracker)
     tracker_mock.list_by_label = AsyncMock(return_value=[item])
+    host_mock = AsyncMock(spec=GitHost)
 
-    wf = RalphWorkflow(runner=EchoRunner(), tracker=tracker_mock)
+    wf = RalphWorkflow(runner=EchoRunner(), tracker=tracker_mock, host=host_mock)
 
     # Monkey-patch stages to a single stage so this test focuses on pre_stages
     # behavior (branch creation) rather than the full build/review/document cycle.
@@ -102,6 +110,7 @@ async def test_end_to_end_with_real_git(git_env: Path) -> None:
 
     wf.stages = _stages  # type: ignore[method-assign]
     wf.classify_outcome = _classify  # type: ignore[method-assign]
+    wf.write_report = AsyncMock()  # type: ignore[method-assign]
 
     ctx = ExecutionContext(
         project_dir=git_env,

@@ -71,6 +71,26 @@ class GitHubIssueTracker(IssueTracker):
             args += ["--title", title]
         await self._gh_run(args, stdin=body.encode("utf-8"))
 
+    async def ensure_label(
+        self,
+        name: str,
+        *,
+        color: str = "cccccc",
+        description: str = "",
+    ) -> None:
+        await self._gh_run(
+            [
+                "label",
+                "create",
+                name,
+                "--color",
+                color,
+                "--description",
+                description,
+                "--force",
+            ]
+        )
+
     async def _tracker_id_cached(self) -> str:
         if self._tracker_id is None:
             data = await self._gh_json(["repo", "view", "--json", "nameWithOwner"])
