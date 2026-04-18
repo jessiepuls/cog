@@ -52,7 +52,6 @@ async def test_tracker_id_cached_across_calls(
     """repo view should only be called once even across multiple list_by_label calls."""
     register_repo(registry)
     registry.expect(LIST_ARGV, stdout=b"[]")
-    registry.expect(LIST_ARGV, stdout=b"[]")
 
     tracker = make_tracker(registry, tmp_path, monkeypatch)
     await tracker.list_by_label("agent-ready")
