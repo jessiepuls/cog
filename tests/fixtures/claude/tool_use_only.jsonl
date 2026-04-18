@@ -1,0 +1,6 @@
+{"type":"system","subtype":"init","apiKeySource":"environment","cwd":"/work","model":"claude-sonnet-4-5","permissionMode":"bypassPermissions","tools":["Read","Grep"]}
+{"type":"assistant","message":{"id":"msg_01","type":"message","role":"assistant","content":[{"type":"tool_use","id":"toolu_01","name":"Read","input":{"file_path":"/etc/hosts"}}],"model":"claude-sonnet-4-5","stop_reason":"tool_use","stop_sequence":null,"usage":{"input_tokens":10,"output_tokens":15}}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_01","content":[{"type":"text","text":"127.0.0.1 localhost\n"}]}]}}
+{"type":"assistant","message":{"id":"msg_02","type":"message","role":"assistant","content":[{"type":"tool_use","id":"toolu_02","name":"Grep","input":{"pattern":"localhost","path":"/etc/hosts"}}],"model":"claude-sonnet-4-5","stop_reason":"tool_use","stop_sequence":null,"usage":{"input_tokens":30,"output_tokens":20}}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_02","content":[{"type":"text","text":"127.0.0.1 localhost\n"}]}]}}
+{"type":"result","subtype":"success","is_error":false,"duration_ms":3000,"duration_api_ms":2500,"num_turns":2,"result":"","session_id":"sess_02","total_cost_usd":0.0042,"usage":{"input_tokens":40,"output_tokens":35},"exit_status":0}

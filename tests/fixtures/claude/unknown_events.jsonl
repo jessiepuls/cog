@@ -1,0 +1,4 @@
+{"type":"system","subtype":"init","apiKeySource":"environment","cwd":"/work","model":"claude-sonnet-4-5","permissionMode":"bypassPermissions","tools":["Bash"]}
+{"type":"assistant","message":{"id":"msg_01","type":"message","role":"assistant","content":[{"type":"text","text":"Processing..."}],"model":"claude-sonnet-4-5","stop_reason":"tool_use","stop_sequence":null,"usage":{"input_tokens":10,"output_tokens":5}}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_01","content":[{"type":"text","text":"output"}]}]}}
+{"type":"result","subtype":"success","is_error":false,"duration_ms":2000,"duration_api_ms":1500,"num_turns":1,"result":"Processing...","session_id":"sess_05","total_cost_usd":0.002,"usage":{"input_tokens":15,"output_tokens":5},"exit_status":0}

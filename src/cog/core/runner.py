@@ -1,6 +1,8 @@
 from abc import ABC, abstractmethod
+from collections.abc import AsyncIterator, Mapping
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 
 @dataclass(frozen=True)
@@ -12,6 +14,34 @@ class RunResult:
     duration_seconds: float
 
 
+@dataclass(frozen=True)
+class AssistantTextEvent:
+    text: str
+
+
+@dataclass(frozen=True)
+class ToolUseEvent:
+    tool: str
+    input: Mapping[str, Any]
+
+
+@dataclass(frozen=True)
+class ResultEvent:
+    result: RunResult
+
+
+RunEvent = AssistantTextEvent | ToolUseEvent | ResultEvent
+
+
 class AgentRunner(ABC):
     @abstractmethod
-    async def run(self, prompt: str, *, model: str) -> RunResult: ...
+    def stream(self, prompt: str, *, model: str) -> AsyncIterator[RunEvent]: ...
+
+    async def run(self, prompt: str, *, model: str) -> RunResult:
+        """Default impl — drain stream() and return the final RunResult."""
+        result: RunResult | None = None
+        async for event in self.stream(prompt, model=model):
+            if isinstance(event, ResultEvent):
+                result = event.result
+        assert result is not None, "runner must emit a ResultEvent before finishing"
+        return result
