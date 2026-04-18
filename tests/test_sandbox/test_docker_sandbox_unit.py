@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from cog.core.errors import DockerImageBuildError, DockerUnavailableError
+from cog.core.errors import DockerImageBuildError, DockerUnavailableError, SandboxError
 from cog.runners.docker_sandbox import DockerSandbox
 
 _PATCH_DOCKERFILE = "cog.runners.docker_sandbox._read_bundled_dockerfile"
@@ -48,10 +48,6 @@ def _standard_build_procs(*, image_exists: bool, build_rc: int = 0) -> list[Fake
         FakeProc(0 if image_exists else 1),  # docker image inspect
         FakeProc(build_rc),  # docker build
     ]
-
-
-def _keychain_proc(rc: int = 0, creds: bytes = b'{"token":"abc"}') -> FakeProc:
-    return FakeProc(rc, creds)
 
 
 def _patch_exec(*procs: FakeProc) -> Any:
@@ -430,6 +426,24 @@ async def test_keychain_security_binary_missing_warns(
         await sandbox.prepare()  # must not raise
 
     assert "warning" in capsys.readouterr().err.lower()
+
+
+# ---------------------------------------------------------------------------
+# Smoke test
+# ---------------------------------------------------------------------------
+
+
+async def test_smoke_test_succeeds() -> None:
+    with _patch_exec(FakeProc(0)):
+        sandbox = DockerSandbox()
+        await sandbox.smoke_test()  # must not raise
+
+
+async def test_smoke_test_raises_on_failure() -> None:
+    with _patch_exec(FakeProc(1)):
+        sandbox = DockerSandbox()
+        with pytest.raises(SandboxError, match="smoke test failed"):
+            await sandbox.smoke_test()
 
 
 # ---------------------------------------------------------------------------

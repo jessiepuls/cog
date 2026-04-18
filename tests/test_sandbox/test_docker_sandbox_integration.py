@@ -29,8 +29,9 @@ async def test_real_smoke_test_passes() -> None:
     await sandbox.smoke_test()  # raises SandboxError if any tool is missing
 
 
-def test_real_wrap_and_exec_runs_true() -> None:
+async def test_real_wrap_and_exec_runs_true() -> None:
     sandbox = DockerSandbox()
+    await sandbox.prepare()
     argv = sandbox.wrap_argv(["true"])
     result = subprocess.run(argv, check=False)
     assert result.returncode == 0
