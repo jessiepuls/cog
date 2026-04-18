@@ -7,10 +7,29 @@ from collections.abc import Callable, Coroutine
 from pathlib import Path
 from typing import Any, Literal
 
-from cog.core.preflight import PreflightResult
+from cog.core.preflight import PreflightCheck, PreflightResult
 
 _SubprocessFactory = Callable[..., Coroutine[Any, Any, Any]]
 _WhichFn = Callable[[str], str | None]
+
+
+async def _run_cmd(
+    factory: _SubprocessFactory | None,
+    *args: str,
+    cwd: Path | None = None,
+) -> tuple[int, bytes, bytes]:
+    """Run a subprocess, wait for completion, return (returncode, stdout, stderr)."""
+    create = factory or asyncio.create_subprocess_exec
+    kwargs: dict[str, Any] = {
+        "stdout": asyncio.subprocess.PIPE,
+        "stderr": asyncio.subprocess.PIPE,
+    }
+    if cwd is not None:
+        kwargs["cwd"] = cwd
+    proc = await create(*args, **kwargs)
+    out, err = await proc.communicate()
+    rc: int = proc.returncode  # type: ignore[assignment]  # guaranteed set after communicate()
+    return rc, bytes(out), bytes(err)
 
 
 class CheckHostTool:
@@ -43,17 +62,10 @@ class CheckGitRepo:
         self._create_subprocess = _create_subprocess
 
     async def run(self, project_dir: Path) -> PreflightResult:
-        create = self._create_subprocess or asyncio.create_subprocess_exec
-        proc = await create(
-            "git",
-            "rev-parse",
-            "--is-inside-work-tree",
-            cwd=project_dir,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
+        rc, _, _ = await _run_cmd(
+            self._create_subprocess, "git", "rev-parse", "--is-inside-work-tree", cwd=project_dir
         )
-        await proc.communicate()
-        if proc.returncode == 0:
+        if rc == 0:
             return PreflightResult(
                 check=self.name, ok=True, level="error", message="inside a git repository"
             )
@@ -70,44 +82,28 @@ class CheckCleanTree:
         self._create_subprocess = _create_subprocess
 
     async def run(self, project_dir: Path) -> PreflightResult:
-        create = self._create_subprocess or asyncio.create_subprocess_exec
         issues = []
 
-        unstaged = await create(
-            "git",
-            "diff",
-            "--quiet",
-            cwd=project_dir,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
+        rc, _, _ = await _run_cmd(
+            self._create_subprocess, "git", "diff", "--quiet", cwd=project_dir
         )
-        await unstaged.communicate()
-        if unstaged.returncode != 0:
+        if rc != 0:
             issues.append("unstaged changes")
 
-        staged = await create(
-            "git",
-            "diff",
-            "--cached",
-            "--quiet",
-            cwd=project_dir,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
+        rc, _, _ = await _run_cmd(
+            self._create_subprocess, "git", "diff", "--cached", "--quiet", cwd=project_dir
         )
-        await staged.communicate()
-        if staged.returncode != 0:
+        if rc != 0:
             issues.append("staged changes")
 
-        status = await create(
+        rc, status_out, _ = await _run_cmd(
+            self._create_subprocess,
             "git",
             "status",
             "--porcelain",
             "--untracked-files=normal",
             cwd=project_dir,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
         )
-        status_out, _ = await status.communicate()
         untracked = [ln for ln in status_out.decode().splitlines() if ln.startswith("??")]
         if untracked:
             n = len(untracked)
@@ -133,19 +129,15 @@ class CheckDefaultBranch:
         self._create_subprocess = _create_subprocess
 
     async def run(self, project_dir: Path) -> PreflightResult:
-        create = self._create_subprocess or asyncio.create_subprocess_exec
-
-        origin_proc = await create(
+        rc, origin_out, _ = await _run_cmd(
+            self._create_subprocess,
             "git",
             "symbolic-ref",
             "--short",
             "refs/remotes/origin/HEAD",
             cwd=project_dir,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
         )
-        origin_out, _ = await origin_proc.communicate()
-        if origin_proc.returncode != 0:
+        if rc != 0:
             return PreflightResult(
                 check=self.name,
                 ok=False,
@@ -155,17 +147,15 @@ class CheckDefaultBranch:
 
         default_branch = origin_out.decode().strip().removeprefix("origin/")
 
-        head_proc = await create(
+        rc, head_out, _ = await _run_cmd(
+            self._create_subprocess,
             "git",
             "symbolic-ref",
             "--short",
             "HEAD",
             cwd=project_dir,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
         )
-        head_out, _ = await head_proc.communicate()
-        if head_proc.returncode != 0:
+        if rc != 0:
             return PreflightResult(
                 check=self.name,
                 ok=False,
@@ -197,16 +187,8 @@ class CheckGhAuth:
         self._create_subprocess = _create_subprocess
 
     async def run(self, project_dir: Path) -> PreflightResult:
-        create = self._create_subprocess or asyncio.create_subprocess_exec
-        proc = await create(
-            "gh",
-            "auth",
-            "status",
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        await proc.communicate()
-        if proc.returncode == 0:
+        rc, _, _ = await _run_cmd(self._create_subprocess, "gh", "auth", "status")
+        if rc == 0:
             return PreflightResult(
                 check=self.name, ok=True, level="error", message="gh auth status ok"
             )
@@ -248,18 +230,10 @@ class CheckOriginRemote:
         self._create_subprocess = _create_subprocess
 
     async def run(self, project_dir: Path) -> PreflightResult:
-        create = self._create_subprocess or asyncio.create_subprocess_exec
-        proc = await create(
-            "git",
-            "remote",
-            "get-url",
-            "origin",
-            cwd=project_dir,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
+        rc, _, _ = await _run_cmd(
+            self._create_subprocess, "git", "remote", "get-url", "origin", cwd=project_dir
         )
-        await proc.communicate()
-        if proc.returncode == 0:
+        if rc == 0:
             return PreflightResult(
                 check=self.name, ok=True, level="error", message="origin remote configured"
             )
@@ -276,15 +250,8 @@ class CheckDockerRunning:
         self._create_subprocess = _create_subprocess
 
     async def run(self, project_dir: Path) -> PreflightResult:
-        create = self._create_subprocess or asyncio.create_subprocess_exec
-        proc = await create(
-            "docker",
-            "info",
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        await proc.communicate()
-        if proc.returncode == 0:
+        rc, _, _ = await _run_cmd(self._create_subprocess, "docker", "info")
+        if rc == 0:
             return PreflightResult(
                 check=self.name, ok=True, level="error", message="docker daemon running"
             )
@@ -292,7 +259,7 @@ class CheckDockerRunning:
             check=self.name,
             ok=False,
             level="error",
-            message=("docker daemon not running (start Docker Desktop or systemctl start docker)"),
+            message="docker daemon not running (start Docker Desktop or systemctl start docker)",
         )
 
 
@@ -330,18 +297,15 @@ class CheckClaudeAuth:
                 ),
             )
 
-        create = self._create_subprocess or asyncio.create_subprocess_exec
-        proc = await create(
+        rc, _, _ = await _run_cmd(
+            self._create_subprocess,
             "security",
             "find-generic-password",
             "-s",
             "Claude Code-credentials",
             "-w",
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
         )
-        await proc.communicate()
-        if proc.returncode == 0:
+        if rc == 0:
             return PreflightResult(
                 check=self.name, ok=True, level="warning", message="macOS keychain entry found"
             )
@@ -357,7 +321,7 @@ class CheckClaudeAuth:
 
 
 # Used by cog doctor — the maximal check set
-ALL_CHECKS: tuple[Any, ...] = (
+ALL_CHECKS: tuple[PreflightCheck, ...] = (
     CheckHostTool("git"),
     CheckHostTool("gh"),
     CheckHostTool("docker"),
@@ -372,7 +336,7 @@ ALL_CHECKS: tuple[Any, ...] = (
 )
 
 # Reusable subsets — workflow issues (#12, #18) will use these
-RALPH_CHECKS: tuple[Any, ...] = ALL_CHECKS
-REFINE_CHECKS: tuple[Any, ...] = tuple(
+RALPH_CHECKS: tuple[PreflightCheck, ...] = ALL_CHECKS
+REFINE_CHECKS: tuple[PreflightCheck, ...] = tuple(
     c for c in ALL_CHECKS if c.name not in ("clean_tree", "default_branch")
 )
