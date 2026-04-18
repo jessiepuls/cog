@@ -33,6 +33,8 @@ class StreamJsonParseError(RunnerError):
 
 class TrackerError(Exception):
     """Non-zero exit or parse failure from an issue tracker."""
+
+
 class SandboxError(Exception):
     """Base for sandbox failures."""
 

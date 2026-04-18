@@ -1,11 +1,13 @@
 import time
 from abc import ABC, abstractmethod
+from collections.abc import Sequence
 from typing import ClassVar
 
 from cog.core.context import ExecutionContext
 from cog.core.errors import StageError
 from cog.core.item import Item
 from cog.core.outcomes import Outcome, StageResult
+from cog.core.preflight import PreflightCheck
 from cog.core.stage import Stage
 
 
@@ -13,6 +15,7 @@ class Workflow(ABC):
     name: ClassVar[str]
     queue_label: ClassVar[str]  # "agent-ready" / "needs-refinement"
     supports_headless: ClassVar[bool]  # no default — subclasses declare
+    preflight_checks: ClassVar[Sequence[PreflightCheck]] = ()
 
     @abstractmethod
     async def select_item(self, ctx: ExecutionContext) -> Item | None:
