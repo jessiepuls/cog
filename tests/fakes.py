@@ -1,8 +1,7 @@
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
-from unittest.mock import AsyncMock, patch
 
 from cog.core.item import Item
 from cog.core.runner import AgentRunner, ResultEvent, RunEvent, RunResult
@@ -53,45 +52,58 @@ class InMemoryStateCache:
 
 
 @dataclass
-class SubprocessCall:
-    argv: tuple[str, ...]
-    cwd: Path | None
-    stdin: bytes | None = None  # populated after communicate()
-
-
-class _FakeProcess:
-    def __init__(self, stdout: bytes, returncode: int, call_record: SubprocessCall) -> None:
-        self._stdout = stdout
-        self.returncode = returncode
-        self._call_record = call_record
+class FakeProc:
+    stdout: bytes
+    stderr: bytes = b""
+    returncode: int = 0
+    received_stdin: bytes | None = None
 
     async def communicate(self, input: bytes | None = None) -> tuple[bytes, bytes]:
-        self._call_record.stdin = input
-        return self._stdout, b""
+        self.received_stdin = input
+        return self.stdout, self.stderr
 
 
 class FakeSubprocessRegistry:
-    """Queue-based fake for asyncio.create_subprocess_exec.
+    """Maps argv tuples to FakeProc results.
 
-    Push responses in order, then use patch() as a context manager to intercept
-    subprocess calls. Inspect calls[] after the fact to assert argv/cwd/stdin.
+    Tests register expected invocations; an unexpected argv raises a clear error.
     """
 
     def __init__(self) -> None:
-        self._queue: list[tuple[bytes, int]] = []
-        self.calls: list[SubprocessCall] = []
+        self._expectations: dict[tuple[str, ...], FakeProc] = {}
+        self._calls: list[tuple[str, ...]] = []
+        self._procs: list[FakeProc] = []
 
-    def push(self, *, stdout: bytes = b"", returncode: int = 0) -> None:
-        self._queue.append((stdout, returncode))
+    def expect(
+        self,
+        argv: Sequence[str],
+        *,
+        stdout: bytes = b"",
+        stderr: bytes = b"",
+        returncode: int = 0,
+    ) -> FakeProc:
+        """Register an expectation. Returns the FakeProc so tests can inspect
+        `received_stdin` after the call runs."""
+        proc = FakeProc(stdout=stdout, stderr=stderr, returncode=returncode)
+        self._expectations[tuple(argv)] = proc
+        return proc
 
-    async def _create(self, *args: Any, **kwargs: Any) -> _FakeProcess:
-        stdout, returncode = self._queue.pop(0) if self._queue else (b"", 0)
-        call = SubprocessCall(argv=tuple(str(a) for a in args), cwd=kwargs.get("cwd"))
-        self.calls.append(call)
-        return _FakeProcess(stdout, returncode, call)
+    @property
+    def calls(self) -> list[tuple[str, ...]]:
+        return list(self._calls)
 
-    def patch(self, module_path: str) -> Any:
-        return patch(
-            f"{module_path}.asyncio.create_subprocess_exec",
-            new=AsyncMock(side_effect=self._create),
-        )
+    async def create_subprocess_exec(
+        self,
+        *argv: str,
+        cwd: Any = None,
+        stdin: Any = None,
+        stdout: Any = None,
+        stderr: Any = None,
+    ) -> FakeProc:
+        key = tuple(argv)
+        self._calls.append(key)
+        if key not in self._expectations:
+            raise AssertionError(f"Unexpected subprocess call: {key!r}")
+        proc = self._expectations[key]
+        self._procs.append(proc)
+        return proc

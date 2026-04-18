@@ -6,36 +6,50 @@ from cog.core.errors import HostError
 from cog.hosts.github import GitHubGitHost
 from tests.fakes import FakeSubprocessRegistry
 
-FIXTURES_DIR = Path(__file__).parent.parent / "fixtures" / "gh"
+LIST_ARGV = (
+    "gh",
+    "pr",
+    "list",
+    "--head",
+    "my-branch",
+    "--state",
+    "open",
+    "--json",
+    "number,url,state,body,headRefName",
+)
 
 
-@pytest.fixture
-def project_dir(tmp_path):
-    return tmp_path
-
-
-async def test_gh_nonzero_raises_host_error(project_dir):
-    reg = FakeSubprocessRegistry()
-    reg.push(returncode=1)
+async def test_gh_nonzero_raises_host_error(
+    registry: FakeSubprocessRegistry,
+    project_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    registry.expect(LIST_ARGV, returncode=1)
+    monkeypatch.setattr("asyncio.create_subprocess_exec", registry.create_subprocess_exec)
     host = GitHubGitHost(project_dir)
-    with reg.patch("cog.hosts.github"):
-        with pytest.raises(HostError):
-            await host.get_pr_for_branch("my-branch")
+    with pytest.raises(HostError):
+        await host.get_pr_for_branch("my-branch")
 
 
-async def test_git_nonzero_raises_host_error(project_dir):
-    reg = FakeSubprocessRegistry()
-    reg.push(returncode=128)
+async def test_git_nonzero_raises_host_error(
+    registry: FakeSubprocessRegistry,
+    project_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    registry.expect(("git", "push", "-u", "origin", "my-branch"), returncode=128)
+    monkeypatch.setattr("asyncio.create_subprocess_exec", registry.create_subprocess_exec)
     host = GitHubGitHost(project_dir)
-    with reg.patch("cog.hosts.github"):
-        with pytest.raises(HostError):
-            await host.push_branch("my-branch")
+    with pytest.raises(HostError):
+        await host.push_branch("my-branch")
 
 
-async def test_malformed_json_raises_host_error(project_dir):
-    reg = FakeSubprocessRegistry()
-    reg.push(stdout=b"not valid json {")
+async def test_malformed_json_raises_host_error(
+    registry: FakeSubprocessRegistry,
+    project_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    registry.expect(LIST_ARGV, stdout=b"not valid json {")
+    monkeypatch.setattr("asyncio.create_subprocess_exec", registry.create_subprocess_exec)
     host = GitHubGitHost(project_dir)
-    with reg.patch("cog.hosts.github"):
-        with pytest.raises(HostError, match="invalid JSON"):
-            await host.get_pr_for_branch("my-branch")
+    with pytest.raises(HostError, match="invalid JSON"):
+        await host.get_pr_for_branch("my-branch")

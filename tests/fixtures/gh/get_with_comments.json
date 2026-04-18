@@ -1,0 +1,22 @@
+{
+  "number": 10,
+  "title": "Fix login bug",
+  "body": "Users can't log in with SSO.",
+  "labels": [{"name": "agent-ready", "color": "0075ca", "description": "Ready for agent"}],
+  "state": "OPEN",
+  "createdAt": "2026-04-01T10:00:00Z",
+  "updatedAt": "2026-04-10T12:30:00Z",
+  "url": "https://github.com/jessiepuls/cog/issues/10",
+  "comments": [
+    {
+      "author": {"login": "alice"},
+      "body": "I can reproduce this with Chrome on macOS.",
+      "createdAt": "2026-04-02T11:00:00Z"
+    },
+    {
+      "author": {"login": "bob"},
+      "body": "Same issue on Firefox.",
+      "createdAt": "2026-04-03T15:30:00Z"
+    }
+  ]
+}

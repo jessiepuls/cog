@@ -1,0 +1,11 @@
+{
+  "number": 11,
+  "title": "Add dark mode",
+  "body": "Users want a dark theme option.",
+  "labels": [{"name": "enhancement", "color": "a2eeef", "description": "New feature or request"}],
+  "state": "OPEN",
+  "createdAt": "2026-04-05T08:00:00Z",
+  "updatedAt": "2026-04-15T09:00:00Z",
+  "url": "https://github.com/jessiepuls/cog/issues/11",
+  "comments": []
+}
