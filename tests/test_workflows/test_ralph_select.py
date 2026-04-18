@@ -12,7 +12,7 @@ def _make_workflow() -> RalphWorkflow:
     return RalphWorkflow(runner=AsyncMock(), tracker=AsyncMock(spec=IssueTracker))
 
 
-def _make_ctx(items: list, cache: InMemoryStateCache | None = None):
+def _make_ctx(cache: InMemoryStateCache | None = None):
     from pathlib import Path
 
     from cog.core.context import ExecutionContext
@@ -59,7 +59,7 @@ def test_priority_tier_accepts_p0() -> None:
 async def test_select_item_returns_none_when_empty() -> None:
     wf = _make_workflow()
     wf._tracker.list_by_label = AsyncMock(return_value=[])
-    ctx = _make_ctx([])
+    ctx = _make_ctx()
     result = await wf.select_item(ctx)
     assert result is None
 
@@ -73,7 +73,7 @@ async def test_select_item_sorts_by_priority_tier_asc() -> None:
     ]
     wf = _make_workflow()
     wf._tracker.list_by_label = AsyncMock(return_value=items)
-    ctx = _make_ctx(items)
+    ctx = _make_ctx()
     result = await wf.select_item(ctx)
     assert result is not None
     assert result.item_id == "1"
@@ -90,7 +90,7 @@ async def test_select_item_within_tier_sorts_by_created_at_asc() -> None:
     ]
     wf = _make_workflow()
     wf._tracker.list_by_label = AsyncMock(return_value=items)
-    ctx = _make_ctx(items)
+    ctx = _make_ctx()
     result = await wf.select_item(ctx)
     assert result is not None
     assert result.item_id == "a"
@@ -102,7 +102,7 @@ async def test_select_item_skips_processed_in_current_loop() -> None:
     wf = _make_workflow()
     wf._tracker.list_by_label = AsyncMock(return_value=[item])
     wf._processed_this_loop.add((item.tracker_id, item.item_id))
-    ctx = _make_ctx([item])
+    ctx = _make_ctx()
     result = await wf.select_item(ctx)
     assert result is None
 
@@ -114,7 +114,7 @@ async def test_select_item_skips_processed_in_state_cache() -> None:
     cache.mark_processed(item, "success")
     wf = _make_workflow()
     wf._tracker.list_by_label = AsyncMock(return_value=[item])
-    ctx = _make_ctx([item], cache)
+    ctx = _make_ctx(cache)
     result = await wf.select_item(ctx)
     assert result is None
 
@@ -126,7 +126,7 @@ async def test_select_item_skips_deferred_in_state_cache() -> None:
     cache.mark_deferred(item, "blocked", [])
     wf = _make_workflow()
     wf._tracker.list_by_label = AsyncMock(return_value=[item])
-    ctx = _make_ctx([item], cache)
+    ctx = _make_ctx(cache)
     result = await wf.select_item(ctx)
     assert result is None
 
@@ -136,7 +136,7 @@ async def test_select_item_adds_chosen_to_local_set() -> None:
     item = make_item(item_id="42", created_at=t)
     wf = _make_workflow()
     wf._tracker.list_by_label = AsyncMock(return_value=[item])
-    ctx = _make_ctx([item])
+    ctx = _make_ctx()
     result = await wf.select_item(ctx)
     assert result is not None
     assert (item.tracker_id, item.item_id) in wf._processed_this_loop
