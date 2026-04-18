@@ -1,4 +1,4 @@
-"""Integration tests for RalphWorkflow with a real git repo."""
+"""Integration tests for RalphWorkflow."""
 
 import shutil
 import subprocess
@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from cog.core.context import ExecutionContext
+from cog.core.stage import Stage
 from cog.core.tracker import IssueTracker
 from cog.core.workflow import StageExecutor
 from cog.workflows.ralph import RalphWorkflow
@@ -46,8 +47,39 @@ def git_env(tmp_path: Path):
     return repo
 
 
+async def test_runs_all_three_stages_end_to_end(tmp_path):
+    """Verify the 3-stage sequence runs via pre-selected item (no git ops)."""
+    tracker_mock = AsyncMock(spec=IssueTracker)
+    runner = EchoRunner()
+    wf = RalphWorkflow(runner, tracker_mock)
+
+    # Short-circuit pre_stages; this test isolates stage-sequence behavior
+    # from git-setup concerns (which are covered by test_end_to_end_with_real_git).
+    async def _noop_pre_stages(ctx):
+        return
+
+    wf.pre_stages = _noop_pre_stages  # type: ignore[method-assign]
+
+    ctx = ExecutionContext(
+        project_dir=tmp_path,
+        tmp_dir=tmp_path,
+        state_cache=InMemoryStateCache(),
+        headless=True,
+        item=make_item(),  # pre-select item, bypassing select_item
+        work_branch="ralph/42-test",
+    )
+
+    results = await StageExecutor().run(wf, ctx)
+
+    assert len(results) == 3
+    assert [r.stage.name for r in results] == ["build", "review", "document"]
+    assert all(r.exit_status == 0 for r in results)
+    assert all(r.error is None for r in results)
+
+
 @pytest.mark.skipif(shutil.which("git") is None, reason="git not available")
 async def test_end_to_end_with_real_git(git_env: Path) -> None:
+    """Verify pre_stages creates a real git branch via cog.git helpers."""
     item = make_item(
         tracker_id="github/test/repo",
         item_id="42",
@@ -60,9 +92,8 @@ async def test_end_to_end_with_real_git(git_env: Path) -> None:
 
     wf = RalphWorkflow(runner=EchoRunner(), tracker=tracker_mock)
 
-    # Monkey-patch stages so we don't hit NotImplementedError
-    from cog.core.stage import Stage
-
+    # Monkey-patch stages to a single stage so this test focuses on pre_stages
+    # behavior (branch creation) rather than the full build/review/document cycle.
     def _stages(ctx):
         return [Stage(name="build", prompt_source=lambda _: "go", model="m", runner=EchoRunner())]
 

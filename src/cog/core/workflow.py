@@ -3,6 +3,7 @@ from __future__ import annotations
 import time
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
+from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar, Literal
 
@@ -12,7 +13,7 @@ from cog.core.errors import GitError, StageError
 from cog.core.item import Item
 from cog.core.outcomes import Outcome, StageResult
 from cog.core.preflight import PreflightCheck
-from cog.core.runner import ResultEvent, RunResult
+from cog.core.runner import ResultEvent, RunResult, StageEndEvent, StageStartEvent
 from cog.core.stage import Stage
 
 if TYPE_CHECKING:
@@ -94,6 +95,10 @@ class StageExecutor:
         return results
 
     async def _run_stage(self, stage: Stage, ctx: ExecutionContext) -> StageResult:
+        sink = ctx.event_sink
+        if sink is not None:
+            await sink.emit(StageStartEvent(stage_name=stage.name, model=stage.model))
+
         head_before: str | None = None
         try:
             head_before = await git.current_head_sha(ctx.project_dir)
@@ -101,17 +106,19 @@ class StageExecutor:
             pass  # not a git repo; commits_created stays 0
 
         start = time.monotonic()
+        error: Exception | None = None
         run_result: RunResult | None = None
         try:
             prompt = stage.prompt_source(ctx)
             async for event in stage.runner.stream(prompt, model=stage.model):
-                if ctx.event_sink is not None:
-                    await ctx.event_sink.emit(event)
                 if isinstance(event, ResultEvent):
                     run_result = event.result
+                elif sink is not None:
+                    await sink.emit(event)
         except Exception as e:
-            raise StageError(stage, cause=e) from e
-        assert run_result is not None, "runner must emit a ResultEvent before finishing"
+            if not stage.tolerate_failure:
+                raise StageError(stage, cause=e) from e
+            error = e
         duration = time.monotonic() - start
 
         commits_created = 0
@@ -121,6 +128,28 @@ class StageExecutor:
             except GitError:
                 pass  # counting failed; leave 0
 
+        if run_result is None:
+            # Runner raised and tolerate_failure=True
+            stage_result = StageResult(
+                stage=stage,
+                duration_seconds=duration,
+                cost_usd=0.0,
+                exit_status=-1,
+                final_message="",
+                stream_json_path=Path("/dev/null"),
+                commits_created=commits_created,
+                error=error,
+            )
+            if sink is not None:
+                await sink.emit(
+                    StageEndEvent(
+                        stage_name=stage.name,
+                        cost_usd=0.0,
+                        exit_status=-1,
+                    )
+                )
+            return stage_result
+
         stage_result = StageResult(
             stage=stage,
             duration_seconds=duration,
@@ -129,7 +158,18 @@ class StageExecutor:
             final_message=run_result.final_message,
             stream_json_path=run_result.stream_json_path,
             commits_created=commits_created,
+            error=None,
         )
+        if sink is not None:
+            await sink.emit(
+                StageEndEvent(
+                    stage_name=stage.name,
+                    cost_usd=run_result.total_cost_usd,
+                    exit_status=run_result.exit_status,
+                )
+            )
         if run_result.exit_status != 0:
-            raise StageError(stage, stage_result)
+            if not stage.tolerate_failure:
+                raise StageError(stage, stage_result)
+            stage_result = replace(stage_result, error=StageError(stage, stage_result))
         return stage_result

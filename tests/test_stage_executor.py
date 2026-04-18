@@ -14,6 +14,7 @@ from cog.core.outcomes import Outcome, StageResult
 from cog.core.runner import AgentRunner, ResultEvent, RunEvent, RunResult
 from cog.core.stage import Stage
 from cog.core.workflow import StageExecutor, Workflow
+from tests.fakes import EchoRunner, ExitNonZeroRunner, FailingRunner
 
 
 def _make_item() -> Item:
@@ -170,3 +171,112 @@ async def test_executor_commits_created_zero_when_counting_fails(ctx_factory, ec
     ):
         results = await StageExecutor().run(wf, ctx_factory())
     assert results[0].commits_created == 0
+
+
+# --- tolerate_failure regression guards ---
+
+
+def _make_tolerate_stage(runner, *, tolerate: bool) -> Stage:
+    return Stage(
+        name="s1",
+        prompt_source=lambda _: "hello",
+        model="m",
+        runner=runner,
+        tolerate_failure=tolerate,
+    )
+
+
+async def test_tolerate_failure_false_raises_on_runner_exception(ctx_factory):
+    executor = StageExecutor()
+    stage = _make_tolerate_stage(FailingRunner(), tolerate=False)
+    with pytest.raises(StageError) as exc_info:
+        await executor._run_stage(stage, ctx_factory())
+    assert exc_info.value.stage.name == "s1"
+    assert isinstance(exc_info.value.cause, RuntimeError)
+
+
+async def test_tolerate_failure_false_raises_on_nonzero_exit(ctx_factory):
+    executor = StageExecutor()
+    stage = _make_tolerate_stage(ExitNonZeroRunner(1), tolerate=False)
+    with pytest.raises(StageError) as exc_info:
+        await executor._run_stage(stage, ctx_factory())
+    assert exc_info.value.result is not None
+    assert exc_info.value.result.exit_status == 1
+
+
+async def test_tolerate_failure_true_runner_exception_continues(ctx_factory):
+    executor = StageExecutor()
+    stage = _make_tolerate_stage(FailingRunner(), tolerate=True)
+    result = await executor._run_stage(stage, ctx_factory())
+    assert result.error is not None
+
+
+async def test_tolerate_failure_true_nonzero_exit_continues(ctx_factory):
+    executor = StageExecutor()
+    stage = _make_tolerate_stage(ExitNonZeroRunner(1), tolerate=True)
+    result = await executor._run_stage(stage, ctx_factory())
+    assert result.error is not None
+
+
+async def test_tolerate_failure_runner_exception_result_has_exit_status_minus_one(ctx_factory):
+    executor = StageExecutor()
+    stage = _make_tolerate_stage(FailingRunner(), tolerate=True)
+    result = await executor._run_stage(stage, ctx_factory())
+    assert result.exit_status == -1
+
+
+async def test_tolerate_failure_runner_exception_stores_original_exception(ctx_factory):
+    exc = RuntimeError("boom")
+    executor = StageExecutor()
+    stage = _make_tolerate_stage(FailingRunner(exc), tolerate=True)
+    result = await executor._run_stage(stage, ctx_factory())
+    assert result.error is exc
+
+
+async def test_tolerate_failure_nonzero_exit_stores_stage_error_as_error(ctx_factory):
+    executor = StageExecutor()
+    stage = _make_tolerate_stage(ExitNonZeroRunner(2), tolerate=True)
+    result = await executor._run_stage(stage, ctx_factory())
+    assert isinstance(result.error, StageError)
+    assert result.exit_status == 2
+
+
+async def test_subsequent_stages_run_after_tolerated_failure(ctx_factory):
+    """Middle stage fails with tolerate_failure=True; executor continues to all 3 stages."""
+    runner_ok = EchoRunner()
+    runner_fail = FailingRunner()
+
+    stages = [
+        Stage(name="first", prompt_source=lambda _: "a", model="m", runner=runner_ok),
+        Stage(
+            name="middle",
+            prompt_source=lambda _: "b",
+            model="m",
+            runner=runner_fail,
+            tolerate_failure=True,
+        ),
+        Stage(name="last", prompt_source=lambda _: "c", model="m", runner=runner_ok),
+    ]
+
+    class _ThreeStageWorkflow(Workflow):
+        name = "three"
+        queue_label = "test"
+        supports_headless = True
+
+        async def select_item(self, ctx):
+            return _make_item()
+
+        def stages(self, ctx):
+            return stages
+
+        async def classify_outcome(self, ctx, results):
+            return "noop"
+
+    results = await StageExecutor().run(_ThreeStageWorkflow(), ctx_factory())
+    assert len(results) == 3
+    assert results[0].stage.name == "first"
+    assert results[1].stage.name == "middle"
+    assert results[2].stage.name == "last"
+    assert results[1].error is not None
+    assert results[0].error is None
+    assert results[2].error is None

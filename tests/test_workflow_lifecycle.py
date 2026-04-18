@@ -5,9 +5,10 @@ from datetime import UTC, datetime
 from cog.core.context import ExecutionContext
 from cog.core.item import Item
 from cog.core.outcomes import Outcome, StageResult
+from cog.core.runner import StageEndEvent, StageStartEvent
 from cog.core.stage import Stage
 from cog.core.workflow import StageExecutor, Workflow
-from tests.fakes import EchoRunner
+from tests.fakes import EchoRunner, RecordingEventSink
 
 
 def _make_item() -> Item:
@@ -92,3 +93,53 @@ async def test_noop_hook_order(ctx_factory, echo_runner):
         "classify_outcome",
         "finalize_noop",
     ]
+
+
+async def test_stage_executor_emits_stage_start_before_runner(ctx_factory, echo_runner):
+    sink = RecordingEventSink()
+    ctx = ctx_factory(event_sink=sink)
+    wf = _RecordingWorkflow(echo_runner)
+    await StageExecutor().run(wf, ctx)
+    # Find indices of StageStartEvent and first non-stage-boundary event from runner
+    types = [type(e) for e in sink.events]
+    start_idx = types.index(StageStartEvent)
+    # AssistantTextEvent or ResultEvent from runner would follow; EchoRunner emits ResultEvent
+    # (ResultEvent is filtered out of sink — so StageEndEvent should follow)
+    end_idx = types.index(StageEndEvent)
+    assert start_idx < end_idx
+
+
+async def test_stage_executor_emits_stage_end_after_runner(ctx_factory, echo_runner):
+    sink = RecordingEventSink()
+    ctx = ctx_factory(event_sink=sink)
+    wf = _RecordingWorkflow(echo_runner)
+    await StageExecutor().run(wf, ctx)
+    # Both stages should each emit a start and end
+    starts = [e for e in sink.events if isinstance(e, StageStartEvent)]
+    ends = [e for e in sink.events if isinstance(e, StageEndEvent)]
+    assert len(starts) == 2
+    assert len(ends) == 2
+    # Verify ordering: start then end for each stage
+    for start, end in zip(starts, ends, strict=True):
+        assert start.stage_name == end.stage_name
+
+
+async def test_stage_end_event_carries_cost_and_exit_status(ctx_factory, echo_runner):
+    sink = RecordingEventSink()
+    ctx = ctx_factory(event_sink=sink)
+    wf = _RecordingWorkflow(echo_runner)
+    await StageExecutor().run(wf, ctx)
+    end_events = [e for e in sink.events if isinstance(e, StageEndEvent)]
+    assert len(end_events) == 2
+    for end in end_events:
+        assert end.exit_status == 0
+        assert end.cost_usd == 0.0  # EchoRunner emits zero cost
+
+
+async def test_no_event_sink_emission_when_sink_is_none(ctx_factory, echo_runner):
+    ctx = ctx_factory()
+    assert ctx.event_sink is None
+    wf = _RecordingWorkflow(echo_runner)
+    # Should run cleanly with no AttributeError
+    results = await StageExecutor().run(wf, ctx)
+    assert len(results) == 2

@@ -12,7 +12,7 @@ from textual.worker import Worker
 
 from cog.core.context import ExecutionContext
 from cog.core.outcomes import StageResult
-from cog.core.runner import ResultEvent, RunEvent
+from cog.core.runner import RunEvent, StageEndEvent
 from cog.core.workflow import StageExecutor, Workflow
 
 
@@ -26,8 +26,8 @@ class _CountingSink:
     async def emit(self, event: RunEvent) -> None:
         if hasattr(self._inner, "emit"):
             await self._inner.emit(event)
-        if isinstance(event, ResultEvent):
-            self._screen._cumulative_cost += event.result.total_cost_usd
+        if isinstance(event, StageEndEvent):
+            self._screen._cumulative_cost += event.cost_usd
             self._screen._refresh_footer()
 
 

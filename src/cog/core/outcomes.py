@@ -16,3 +16,4 @@ class StageResult:
     final_message: str
     stream_json_path: Path
     commits_created: int  # executor captures via git rev-list before/after
+    error: Exception | None = None  # populated when tolerate_failure=True and stage failed

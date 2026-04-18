@@ -1,5 +1,5 @@
 from collections.abc import AsyncIterator, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -7,7 +7,7 @@ from typing import Any
 from textual.app import ComposeResult
 from textual.widget import Widget
 
-from cog.core.item import Item
+from cog.core.item import Comment, Item
 from cog.core.runner import AgentRunner, ResultEvent, RunEvent, RunResult
 
 _EPOCH = datetime(2024, 1, 1, tzinfo=UTC)
@@ -20,6 +20,7 @@ def make_item(
     title: str = "Test item",
     body: str = "",
     labels: tuple[str, ...] = (),
+    comments: tuple[Comment, ...] = (),
     created_at: datetime | None = None,
     updated_at: datetime | None = None,
     url: str = "https://github.com/org/repo/issues/1",
@@ -30,11 +31,21 @@ def make_item(
         title=title,
         body=body,
         labels=labels,
-        comments=(),
+        comments=comments,
         created_at=created_at or _EPOCH,
         updated_at=updated_at or _EPOCH,
         url=url,
     )
+
+
+@dataclass
+class RecordingEventSink:
+    """Captures emitted events for assertion in tests."""
+
+    events: list[RunEvent] = field(default_factory=list)
+
+    async def emit(self, event: RunEvent) -> None:
+        self.events.append(event)
 
 
 class EchoRunner(AgentRunner):
@@ -101,6 +112,35 @@ class FakeProc:
     async def communicate(self, input: bytes | None = None) -> tuple[bytes, bytes]:
         self.received_stdin = input
         return self.stdout, self.stderr
+
+
+class FailingRunner(AgentRunner):
+    """Raises exc from stream(), simulating a runner crash."""
+
+    def __init__(self, exc: Exception | None = None) -> None:
+        self._exc = exc or RuntimeError("runner failed")
+
+    async def stream(self, prompt: str, *, model: str) -> AsyncIterator[RunEvent]:
+        raise self._exc
+        yield  # type: ignore[misc]
+
+
+class ExitNonZeroRunner(AgentRunner):
+    """Returns a RunResult with the given non-zero exit status."""
+
+    def __init__(self, exit_status: int = 1) -> None:
+        self._exit_status = exit_status
+
+    async def stream(self, prompt: str, *, model: str) -> AsyncIterator[RunEvent]:
+        yield ResultEvent(
+            result=RunResult(
+                final_message="non-zero exit",
+                total_cost_usd=0.0,
+                exit_status=self._exit_status,
+                stream_json_path=Path("/dev/null"),
+                duration_seconds=0.0,
+            )
+        )
 
 
 class FakeSubprocessRegistry:
