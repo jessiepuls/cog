@@ -3,6 +3,7 @@ from __future__ import annotations
 import time
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
+from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar, Literal
 
@@ -97,6 +98,7 @@ class StageExecutor:
         if sink is not None:
             await sink.emit(StageStartEvent(stage_name=stage.name, model=stage.model))
         start = time.monotonic()
+        error: Exception | None = None
         run_result: RunResult | None = None
         try:
             prompt = stage.prompt_source(ctx)
@@ -106,9 +108,33 @@ class StageExecutor:
                 elif sink is not None:
                     await sink.emit(event)
         except Exception as e:
-            raise StageError(stage, cause=e) from e
-        assert run_result is not None, "runner must emit a ResultEvent before finishing"
+            if not stage.tolerate_failure:
+                raise StageError(stage, cause=e) from e
+            error = e
         duration = time.monotonic() - start
+
+        if run_result is None:
+            # Runner raised and tolerate_failure=True
+            stage_result = StageResult(
+                stage=stage,
+                duration_seconds=duration,
+                cost_usd=0.0,
+                exit_status=-1,
+                final_message="",
+                stream_json_path=Path("/dev/null"),
+                commits_created=0,
+                error=error,
+            )
+            if sink is not None:
+                await sink.emit(
+                    StageEndEvent(
+                        stage_name=stage.name,
+                        cost_usd=0.0,
+                        exit_status=-1,
+                    )
+                )
+            return stage_result
+
         stage_result = StageResult(
             stage=stage,
             duration_seconds=duration,
@@ -117,6 +143,7 @@ class StageExecutor:
             final_message=run_result.final_message,
             stream_json_path=run_result.stream_json_path,
             commits_created=0,  # stub: git integration lands in #13
+            error=None,
         )
         if sink is not None:
             await sink.emit(
@@ -127,5 +154,7 @@ class StageExecutor:
                 )
             )
         if run_result.exit_status != 0:
-            raise StageError(stage, stage_result)
+            if not stage.tolerate_failure:
+                raise StageError(stage, stage_result)
+            stage_result = replace(stage_result, error=StageError(stage, stage_result))
         return stage_result

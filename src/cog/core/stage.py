@@ -12,6 +12,8 @@ class Stage:
     model: str
     runner: AgentRunner
     interactive: bool = False
+    # True → failures stored in StageResult.error; executor continues to next stage
+    tolerate_failure: bool = False
 
 
 def static_prompt(resource: str) -> Callable[[ExecutionContext], str]:
