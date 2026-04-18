@@ -5,7 +5,7 @@ description = "TUI for managing the refine → ralph workflow across GitHub issu
 license = "MIT"
 requires-python = ">=3.12"
 authors = [{name = "Jessie Puls", email = "jessiepuls@gmail.com"}]
-dependencies = ["typer"]
+dependencies = ["typer", "rich"]
 
 [project.scripts]
 cog = "cog.cli:main"
