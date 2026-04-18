@@ -15,3 +15,4 @@ dist/
 .uv-bin/
 
 .review-venv/
+.local-data/
