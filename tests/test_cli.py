@@ -94,8 +94,8 @@ def test_doctor_output_goes_to_stderr(monkeypatch, tmp_path):
 def test_cog_ralph_headless_forwards_flag(monkeypatch, tmp_path):
     calls: list[dict] = []
 
-    async def fake_build_and_run(**kwargs: Any) -> int:
-        calls.append(kwargs)
+    async def fake_build_and_run(*args: Any, **kwargs: Any) -> int:
+        calls.append({"args": args, **kwargs})
         return 0
 
     monkeypatch.setattr("cog.cli.build_and_run", fake_build_and_run)

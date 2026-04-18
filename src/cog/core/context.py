@@ -1,20 +1,15 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Protocol, runtime_checkable
+from typing import TYPE_CHECKING
 
 from cog.core.item import Item
+from cog.core.sinks import RunEventSink, UserInputProvider
 from cog.core.state import StateCache
 
 if TYPE_CHECKING:
-    from cog.core.runner import RunEvent
     from cog.telemetry import TelemetryWriter
-
-
-@runtime_checkable
-class RunEventSink(Protocol):
-    async def emit(self, event: RunEvent) -> None: ...
 
 
 @dataclass
@@ -25,5 +20,6 @@ class ExecutionContext:
     headless: bool
     item: Item | None = None
     work_branch: str | None = None
+    event_sink: RunEventSink | None = None
+    input_provider: UserInputProvider | None = None
     telemetry: TelemetryWriter | None = None
-    event_sink: RunEventSink | None = field(default=None, repr=False)

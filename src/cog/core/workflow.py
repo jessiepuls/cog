@@ -1,16 +1,21 @@
+from __future__ import annotations
+
 import time
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
 from pathlib import Path
-from typing import ClassVar, Literal
+from typing import TYPE_CHECKING, ClassVar, Literal
 
 from cog.core.context import ExecutionContext
 from cog.core.errors import StageError
 from cog.core.item import Item
 from cog.core.outcomes import Outcome, StageResult
 from cog.core.preflight import PreflightCheck
-from cog.core.runner import ResultEvent, StageEndEvent, StageStartEvent
+from cog.core.runner import ResultEvent, RunResult, StageEndEvent, StageStartEvent
 from cog.core.stage import Stage
+
+if TYPE_CHECKING:
+    from textual.widget import Widget
 
 
 class Workflow(ABC):
@@ -18,6 +23,7 @@ class Workflow(ABC):
     queue_label: ClassVar[str]  # "agent-ready" / "needs-refinement"
     supports_headless: ClassVar[bool]  # no default — subclasses declare
     preflight_checks: ClassVar[Sequence[PreflightCheck]] = ()
+    content_widget_cls: ClassVar[type[Widget] | None] = None
 
     @abstractmethod
     async def select_item(self, ctx: ExecutionContext) -> Item | None:
@@ -65,10 +71,11 @@ class StageExecutor:
     """Runs one workflow iteration against an ExecutionContext."""
 
     async def run(self, workflow: Workflow, ctx: ExecutionContext) -> list[StageResult]:
-        item = await workflow.select_item(ctx)
-        if item is None:
-            return []
-        ctx.item = item
+        if ctx.item is None:
+            item = await workflow.select_item(ctx)
+            if item is None:
+                return []
+            ctx.item = item
         results: list[StageResult] = []
         try:
             await workflow.pre_stages(ctx)
@@ -90,9 +97,9 @@ class StageExecutor:
         if sink is not None:
             await sink.emit(StageStartEvent(stage_name=stage.name, model=stage.model))
         start = time.monotonic()
+        run_result: RunResult | None = None
         try:
             prompt = stage.prompt_source(ctx)
-            run_result = None
             async for event in stage.runner.stream(prompt, model=stage.model):
                 if isinstance(event, ResultEvent):
                     run_result = event.result
