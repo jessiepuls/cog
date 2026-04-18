@@ -1,4 +1,5 @@
 import asyncio
+import sys
 from pathlib import Path
 
 import typer
@@ -37,15 +38,19 @@ def ralph(
     """Autonomous agent: picks next agent-ready issue, runs build/review/document, opens PR."""
     from cog.workflows.ralph import RalphWorkflow
 
-    exit_code = asyncio.run(
-        build_and_run(
-            RalphWorkflow,
-            project_dir or Path.cwd(),
-            item_id=item,
-            loop=loop,
-            headless=headless,
+    try:
+        exit_code = asyncio.run(
+            build_and_run(
+                RalphWorkflow,
+                project_dir or Path.cwd(),
+                item_id=item,
+                loop=loop,
+                headless=headless,
+            )
         )
-    )
+    except KeyboardInterrupt:
+        sys.stderr.write("\naborted.\n")
+        exit_code = 130
     raise typer.Exit(exit_code)
 
 
