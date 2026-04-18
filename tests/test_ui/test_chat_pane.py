@@ -34,8 +34,9 @@ async def test_chat_pane_prompt_returns_submitted_text() -> None:
 
         async def _resolve_after_delay() -> None:
             await asyncio.sleep(0.05)
-            if not widget._input_future.done():
-                widget._input_future.set_result("my response")
+            future = widget._ensure_future()
+            if not future.done():
+                future.set_result("my response")
 
         pilot.app.run_worker(_resolve_after_delay())
         result = await widget.prompt()
@@ -65,7 +66,8 @@ async def test_chat_pane_shift_enter_inserts_newline() -> None:
         await pilot.press("shift+enter")
         await pilot.pause()
         # Future not resolved — shift+enter did NOT submit
-        assert not widget._input_future.done()
+        future = widget._ensure_future()
+        assert not future.done()
 
 
 async def test_chat_pane_thinking_indicator_during_emit() -> None:

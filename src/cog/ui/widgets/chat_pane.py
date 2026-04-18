@@ -34,15 +34,21 @@ class ChatPaneWidget(Widget):
 
     def __init__(self, *args: object, **kwargs: object) -> None:
         super().__init__(*args, **kwargs)  # type: ignore[arg-type]
-        self._input_future: asyncio.Future[str] = asyncio.get_event_loop().create_future()
+        self._input_future: asyncio.Future[str] | None = None
 
     def compose(self) -> ComposeResult:
         yield RichLog(id="scrollback", highlight=True, markup=True)
         yield Static("⏳ Thinking…", id="thinking")
         yield TextArea(id="input-area")
 
+    def _ensure_future(self) -> asyncio.Future[str]:
+        if self._input_future is None or self._input_future.done():
+            self._input_future = asyncio.get_running_loop().create_future()
+        return self._input_future
+
     def on_mount(self) -> None:
         self.query_one("#thinking", Static).display = False
+        self._ensure_future()
 
     def _append_assistant_message(self, text: str) -> None:
         log = self.query_one("#scrollback", RichLog)
@@ -70,8 +76,9 @@ class ChatPaneWidget(Widget):
         log = self.query_one("#scrollback", RichLog)
         log.write(f"[bold green]You:[/bold green] {text}")
         log.scroll_end(animate=False)
-        if not self._input_future.done():
-            self._input_future.set_result(text)
+        future = self._ensure_future()
+        if not future.done():
+            future.set_result(text)
 
     async def emit(self, event: RunEvent) -> None:
         if isinstance(event, AssistantTextEvent):
@@ -82,7 +89,8 @@ class ChatPaneWidget(Widget):
     async def prompt(self) -> str:
         """Block until the user submits a message via Enter."""
         self._hide_thinking_indicator()
-        text = await self._input_future
-        self._input_future = asyncio.get_event_loop().create_future()
+        future = self._ensure_future()
+        text = await future
+        self._input_future = None
         self._show_thinking_indicator()
         return text

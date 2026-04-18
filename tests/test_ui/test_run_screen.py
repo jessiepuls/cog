@@ -9,6 +9,7 @@ from textual.app import App, ComposeResult
 from cog.core.context import ExecutionContext
 from cog.core.item import Item
 from cog.core.runner import ResultEvent, RunResult
+from cog.core.stage import Stage
 from cog.core.workflow import Workflow
 from cog.ui.screens.run import RunScreen
 from tests.fakes import EchoRunner, InMemoryStateCache, NullContentWidget
@@ -37,6 +38,30 @@ def _ctx(tmp_path: Path) -> ExecutionContext:
     )
 
 
+def _dummy_result() -> RunResult:
+    return RunResult(
+        final_message="",
+        total_cost_usd=0.0,
+        exit_status=0,
+        stream_json_path=Path("/dev/null"),
+        duration_seconds=0.0,
+    )
+
+
+class _SlowRunner:
+    """Runner that blocks until cancelled — used to keep the workflow in 'running' state."""
+
+    def stream(self, prompt: str, *, model: str):  # type: ignore[return]
+        return self._slow_stream()
+
+    async def _slow_stream(self):
+        await asyncio.sleep(10)
+        yield ResultEvent(result=_dummy_result())
+
+    async def run(self, prompt: str, *, model: str) -> None:  # pragma: no cover
+        pass
+
+
 class _FakeWorkflow(Workflow):
     name = "fake"
     queue_label = "fake-label"
@@ -50,12 +75,17 @@ class _FakeWorkflow(Workflow):
         return _item()
 
     def stages(self, ctx: ExecutionContext):
-        from cog.core.stage import Stage
-
         return [Stage(name="s1", prompt_source=lambda _: "hi", model="m", runner=self._runner)]
 
     async def classify_outcome(self, ctx, results):
         return "success"
+
+
+class _SlowWorkflow(_FakeWorkflow):
+    """Workflow whose single stage blocks indefinitely — for testing running-state behavior."""
+
+    def stages(self, ctx):
+        return [Stage(name="s", prompt_source=lambda _: "hi", model="m", runner=_SlowRunner())]
 
 
 def _make_app(workflow: Workflow, ctx: ExecutionContext) -> App:
@@ -104,91 +134,34 @@ async def test_run_screen_clock_advances(tmp_path: Path) -> None:
 
 
 async def test_run_screen_cost_accumulates_from_result_events(tmp_path: Path) -> None:
-
-    class _CostWorkflow(_FakeWorkflow):
-        async def select_item(self, ctx):  # type: ignore[override]
-            return _item()
-
-        def stages(self, ctx):
-            from cog.core.stage import Stage
-            from tests.fakes import EchoRunner
-
-            return [Stage(name="s", prompt_source=lambda _: "hi", model="m", runner=EchoRunner())]
-
-    workflow = _CostWorkflow(EchoRunner())
+    workflow = _FakeWorkflow(EchoRunner())
     ctx = _ctx(tmp_path)
     async with _make_app(workflow, ctx).run_test(headless=True) as pilot:
-        await pilot.pause()
+        for _ in range(5):
+            await pilot.pause()
         screen = pilot.app.query_one(RunScreen)
-        # EchoRunner emits cost=0.0; screen should have processed the result event
-        assert screen._cumulative_cost >= 0.0
+        # EchoRunner completes with cost=0.0 — verify the sink processed the result event
+        # by checking state reached completed (proving the event pipeline worked end-to-end)
+        assert screen._state == "completed"
+        assert screen._cumulative_cost == 0.0
 
 
 async def test_run_screen_ctrl_c_cancels_worker(tmp_path: Path) -> None:
     """Pressing ctrl+c while running transitions to cancelled."""
-
-    class _SlowWorkflow(_FakeWorkflow):
-        def stages(self, ctx):
-            from cog.core.stage import Stage
-
-            async def _slow_stream(prompt, *, model):
-                await asyncio.sleep(10)
-                yield ResultEvent(
-                    result=RunResult(
-                        final_message="",
-                        total_cost_usd=0.0,
-                        exit_status=0,
-                        stream_json_path=Path("/dev/null"),
-                        duration_seconds=0.0,
-                    )
-                )
-
-            class _SlowRunner:
-                def stream(self, prompt, *, model):
-                    return _slow_stream(prompt, model=model)
-
-                async def run(self, prompt, *, model):  # pragma: no cover
-                    pass
-
-            return [Stage(name="s", prompt_source=lambda _: "hi", model="m", runner=_SlowRunner())]
-
     workflow = _SlowWorkflow(EchoRunner())
     ctx = _ctx(tmp_path)
     async with _make_app(workflow, ctx).run_test(headless=True) as pilot:
         await pilot.pause()
-        await pilot.press("ctrl+c")
-        await pilot.pause()
-        await pilot.pause()  # allow cancellation to propagate
         screen = pilot.app.query_one(RunScreen)
-        assert screen._state in ("cancelled", "running")  # may still be running if cancel is async
+        assert screen._state == "running"
+        await pilot.press("ctrl+c")
+        # Give cancellation time to propagate through the worker
+        for _ in range(10):
+            await pilot.pause()
+        assert screen._state == "cancelled"
 
 
 async def test_run_screen_q_ignored_while_running(tmp_path: Path) -> None:
-    class _SlowWorkflow(_FakeWorkflow):
-        def stages(self, ctx):
-            from cog.core.stage import Stage
-
-            async def _slow_stream(prompt, *, model):
-                await asyncio.sleep(10)
-                yield ResultEvent(
-                    result=RunResult(
-                        final_message="",
-                        total_cost_usd=0.0,
-                        exit_status=0,
-                        stream_json_path=Path("/dev/null"),
-                        duration_seconds=0.0,
-                    )
-                )
-
-            class _SlowRunner:
-                def stream(self, prompt, *, model):
-                    return _slow_stream(prompt, model=model)
-
-                async def run(self, prompt, *, model):  # pragma: no cover
-                    pass
-
-            return [Stage(name="s", prompt_source=lambda _: "hi", model="m", runner=_SlowRunner())]
-
     workflow = _SlowWorkflow(EchoRunner())
     ctx = _ctx(tmp_path)
     async with _make_app(workflow, ctx).run_test(headless=True) as pilot:
@@ -219,8 +192,6 @@ async def test_run_screen_q_pops_after_completion(tmp_path: Path) -> None:
 async def test_run_screen_shows_error_panel_on_workflow_exception(tmp_path: Path) -> None:
     class _BrokenWorkflow(_FakeWorkflow):
         def stages(self, ctx):
-            from cog.core.stage import Stage
-
             async def _err_stream(prompt, *, model):
                 raise RuntimeError("kaboom")
                 yield  # make it a generator
@@ -241,18 +212,21 @@ async def test_run_screen_shows_error_panel_on_workflow_exception(tmp_path: Path
             await pilot.pause()
         screen = pilot.app.query_one(RunScreen)
         assert screen._state == "failed"
-        # result panel should be mounted
         assert len(pilot.app.query("#result-panel")) > 0
 
 
 async def test_run_screen_shows_cancellation_panel_after_cancel(tmp_path: Path) -> None:
-    # Directly drive the _show_cancellation_panel path
+    # Verify that _show_cancellation_panel mounts the result panel when called
+    # while the screen is still attached. (During real ctrl+c, the screen may
+    # already be detached — tested in test_run_screen_ctrl_c_cancels_worker.)
     workflow = _FakeWorkflow(EchoRunner())
     ctx = _ctx(tmp_path)
     async with _make_app(workflow, ctx).run_test(headless=True) as pilot:
-        await pilot.pause()
+        for _ in range(5):
+            await pilot.pause()
         screen = pilot.app.query_one(RunScreen)
-        # Manually trigger cancellation state
+        assert screen._state == "completed"
+        # Now manually trigger the cancellation panel while screen is attached
         screen._state = "cancelled"
         screen._show_cancellation_panel()
         await pilot.pause()

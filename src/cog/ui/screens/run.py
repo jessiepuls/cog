@@ -1,5 +1,6 @@
 """RunScreen — single-run lifecycle. Loop semantics deferred to #16."""
 
+import asyncio
 import time
 from typing import Literal
 
@@ -90,18 +91,19 @@ class RunScreen(Screen):
             results = await StageExecutor().run(self._workflow, self._ctx)
             self._state = "completed"
             self._show_completion_panel(results)
+        except asyncio.CancelledError:
+            self._state = "cancelled"
+            self._show_cancellation_panel()
         except Exception as e:
-            if "CancelledError" in type(e).__name__:
-                self._state = "cancelled"
-                self._show_cancellation_panel()
-            else:
-                self._state = "failed"
-                self._show_error_panel(e)
+            self._state = "failed"
+            self._show_error_panel(e)
         finally:
             self._refresh_footer()
 
     def _set_result_panel(self, markup: str) -> None:
         """Mount or update the result panel."""
+        if not self.is_attached:
+            return
         panels = self.query("#result-panel")
         if panels:
             panels.first(Static).update(markup)
