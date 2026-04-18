@@ -1,0 +1,9 @@
+[
+  {
+    "number": 42,
+    "url": "https://github.com/jessiepuls/cog/pull/42",
+    "state": "OPEN",
+    "body": "Closes #1",
+    "headRefName": "feature/my-branch"
+  }
+]

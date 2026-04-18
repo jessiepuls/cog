@@ -81,10 +81,12 @@ class FakeSubprocessRegistry:
         stdout: bytes = b"",
         stderr: bytes = b"",
         returncode: int = 0,
-    ) -> None:
-        self._expectations[tuple(argv)] = FakeProc(
-            stdout=stdout, stderr=stderr, returncode=returncode
-        )
+    ) -> FakeProc:
+        """Register an expectation. Returns the FakeProc so tests can inspect
+        `received_stdin` after the call runs."""
+        proc = FakeProc(stdout=stdout, stderr=stderr, returncode=returncode)
+        self._expectations[tuple(argv)] = proc
+        return proc
 
     @property
     def calls(self) -> list[tuple[str, ...]]:
