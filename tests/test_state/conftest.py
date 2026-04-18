@@ -19,6 +19,7 @@ def make_item(
         body="body",
         labels=(),
         comments=(),
+        created_at=datetime(2024, 1, 1, 12, 0, 0, tzinfo=UTC),
         updated_at=updated_at or datetime(2024, 1, 1, 12, 0, 0, tzinfo=UTC),
         url="https://github.com/org/repo/issues/42",
     )

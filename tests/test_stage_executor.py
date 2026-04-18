@@ -3,11 +3,12 @@
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from pathlib import Path
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
 from cog.core.context import ExecutionContext
-from cog.core.errors import StageError
+from cog.core.errors import GitError, StageError
 from cog.core.item import Item
 from cog.core.outcomes import Outcome, StageResult
 from cog.core.runner import AgentRunner, ResultEvent, RunEvent, RunResult
@@ -24,6 +25,7 @@ def _make_item() -> Item:
         body="",
         labels=(),
         comments=(),
+        created_at=datetime.now(UTC),
         updated_at=datetime.now(UTC),
         url="",
     )
@@ -136,6 +138,39 @@ async def test_classify_noop_calls_finalize_noop(ctx_factory, echo_runner):
     wf = _SimpleWorkflow(echo_runner, outcome="noop")
     await StageExecutor().run(wf, ctx_factory())
     assert wf.finalize_called == "noop"
+
+
+async def test_executor_populates_commits_created(ctx_factory, echo_runner):
+    wf = _SimpleWorkflow(echo_runner)
+    with (
+        patch("cog.core.workflow.git.current_head_sha", new=AsyncMock(return_value="abc123")),
+        patch("cog.core.workflow.git.commits_between", new=AsyncMock(return_value=3)),
+    ):
+        results = await StageExecutor().run(wf, ctx_factory())
+    assert results[0].commits_created == 3
+
+
+async def test_executor_commits_created_zero_when_not_git_repo(ctx_factory, echo_runner):
+    wf = _SimpleWorkflow(echo_runner)
+    with patch(
+        "cog.core.workflow.git.current_head_sha",
+        new=AsyncMock(side_effect=GitError("not a git repo")),
+    ):
+        results = await StageExecutor().run(wf, ctx_factory())
+    assert results[0].commits_created == 0
+
+
+async def test_executor_commits_created_zero_when_counting_fails(ctx_factory, echo_runner):
+    wf = _SimpleWorkflow(echo_runner)
+    with (
+        patch("cog.core.workflow.git.current_head_sha", new=AsyncMock(return_value="abc123")),
+        patch(
+            "cog.core.workflow.git.commits_between",
+            new=AsyncMock(side_effect=GitError("counting failed")),
+        ),
+    ):
+        results = await StageExecutor().run(wf, ctx_factory())
+    assert results[0].commits_created == 0
 
 
 # --- tolerate_failure regression guards ---

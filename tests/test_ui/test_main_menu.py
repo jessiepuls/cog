@@ -21,6 +21,7 @@ def _item(n: int) -> Item:
         body="",
         labels=(),
         comments=(),
+        created_at=datetime.now(UTC),
         updated_at=datetime.now(UTC),
         url="",
     )

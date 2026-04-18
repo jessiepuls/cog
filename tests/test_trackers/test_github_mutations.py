@@ -14,6 +14,7 @@ DUMMY_ITEM = Item(
     body="Body text",
     labels=(),
     comments=(),
+    created_at=datetime(2026, 4, 18, tzinfo=UTC),
     updated_at=datetime(2026, 4, 18, tzinfo=UTC),
     url="https://github.com/jessiepuls/cog/issues/42",
 )

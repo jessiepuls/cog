@@ -7,8 +7,9 @@ from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar, Literal
 
+import cog.git as git
 from cog.core.context import ExecutionContext
-from cog.core.errors import StageError
+from cog.core.errors import GitError, StageError
 from cog.core.item import Item
 from cog.core.outcomes import Outcome, StageResult
 from cog.core.preflight import PreflightCheck
@@ -97,6 +98,13 @@ class StageExecutor:
         sink = ctx.event_sink
         if sink is not None:
             await sink.emit(StageStartEvent(stage_name=stage.name, model=stage.model))
+
+        head_before: str | None = None
+        try:
+            head_before = await git.current_head_sha(ctx.project_dir)
+        except GitError:
+            pass  # not a git repo; commits_created stays 0
+
         start = time.monotonic()
         error: Exception | None = None
         run_result: RunResult | None = None
@@ -113,6 +121,13 @@ class StageExecutor:
             error = e
         duration = time.monotonic() - start
 
+        commits_created = 0
+        if head_before is not None:
+            try:
+                commits_created = await git.commits_between(ctx.project_dir, head_before)
+            except GitError:
+                pass  # counting failed; leave 0
+
         if run_result is None:
             # Runner raised and tolerate_failure=True
             stage_result = StageResult(
@@ -122,7 +137,7 @@ class StageExecutor:
                 exit_status=-1,
                 final_message="",
                 stream_json_path=Path("/dev/null"),
-                commits_created=0,
+                commits_created=commits_created,
                 error=error,
             )
             if sink is not None:
@@ -142,7 +157,7 @@ class StageExecutor:
             exit_status=run_result.exit_status,
             final_message=run_result.final_message,
             stream_json_path=run_result.stream_json_path,
-            commits_created=0,  # stub: git integration lands in #13
+            commits_created=commits_created,
             error=None,
         )
         if sink is not None:

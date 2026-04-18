@@ -1,10 +1,11 @@
 """Tests for RalphWorkflow class attributes, lifecycle hooks, and outcome classification."""
 
-import pytest
+from unittest.mock import AsyncMock
 
 from cog.checks import RALPH_CHECKS
 from cog.core.context import ExecutionContext
 from cog.core.outcomes import StageResult
+from cog.core.tracker import IssueTracker
 from cog.workflows.ralph import RalphWorkflow
 from tests.fakes import EchoRunner, InMemoryStateCache, make_item
 
@@ -48,29 +49,22 @@ def test_class_attributes():
     assert RalphWorkflow.preflight_checks is RALPH_CHECKS
 
 
-async def test_select_item_raises_not_implemented_mentioning_issue_13(tmp_path):
-    wf = RalphWorkflow(EchoRunner())
-    with pytest.raises(NotImplementedError) as exc_info:
-        await wf.select_item(_make_ctx(tmp_path))
-    assert "#13" in str(exc_info.value)
-
-
 async def test_classify_outcome_success_when_any_commits(tmp_path):
-    wf = RalphWorkflow(EchoRunner())
+    wf = RalphWorkflow(EchoRunner(), AsyncMock(spec=IssueTracker))
     results = [_make_stage_result(2)]
     outcome = await wf.classify_outcome(_make_ctx(tmp_path), results)
     assert outcome == "success"
 
 
 async def test_classify_outcome_noop_when_zero_commits(tmp_path):
-    wf = RalphWorkflow(EchoRunner())
+    wf = RalphWorkflow(EchoRunner(), AsyncMock(spec=IssueTracker))
     results = [_make_stage_result(0)]
     outcome = await wf.classify_outcome(_make_ctx(tmp_path), results)
     assert outcome == "noop"
 
 
 async def test_classify_outcome_sums_commits_across_stages(tmp_path):
-    wf = RalphWorkflow(EchoRunner())
+    wf = RalphWorkflow(EchoRunner(), AsyncMock(spec=IssueTracker))
     results = [
         _make_stage_result(0),
         _make_stage_result(1),

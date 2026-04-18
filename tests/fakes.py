@@ -7,8 +7,35 @@ from typing import Any
 from textual.app import ComposeResult
 from textual.widget import Widget
 
-from cog.core.item import Item
+from cog.core.item import Comment, Item
 from cog.core.runner import AgentRunner, ResultEvent, RunEvent, RunResult
+
+_EPOCH = datetime(2024, 1, 1, tzinfo=UTC)
+
+
+def make_item(
+    *,
+    tracker_id: str = "github/org/repo",
+    item_id: str = "1",
+    title: str = "Test item",
+    body: str = "",
+    labels: tuple[str, ...] = (),
+    comments: tuple[Comment, ...] = (),
+    created_at: datetime | None = None,
+    updated_at: datetime | None = None,
+    url: str = "https://github.com/org/repo/issues/1",
+) -> Item:
+    return Item(
+        tracker_id=tracker_id,
+        item_id=item_id,
+        title=title,
+        body=body,
+        labels=labels,
+        comments=comments,
+        created_at=created_at or _EPOCH,
+        updated_at=updated_at or _EPOCH,
+        url=url,
+    )
 
 
 @dataclass
@@ -85,22 +112,6 @@ class FakeProc:
     async def communicate(self, input: bytes | None = None) -> tuple[bytes, bytes]:
         self.received_stdin = input
         return self.stdout, self.stderr
-
-
-def make_item(**overrides: Any) -> Item:
-    """Factory for Item with sensible defaults. Pass keyword args to override."""
-    defaults: dict[str, Any] = {
-        "tracker_id": "github/owner/repo",
-        "item_id": "42",
-        "title": "Test issue",
-        "body": "Issue body text.",
-        "labels": ("agent-ready",),
-        "comments": (),
-        "updated_at": datetime(2024, 1, 1, tzinfo=UTC),
-        "url": "https://github.com/owner/repo/issues/42",
-    }
-    defaults.update(overrides)
-    return Item(**defaults)
 
 
 class FailingRunner(AgentRunner):

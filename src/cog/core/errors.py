@@ -49,3 +49,7 @@ class DockerUnavailableError(SandboxError):
 
 class DockerImageBuildError(SandboxError):
     """`docker build` exited non-zero."""
+
+
+class GitError(Exception):
+    """Non-zero exit or unexpected output from a git subprocess."""

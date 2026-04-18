@@ -16,6 +16,7 @@ from tests.fakes import EchoRunner, InMemoryStateCache
 
 
 def _make_item() -> Item:
+    now = datetime.now(UTC)
     return Item(
         tracker_id="test",
         item_id="1",
@@ -23,7 +24,8 @@ def _make_item() -> Item:
         body="",
         labels=(),
         comments=(),
-        updated_at=datetime.now(UTC),
+        created_at=now,
+        updated_at=now,
         url="",
     )
 
