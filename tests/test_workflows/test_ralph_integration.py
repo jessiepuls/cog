@@ -17,6 +17,12 @@ from cog.workflows.ralph import RalphWorkflow
 from tests.fakes import EchoRunner, InMemoryStateCache, make_item
 
 
+@pytest.fixture(autouse=True)
+def _writable_state_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Point XDG_STATE_HOME at a writable temp dir so write_report doesn't fail."""
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+
+
 def _git(*args: str, cwd: Path) -> None:
     subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True)
 

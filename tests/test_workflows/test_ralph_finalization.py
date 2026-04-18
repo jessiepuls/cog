@@ -14,6 +14,13 @@ from cog.core.tracker import IssueTracker
 from cog.workflows.ralph import RalphWorkflow, _split_summary_and_test_plan
 from tests.fakes import InMemoryStateCache, make_item, make_stage_result
 
+
+@pytest.fixture(autouse=True)
+def _writable_state_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Point XDG_STATE_HOME at a writable temp dir so write_report doesn't fail."""
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

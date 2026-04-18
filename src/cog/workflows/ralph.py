@@ -7,7 +7,8 @@ import re
 import sys
 from collections.abc import Callable
 from importlib.resources import files
-from typing import TYPE_CHECKING, ClassVar, Literal
+from pathlib import Path
+from typing import ClassVar, Literal
 
 import cog.git as git
 from cog.checks import RALPH_CHECKS
@@ -22,9 +23,6 @@ from cog.core.tracker import IssueTracker
 from cog.core.workflow import Workflow
 from cog.state_paths import project_slug, project_state_dir
 from cog.telemetry import TelemetryRecord
-
-if TYPE_CHECKING:
-    pass
 
 _PRIORITY_RE = re.compile(r"^p(\d+)$")
 _SLUG_RE = re.compile(r"[^a-z0-9-]+")
@@ -257,7 +255,7 @@ class RalphWorkflow(Workflow):
         outcome: Literal["success", "noop", "error"],
         *,
         error: Exception | None = None,
-    ) -> None:
+    ) -> Path | None:
         assert ctx.item is not None
         from datetime import UTC, datetime
 
@@ -319,6 +317,7 @@ class RalphWorkflow(Workflow):
         lines.append(f"\nTotal cost: ${total_cost:.4f} | Duration: {total_duration:.1f}s")
 
         report_path.write_text("\n".join(lines), encoding="utf-8")
+        return report_path
 
     def _build_pr_body(self, ctx: ExecutionContext, results: list[StageResult]) -> str:
         build = next((r for r in results if r.stage.name == "build"), None)
