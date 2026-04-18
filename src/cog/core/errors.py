@@ -17,3 +17,15 @@ class StageError(WorkflowError):
         self.result = result
         self.cause = cause
         super().__init__(f"stage {stage.name!r} failed")
+
+
+class RunnerError(Exception):
+    """Base for runner failures."""
+
+
+class RunnerTimeoutError(RunnerError):
+    """Subprocess exceeded COG_RUNNER_TIMEOUT_SECONDS; process was terminated."""
+
+
+class StreamJsonParseError(RunnerError):
+    """Claude emitted a line that wasn't parseable JSON or had unexpected shape."""

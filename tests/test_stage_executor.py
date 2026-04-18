@@ -1,5 +1,6 @@
 """Tests for StageExecutor behavior."""
 
+from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -9,7 +10,7 @@ from cog.core.context import ExecutionContext
 from cog.core.errors import StageError
 from cog.core.item import Item
 from cog.core.outcomes import Outcome, StageResult
-from cog.core.runner import AgentRunner, RunResult
+from cog.core.runner import AgentRunner, ResultEvent, RunEvent, RunResult
 from cog.core.stage import Stage
 from cog.core.workflow import StageExecutor, Workflow
 
@@ -73,19 +74,22 @@ class _EmptyQueueWorkflow(_SimpleWorkflow):
 
 
 class _FailRunner(AgentRunner):
-    async def run(self, prompt: str, *, model: str) -> RunResult:
-        return RunResult(
-            final_message="failed",
-            total_cost_usd=0.0,
-            exit_status=1,
-            stream_json_path=Path("/dev/null"),
-            duration_seconds=0.0,
+    async def stream(self, prompt: str, *, model: str) -> AsyncIterator[RunEvent]:
+        yield ResultEvent(
+            result=RunResult(
+                final_message="failed",
+                total_cost_usd=0.0,
+                exit_status=1,
+                stream_json_path=Path("/dev/null"),
+                duration_seconds=0.0,
+            )
         )
 
 
 class _RaisingRunner(AgentRunner):
-    async def run(self, prompt: str, *, model: str) -> RunResult:
+    async def stream(self, prompt: str, *, model: str) -> AsyncIterator[RunEvent]:
         raise RuntimeError("runner exploded")
+        yield  # type: ignore[misc]
 
 
 async def test_happy_path_stages_run_in_order(ctx_factory, echo_runner):

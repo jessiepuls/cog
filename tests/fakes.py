@@ -1,19 +1,22 @@
+from collections.abc import AsyncIterator
 from pathlib import Path
 
 from cog.core.item import Item
-from cog.core.runner import AgentRunner, RunResult
+from cog.core.runner import AgentRunner, ResultEvent, RunEvent, RunResult
 
 
 class EchoRunner(AgentRunner):
     """Returns the prompt as the final_message. Zero cost, zero duration."""
 
-    async def run(self, prompt: str, *, model: str) -> RunResult:
-        return RunResult(
-            final_message=prompt,
-            total_cost_usd=0.0,
-            exit_status=0,
-            stream_json_path=Path("/dev/null"),
-            duration_seconds=0.0,
+    async def stream(self, prompt: str, *, model: str) -> AsyncIterator[RunEvent]:
+        yield ResultEvent(
+            result=RunResult(
+                final_message=prompt,
+                total_cost_usd=0.0,
+                exit_status=0,
+                stream_json_path=Path("/dev/null"),
+                duration_seconds=0.0,
+            )
         )
 
 

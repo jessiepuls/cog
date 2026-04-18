@@ -9,3 +9,6 @@ dist/
 *.pyc
 
 .claude/settings.json
+.uv/
+.uv_python/
+.uv_cache/
