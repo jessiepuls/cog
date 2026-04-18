@@ -208,6 +208,13 @@ def test_mount_args_standard_set(tmp_path: Path) -> None:
     assert "/tmp/cog-home/.gitconfig" in containers
     assert "/tmp/cog-home/.local/state/cog" in containers
 
+    # Verify mount modes — .gitconfig must be ro, others rw
+    by_container = {p.split(":")[1]: p.split(":")[2] for p in pairs}
+    assert by_container["/work"] == "rw"
+    assert by_container["/tmp/cog-home/.gitconfig"] == "ro"
+    assert by_container["/tmp/cog-home/.claude"] == "rw"
+    assert by_container["/tmp/cog-home/.local/state/cog"] == "rw"
+
 
 def test_mount_args_skips_absent_host_paths(tmp_path: Path) -> None:
     home = _make_home(tmp_path, skip={".claude"})
