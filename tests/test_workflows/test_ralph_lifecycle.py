@@ -19,7 +19,7 @@ def _make_ctx(tmp_path):
     )
 
 
-def _make_stage_result(commits_created: int, tmp_path):
+def _make_stage_result(commits_created: int):
     from pathlib import Path
 
     from cog.core.stage import Stage
@@ -57,14 +57,14 @@ async def test_select_item_raises_not_implemented_mentioning_issue_13(tmp_path):
 
 async def test_classify_outcome_success_when_any_commits(tmp_path):
     wf = RalphWorkflow(EchoRunner())
-    results = [_make_stage_result(2, tmp_path)]
+    results = [_make_stage_result(2)]
     outcome = await wf.classify_outcome(_make_ctx(tmp_path), results)
     assert outcome == "success"
 
 
 async def test_classify_outcome_noop_when_zero_commits(tmp_path):
     wf = RalphWorkflow(EchoRunner())
-    results = [_make_stage_result(0, tmp_path)]
+    results = [_make_stage_result(0)]
     outcome = await wf.classify_outcome(_make_ctx(tmp_path), results)
     assert outcome == "noop"
 
@@ -72,9 +72,9 @@ async def test_classify_outcome_noop_when_zero_commits(tmp_path):
 async def test_classify_outcome_sums_commits_across_stages(tmp_path):
     wf = RalphWorkflow(EchoRunner())
     results = [
-        _make_stage_result(0, tmp_path),
-        _make_stage_result(1, tmp_path),
-        _make_stage_result(0, tmp_path),
+        _make_stage_result(0),
+        _make_stage_result(1),
+        _make_stage_result(0),
     ]
     outcome = await wf.classify_outcome(_make_ctx(tmp_path), results)
     assert outcome == "success"
