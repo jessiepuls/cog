@@ -29,3 +29,7 @@ class RunnerTimeoutError(RunnerError):
 
 class StreamJsonParseError(RunnerError):
     """Claude emitted a line that wasn't parseable JSON or had unexpected shape."""
+
+
+class HostError(Exception):
+    """Non-zero exit or parse failure from a git host."""

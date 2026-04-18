@@ -1,5 +1,8 @@
 from collections.abc import AsyncIterator
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
+from unittest.mock import AsyncMock, patch
 
 from cog.core.item import Item
 from cog.core.runner import AgentRunner, ResultEvent, RunEvent, RunResult
@@ -47,3 +50,48 @@ class InMemoryStateCache:
 
     def save(self) -> None:
         pass
+
+
+@dataclass
+class SubprocessCall:
+    argv: tuple[str, ...]
+    cwd: Path | None
+    stdin: bytes | None = None  # populated after communicate()
+
+
+class _FakeProcess:
+    def __init__(self, stdout: bytes, returncode: int, call_record: SubprocessCall) -> None:
+        self._stdout = stdout
+        self.returncode = returncode
+        self._call_record = call_record
+
+    async def communicate(self, input: bytes | None = None) -> tuple[bytes, bytes]:
+        self._call_record.stdin = input
+        return self._stdout, b""
+
+
+class FakeSubprocessRegistry:
+    """Queue-based fake for asyncio.create_subprocess_exec.
+
+    Push responses in order, then use patch() as a context manager to intercept
+    subprocess calls. Inspect calls[] after the fact to assert argv/cwd/stdin.
+    """
+
+    def __init__(self) -> None:
+        self._queue: list[tuple[bytes, int]] = []
+        self.calls: list[SubprocessCall] = []
+
+    def push(self, *, stdout: bytes = b"", returncode: int = 0) -> None:
+        self._queue.append((stdout, returncode))
+
+    async def _create(self, *args: Any, **kwargs: Any) -> _FakeProcess:
+        stdout, returncode = self._queue.pop(0) if self._queue else (b"", 0)
+        call = SubprocessCall(argv=tuple(str(a) for a in args), cwd=kwargs.get("cwd"))
+        self.calls.append(call)
+        return _FakeProcess(stdout, returncode, call)
+
+    def patch(self, module_path: str) -> Any:
+        return patch(
+            f"{module_path}.asyncio.create_subprocess_exec",
+            new=AsyncMock(side_effect=self._create),
+        )

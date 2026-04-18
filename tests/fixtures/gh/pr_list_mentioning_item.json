@@ -1,0 +1,16 @@
+[
+  {
+    "number": 10,
+    "url": "https://github.com/jessiepuls/cog/pull/10",
+    "state": "OPEN",
+    "body": "Closes #42",
+    "headRefName": "feature/branch-a"
+  },
+  {
+    "number": 11,
+    "url": "https://github.com/jessiepuls/cog/pull/11",
+    "state": "OPEN",
+    "body": "Fixes #42",
+    "headRefName": "feature/branch-b"
+  }
+]
