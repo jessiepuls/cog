@@ -1,7 +1,7 @@
 """Shared test helpers for ClaudeCliRunner tests."""
 
 import asyncio
-from collections.abc import AsyncIterator
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, patch
@@ -40,14 +40,17 @@ def fixture_proc(name: str, returncode: int = 0) -> FakeProcess:
     return FakeProcess(_make_reader(data), returncode)
 
 
-async def _hanging_stdout() -> AsyncIterator[bytes]:
-    yield b'{"type":"system","subtype":"init"}\n'
-    await asyncio.sleep(10)
+class _HangingStdout:
+    """Stdout that hangs forever on readline() — for wall-clock timeout tests."""
+
+    async def readline(self) -> bytes:
+        await asyncio.sleep(10)
+        return b""
 
 
 def hanging_proc() -> FakeProcess:
     """Fake process whose stdout never closes — for timeout tests."""
-    proc = FakeProcess(_hanging_stdout(), returncode=0)
+    proc = FakeProcess(_HangingStdout(), returncode=0)
 
     def _terminate() -> None:
         proc.terminated = True
@@ -64,6 +67,84 @@ def hanging_proc() -> FakeProcess:
 
 def patch_exec(proc: FakeProcess) -> Any:
     """Context manager that patches asyncio.create_subprocess_exec to return proc."""
+    return patch(
+        "cog.runners.claude_cli.asyncio.create_subprocess_exec",
+        new=AsyncMock(return_value=proc),
+    )
+
+
+@dataclass
+class StreamEvent:
+    """A scripted event for PausingMockProc."""
+
+    data: bytes
+    delay_before: float = 0.0
+
+
+class _PausingStdout:
+    def __init__(self, proc: "PausingMockProc", events: list[StreamEvent]) -> None:
+        self._proc = proc
+        self._events = events
+        self._idx = 0
+
+    async def readline(self) -> bytes:
+        if self._idx >= len(self._events):
+            self._signal_eof()
+            return b""
+        event = self._events[self._idx]
+        self._idx += 1
+        if event.delay_before > 0:
+            await asyncio.sleep(event.delay_before)
+        if not event.data:
+            self._signal_eof()
+        return event.data
+
+    def _signal_eof(self) -> None:
+        if self._proc.returncode is None:
+            self._proc.returncode = 0
+            self._proc._done.set()
+
+
+class PausingMockProc:
+    """Mock asyncio subprocess that emits scripted events with configurable delays.
+
+    Use StreamEvent(b'', delay_before=9999) to simulate an infinite hang.
+    """
+
+    def __init__(
+        self,
+        events: list[StreamEvent],
+        *,
+        respects_sigterm: bool = True,
+    ) -> None:
+        self._respects_sigterm = respects_sigterm
+        self._terminated = False
+        self._killed = False
+        self.returncode: int | None = None
+        self._done = asyncio.Event()
+        self.stdout = _PausingStdout(self, events)
+        self.stderr = None
+
+    def terminate(self) -> None:
+        self._terminated = True
+        if self._respects_sigterm:
+            self.returncode = 143
+            self._done.set()
+
+    def kill(self) -> None:
+        self._killed = True
+        self.returncode = 137
+        self._done.set()
+
+    async def wait(self) -> int:
+        if self.returncode is not None:
+            return self.returncode
+        await self._done.wait()
+        return self.returncode  # type: ignore[return-value]
+
+
+def patch_pausing_exec(proc: "PausingMockProc") -> Any:
+    """Context manager that patches asyncio.create_subprocess_exec to return a PausingMockProc."""
     return patch(
         "cog.runners.claude_cli.asyncio.create_subprocess_exec",
         new=AsyncMock(return_value=proc),

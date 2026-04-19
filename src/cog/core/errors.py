@@ -27,6 +27,23 @@ class RunnerTimeoutError(RunnerError):
     """Subprocess exceeded COG_RUNNER_TIMEOUT_SECONDS; process was terminated."""
 
 
+class RunnerStalledError(RunnerError):
+    """Subprocess produced no stream events within the inactivity window; terminated."""
+
+    def __init__(
+        self,
+        *,
+        inactivity_seconds: float,
+        last_event_summary: str | None = None,
+    ) -> None:
+        self.inactivity_seconds = inactivity_seconds
+        self.last_event_summary = last_event_summary
+        super().__init__(
+            f"no stream event for {inactivity_seconds:.0f}s; subprocess terminated. "
+            f"last event: {last_event_summary or '(none)'}"
+        )
+
+
 class StreamJsonParseError(RunnerError):
     """Claude emitted a line that wasn't parseable JSON or had unexpected shape."""
 
