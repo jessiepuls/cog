@@ -1,4 +1,4 @@
-from collections.abc import AsyncIterator, Sequence
+from collections.abc import AsyncIterator, Iterator, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -229,6 +229,49 @@ def make_needs_refinement_items(ids: list[int]) -> list[Item]:
         )
         for idx, i in enumerate(ids)
     ]
+
+
+class ScriptedInterviewRunner(AgentRunner):
+    """Each stream() call yields one AssistantTextEvent + ResultEvent from the scripted list.
+
+    Cycles through responses per turn.
+    """
+
+    def __init__(self, responses: list[tuple[str, float]]) -> None:
+        self._responses = responses
+        self._iter: Iterator[tuple[str, float]] = iter([])
+        self._call_count = 0
+
+    async def stream(self, prompt: str, *, model: str) -> AsyncIterator[RunEvent]:
+        from cog.core.runner import AssistantTextEvent
+
+        message, cost = self._responses[self._call_count % len(self._responses)]
+        self._call_count += 1
+        yield AssistantTextEvent(text=message)
+        yield ResultEvent(
+            result=RunResult(
+                final_message=message,
+                total_cost_usd=cost,
+                exit_status=0,
+                stream_json_path=Path("/dev/null"),
+                duration_seconds=0.0,
+            )
+        )
+
+
+class ScriptedInputProvider:
+    """Each prompt() call returns the next value from the list; None simulates early-end."""
+
+    def __init__(self, replies: list[str | None]) -> None:
+        self._replies = list(replies)
+        self._index = 0
+
+    async def prompt(self) -> str | None:
+        if self._index >= len(self._replies):
+            raise AssertionError("ScriptedInputProvider ran out of replies")
+        reply = self._replies[self._index]
+        self._index += 1
+        return reply
 
 
 class FakeSubprocessRegistry:
