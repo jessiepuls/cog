@@ -22,18 +22,40 @@ Focus on user-facing changes that aren't self-evident from the code:
 
 ## Steps
 
-1. Run `git diff main..HEAD` to see what changed.
-2. Read the issue body (provided in the runtime context below) for context
+1. Run `git diff --stat $(git merge-base HEAD main 2>/dev/null || git merge-base HEAD master)..HEAD`
+   to get a scope overview of what changed.
+2. For each changed user-facing file (README, CHANGELOG, docs/*, docstrings
+   in public-API files): `Read` the file and check whether its content
+   aligns with the changes.
+3. Run `git log --oneline $(git merge-base HEAD main 2>/dev/null || git merge-base HEAD master)..HEAD`
+   for bounded commit subjects to inform the narrative (NOT `-p`, which
+   includes full patches).
+4. Read the item body (provided in the runtime context below) for context
    on the intent of the change.
-3. Update relevant documentation files (README, CHANGELOG, docstrings,
+5. Update relevant documentation files (README, CHANGELOG, docstrings,
    inline comments that explain WHY — not what).
-4. If there is nothing to document (internal refactors, test-only changes),
+6. If there is nothing to document (internal refactors, test-only changes),
    say so in your final message and exit without committing.
-5. Commit any documentation changes with a clear message.
+7. Commit any documentation changes with a clear message.
+
+## Bounded tool calls (important)
+
+Claude Code persists any single tool output >30KB to a session-scoped file
+and tells you to `Read` that file. In this container, the subsequent `Read`
+has been observed to hang indefinitely. To avoid this:
+
+- Do NOT run `git diff <base>..HEAD` without file filters — produces
+  unbounded output on any non-trivial branch.
+- Do NOT run `grep -r` over the whole repo. Use `Grep` (Claude Code's
+  built-in) with `head_limit` or file-type filters.
+- When running a command that might produce large output, pipe through
+  `head -c 30000` or equivalent defensively.
+- Prefer per-file inspection via `Read <file>` over patch-level inspection
+  via `git diff`.
 
 ## Git rules (hard)
 
 - Make commits locally; do not push them.
-- Do not open PRs or comment on issues.
+- Do not open PRs or comment on items.
 - Never delete branches.
 - Never push or force-push to main/master.
