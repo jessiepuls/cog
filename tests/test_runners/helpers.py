@@ -14,6 +14,7 @@ class FakeProcess:
 
     def __init__(self, stdout: Any, returncode: int = 0) -> None:
         self.stdout = stdout
+        self.stderr = None  # ClaudeCliRunner guards against None stderr for mocks.
         self.returncode = returncode
         self.terminated = False
         self.killed = False
