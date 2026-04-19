@@ -22,6 +22,30 @@ Options for `cog refine`:
     --item N              Skip selection; run on issue number N
     --project-dir PATH    Project directory (default: cwd)
 
+### Refine interview
+
+`cog refine` runs a multi-turn interview in the Textual chat pane. Claude
+asks one question at a time; the user replies until Claude has enough context
+and emits `<<interview-complete>>`, or the user ends early.
+
+Keyboard bindings in the chat pane:
+
+| Key | Action |
+|-----|--------|
+| `Enter` | Submit reply (empty string is a valid reply) |
+| `Shift+Enter` | Insert newline |
+| `Escape` / `Ctrl+D` | End interview early |
+
+Environment variables:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `COG_REFINE_INTERVIEW_MODEL` | `claude-sonnet-4-6` | Claude model used for each interview turn |
+
+When the user ends early via `Escape`/`Ctrl+D`, the interview transcript is
+preserved and the rewrite pass (landing in #19) produces a best-effort rewrite
+from the partial conversation.
+
 ## Telemetry
 
 Each run appends one JSON line to `<state-dir>/runs.jsonl` (default: `~/.local/share/cog/runs.jsonl`).
@@ -32,7 +56,7 @@ Key fields:
 |-------|------|-------------|
 | `ts` | string | ISO-8601 UTC timestamp |
 | `outcome` | string | `success`, `error`, `no-op`, `push-failed`, `deferred-by-blocker` |
-| `stages` | array | Per-stage entry with `stage`, `duration_s`, `cost_usd`, `exit_status`, `commits` |
+| `stages` | array | Per-stage entry with `stage`, `duration_s`, `cost_usd`, `exit_status`, `commits`; for `cog refine` the first entry is `"interview"` |
 | `total_cost_usd` | float | Sum of stage costs |
 | `duration_seconds` | float | Wall time across all stages |
 | `error` | string\|null | `"stage 'X' failed \| cause=RunnerStalledError: ..."` on failure |

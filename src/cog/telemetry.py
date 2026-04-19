@@ -3,6 +3,7 @@ import fcntl
 import json
 import os
 import sys
+from collections.abc import Sequence
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -63,12 +64,15 @@ class TelemetryRecord:
         item: Item,
         outcome: TelemetryOutcome,
         results: list[StageResult],
+        extra_stages: Sequence["StageTelemetry"] = (),
         branch: str | None = None,
         pr_url: str | None = None,
         duration_seconds: float,
         error: str | None = None,
         cause_class: str | None = None,
     ) -> "TelemetryRecord":
+        result_stages = tuple(StageTelemetry.from_stage_result(r) for r in results)
+        all_stages = tuple(extra_stages) + result_stages
         return cls(
             ts=datetime.now(UTC).isoformat(),
             cog_version=cog_version,
@@ -79,8 +83,8 @@ class TelemetryRecord:
             branch=branch,
             pr_url=pr_url,
             duration_seconds=duration_seconds,
-            stages=tuple(StageTelemetry.from_stage_result(r) for r in results),
-            total_cost_usd=sum(r.cost_usd for r in results),
+            stages=all_stages,
+            total_cost_usd=sum(r.cost_usd for r in results) + sum(s.cost_usd for s in extra_stages),
             error=error,
             cause_class=cause_class,
         )

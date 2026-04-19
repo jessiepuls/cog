@@ -7,7 +7,7 @@ from textual.events import Key
 from textual.widget import Widget
 from textual.widgets import RichLog, Static, TextArea
 
-from cog.core.runner import AssistantTextEvent, ResultEvent, RunEvent
+from cog.core.runner import AssistantTextEvent, ResultEvent, RunEvent, ToolUseEvent
 
 
 class ChatPaneWidget(Widget):
@@ -34,14 +34,14 @@ class ChatPaneWidget(Widget):
 
     def __init__(self, *args: object, **kwargs: object) -> None:
         super().__init__(*args, **kwargs)  # type: ignore[arg-type]
-        self._input_future: asyncio.Future[str] | None = None
+        self._input_future: asyncio.Future[str | None] | None = None
 
     def compose(self) -> ComposeResult:
         yield RichLog(id="scrollback", highlight=True, markup=True)
         yield Static("⏳ Thinking…", id="thinking")
         yield TextArea(id="input-area")
 
-    def _ensure_future(self) -> asyncio.Future[str]:
+    def _ensure_future(self) -> asyncio.Future[str | None]:
         if self._input_future is None or self._input_future.done():
             self._input_future = asyncio.get_running_loop().create_future()
         return self._input_future
@@ -65,32 +65,46 @@ class ChatPaneWidget(Widget):
         if event.key == "enter":
             event.stop()
             self._submit()
+        elif event.key in ("escape", "ctrl+d"):
+            event.stop()
+            self._end_interview()
         # shift+enter inserts newline — TextArea handles this by default
 
     def _submit(self) -> None:
         area = self.query_one("#input-area", TextArea)
         text = area.text.strip()
-        if not text:
-            return
         area.clear()
-        log = self.query_one("#scrollback", RichLog)
-        log.write(f"[bold green]You:[/bold green] {text}")
-        log.scroll_end(animate=False)
+        if text:
+            log = self.query_one("#scrollback", RichLog)
+            log.write(f"[bold green]You:[/bold green] {text}")
+            log.scroll_end(animate=False)
         future = self._ensure_future()
         if not future.done():
             future.set_result(text)
 
+    def _end_interview(self) -> None:
+        future = self._ensure_future()
+        if not future.done():
+            future.set_result(None)
+
     async def emit(self, event: RunEvent) -> None:
         if isinstance(event, AssistantTextEvent):
             self._append_assistant_message(event.text)
+        elif isinstance(event, ToolUseEvent):
+            preview = event.input.get("command") or event.input.get("file_path") or ""
+            log = self.query_one("#scrollback", RichLog)
+            log.write(f"[dim]🔧 {event.tool}: {preview}[/dim]")
+            log.scroll_end(animate=False)
         elif isinstance(event, ResultEvent):
             self._hide_thinking_indicator()
 
-    async def prompt(self) -> str:
-        """Block until the user submits a message via Enter."""
+    async def prompt(self) -> str | None:
+        """Block until the user submits a message via Enter (str, possibly empty),
+        or ends the interview via Escape / Ctrl+D (None)."""
         self._hide_thinking_indicator()
         future = self._ensure_future()
-        text = await future
+        result = await future
         self._input_future = None
-        self._show_thinking_indicator()
-        return text
+        if result is not None:
+            self._show_thinking_indicator()
+        return result

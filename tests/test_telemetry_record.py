@@ -264,6 +264,55 @@ def test_telemetry_record_json_includes_cause_class():
     assert "RunnerTimeoutError" in line
 
 
+def test_build_accepts_extra_stages_kwarg():
+    item = _make_item()
+    interview_stage = StageTelemetry(
+        stage="interview",
+        model="claude-sonnet-4-6",
+        duration_s=5.0,
+        cost_usd=0.10,
+        exit_status=0,
+        commits=0,
+    )
+    record = TelemetryRecord.build(
+        project="p",
+        workflow="refine",
+        item=item,
+        outcome="error",
+        results=[],
+        extra_stages=(interview_stage,),
+        duration_seconds=5.0,
+    )
+    assert len(record.stages) == 1
+    assert record.stages[0].stage == "interview"
+    assert abs(record.total_cost_usd - 0.10) < 1e-9
+
+
+def test_build_extra_stages_prepended_before_result_stages():
+    item = _make_item()
+    interview_stage = StageTelemetry(
+        stage="interview",
+        model="claude-sonnet-4-6",
+        duration_s=2.0,
+        cost_usd=0.05,
+        exit_status=0,
+        commits=0,
+    )
+    result = _make_stage_result("build", cost_usd=0.10)
+    record = TelemetryRecord.build(
+        project="p",
+        workflow="refine",
+        item=item,
+        outcome="success",
+        results=[result],
+        extra_stages=(interview_stage,),
+        duration_seconds=10.0,
+    )
+    assert record.stages[0].stage == "interview"
+    assert record.stages[1].stage == "build"
+    assert abs(record.total_cost_usd - 0.15) < 1e-9
+
+
 def test_telemetry_record_backward_compat_missing_cause_class():
     # Old JSONL lines without cause_class should parse correctly
     # when cause_class defaults to None

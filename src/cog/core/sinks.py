@@ -16,7 +16,9 @@ class RunEventSink(Protocol):
 class UserInputProvider(Protocol):
     """Solicits a line of text from the user (interactive workflows only)."""
 
-    async def prompt(self) -> str: ...
+    async def prompt(self) -> str | None:
+        """Return user's reply (str, possibly empty), or None if they ended early."""
+        ...
 
 
 class ItemPicker(Protocol):
