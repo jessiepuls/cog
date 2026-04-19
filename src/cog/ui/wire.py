@@ -7,6 +7,7 @@ from pathlib import Path
 from cog.core.context import ExecutionContext
 from cog.core.preflight import PreflightResult, print_results, run_checks
 from cog.core.workflow import Workflow
+from cog.headless import run_headless
 from cog.runners.claude_cli import ClaudeCliRunner
 from cog.runners.docker_sandbox import DockerSandbox
 from cog.state import JsonFileStateCache
@@ -66,13 +67,8 @@ async def build_and_run(
         ctx.item = await tracker.get(str(item_id))
 
     if headless:
-        return await _run_headless(workflow, ctx)
+        return await run_headless(workflow, ctx)
 
     from cog.ui.app import run_textual
 
     return await run_textual(workflow, ctx, loop=loop)
-
-
-async def _run_headless(workflow: Workflow, ctx: ExecutionContext) -> int:
-    """Headless run stub. Full implementation in #11."""
-    raise NotImplementedError("Headless mode implemented in #11")
