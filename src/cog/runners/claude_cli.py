@@ -58,6 +58,25 @@ def _parse_float_env(name: str, default: float) -> float:
         return default
 
 
+def _parse_int_env(name: str, default: int) -> int:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        print(
+            f"WARNING: {name}={raw!r} is not a valid integer; defaulting to {default}",
+            file=sys.stderr,
+        )
+        return default
+
+
+# 16 MiB: 256× the observed worst-case line (~64 KiB). Per-line RAM is
+# transient — the buffer is cleared after each line is parsed.
+_STREAM_LINE_LIMIT_BYTES = _parse_int_env("COG_STREAM_LINE_LIMIT_BYTES", 16 * 1024 * 1024)
+
+
 class ClaudeCliRunner(AgentRunner):
     def __init__(self, sandbox: Sandbox) -> None:
         self._sandbox = sandbox
@@ -89,7 +108,9 @@ class ClaudeCliRunner(AgentRunner):
         )
         env = self._sandbox.wrap_env(dict(os.environ))
 
-        proc = await asyncio.create_subprocess_exec(*argv, env=env, stdout=PIPE, stderr=PIPE)
+        proc = await asyncio.create_subprocess_exec(
+            *argv, env=env, stdout=PIPE, stderr=PIPE, limit=_STREAM_LINE_LIMIT_BYTES
+        )
         assert proc.stdout is not None  # guaranteed by stdout=PIPE
         # Drain stderr concurrently so the pipe buffer (~64KB on Linux) can't fill and
         # block claude's stderr writes — which would cascade into stdout stalling and

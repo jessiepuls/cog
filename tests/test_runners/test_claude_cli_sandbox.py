@@ -1,6 +1,8 @@
 """Tests for ClaudeCliRunner sandbox integration."""
 
-from cog.runners.claude_cli import ClaudeCliRunner
+from unittest.mock import AsyncMock, patch
+
+from cog.runners.claude_cli import _STREAM_LINE_LIMIT_BYTES, ClaudeCliRunner
 from tests.test_runners.helpers import RecordingSandbox, fixture_proc, patch_exec
 
 
@@ -57,3 +59,16 @@ async def test_prepare_called_each_stream_invocation():
         async for _ in runner.stream("second", model="claude-sonnet-4-5"):
             pass
     assert sandbox.prepare_calls == 2
+
+
+async def test_create_subprocess_exec_is_called_with_limit_kwarg():
+    sandbox = RecordingSandbox()
+    proc = fixture_proc("happy.jsonl")
+    runner = ClaudeCliRunner(sandbox)
+    mock = AsyncMock(return_value=proc)
+    with patch("cog.runners.claude_cli.asyncio.create_subprocess_exec", new=mock):
+        async for _ in runner.stream("hello", model="claude-sonnet-4-5"):
+            pass
+    _, kwargs = mock.call_args
+    assert "limit" in kwargs
+    assert kwargs["limit"] == _STREAM_LINE_LIMIT_BYTES
