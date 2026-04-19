@@ -54,6 +54,7 @@ async def test_pre_stages_git_operations_in_order() -> None:
         patch("cog.workflows.ralph.git.checkout_branch", new=_checkout),
         patch("cog.workflows.ralph.git.fetch_origin", new=_fetch),
         patch("cog.workflows.ralph.git.merge_ff_only", new=_merge),
+        patch("cog.workflows.ralph.git.branch_exists", AsyncMock(return_value=False)),
         patch("cog.workflows.ralph.git.create_branch", new=_create),
     ):
         await wf.pre_stages(ctx)
@@ -77,6 +78,7 @@ async def test_pre_stages_sets_ctx_work_branch() -> None:
         patch("cog.workflows.ralph.git.checkout_branch", AsyncMock()),
         patch("cog.workflows.ralph.git.fetch_origin", AsyncMock()),
         patch("cog.workflows.ralph.git.merge_ff_only", AsyncMock()),
+        patch("cog.workflows.ralph.git.branch_exists", AsyncMock(return_value=False)),
         patch("cog.workflows.ralph.git.create_branch", AsyncMock()),
     ):
         await wf.pre_stages(ctx)
@@ -94,6 +96,7 @@ async def test_pre_stages_branch_name_format() -> None:
         patch("cog.workflows.ralph.git.checkout_branch", AsyncMock()),
         patch("cog.workflows.ralph.git.fetch_origin", AsyncMock()),
         patch("cog.workflows.ralph.git.merge_ff_only", AsyncMock()),
+        patch("cog.workflows.ralph.git.branch_exists", AsyncMock(return_value=False)),
         patch("cog.workflows.ralph.git.create_branch", AsyncMock()) as mock_create,
     ):
         await wf.pre_stages(ctx)
@@ -116,6 +119,7 @@ async def test_pre_stages_propagates_git_error_from_fetch() -> None:
             AsyncMock(side_effect=GitError("fetch failed")),
         ),
         patch("cog.workflows.ralph.git.merge_ff_only", AsyncMock()),
+        patch("cog.workflows.ralph.git.branch_exists", AsyncMock(return_value=False)),
         patch("cog.workflows.ralph.git.create_branch", AsyncMock()),
     ):
         with pytest.raises(GitError, match="fetch failed"):
@@ -132,6 +136,7 @@ async def test_pre_stages_propagates_git_error_from_merge() -> None:
         patch("cog.workflows.ralph.git.checkout_branch", AsyncMock()),
         patch("cog.workflows.ralph.git.fetch_origin", AsyncMock()),
         patch("cog.workflows.ralph.git.merge_ff_only", AsyncMock(side_effect=GitError("not ff"))),
+        patch("cog.workflows.ralph.git.branch_exists", AsyncMock(return_value=False)),
         patch("cog.workflows.ralph.git.create_branch", AsyncMock()),
     ):
         with pytest.raises(GitError, match="not ff"):
@@ -148,6 +153,7 @@ async def test_pre_stages_propagates_git_error_from_create_branch() -> None:
         patch("cog.workflows.ralph.git.checkout_branch", AsyncMock()),
         patch("cog.workflows.ralph.git.fetch_origin", AsyncMock()),
         patch("cog.workflows.ralph.git.merge_ff_only", AsyncMock()),
+        patch("cog.workflows.ralph.git.branch_exists", AsyncMock(return_value=False)),
         patch(
             "cog.workflows.ralph.git.create_branch",
             AsyncMock(side_effect=GitError("branch already exists")),

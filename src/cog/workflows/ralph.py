@@ -99,11 +99,15 @@ class RalphWorkflow(Workflow):
         runner: AgentRunner,
         tracker: IssueTracker,
         host: GitHost | None = None,
+        *,
+        restart: bool = False,
     ) -> None:
         self._runner = runner
         self._tracker = tracker
         self._host = host
+        self._restart = restart
         self._processed_this_loop: set[tuple[str, str]] = set()
+        self._resumed_this_iteration: dict[str, bool] = {}
 
     async def select_item(self, ctx: ExecutionContext) -> Item | None:
         items = await self._tracker.list_by_label("agent-ready", assignee="@me")
@@ -178,8 +182,21 @@ class RalphWorkflow(Workflow):
         await git.fetch_origin(ctx.project_dir)
         await git.merge_ff_only(ctx.project_dir, f"origin/{default}")
         work_branch = f"cog/{ctx.item.item_id}-{_slugify(ctx.item.title)}"
-        await git.create_branch(ctx.project_dir, work_branch, start_point="HEAD")
+
+        resumed = False
+        if await git.branch_exists(ctx.project_dir, work_branch):
+            ahead = await git.commits_between(ctx.project_dir, default, work_branch)
+            if ahead == 0 or self._restart:
+                await git.delete_branch(ctx.project_dir, work_branch)
+                await git.create_branch(ctx.project_dir, work_branch, start_point="HEAD")
+            else:
+                await git.checkout_branch(ctx.project_dir, work_branch)
+                resumed = True
+        else:
+            await git.create_branch(ctx.project_dir, work_branch, start_point="HEAD")
+
         ctx.work_branch = work_branch
+        self._resumed_this_iteration[ctx.item.item_id] = resumed
 
     def stages(self, ctx: ExecutionContext) -> list[Stage]:
         return [
@@ -235,6 +252,10 @@ class RalphWorkflow(Workflow):
 
         await self._tracker.comment(ctx.item, f"🤖 Cog opened a PR for this: {pr.url}")
         await self._tracker.remove_label(ctx.item, "agent-ready")
+        try:
+            await self._tracker.remove_label(ctx.item, "agent-failed")
+        except TrackerError:
+            pass
         ctx.state_cache.mark_processed(ctx.item, "success")
         ctx.state_cache.save()
         await self._write_telemetry(ctx, results, "success", pr_url=pr.url)
@@ -263,6 +284,10 @@ class RalphWorkflow(Workflow):
         )
         await self._tracker.add_label(ctx.item, "agent-abandoned")
         await self._tracker.remove_label(ctx.item, "agent-ready")
+        try:
+            await self._tracker.remove_label(ctx.item, "agent-failed")
+        except TrackerError:
+            pass
         ctx.state_cache.mark_processed(ctx.item, "no-op")
         ctx.state_cache.save()
         await self._write_telemetry(ctx, results, "no-op")
@@ -295,8 +320,14 @@ class RalphWorkflow(Workflow):
                 f"warning: failed to comment error on #{ctx.item.item_id}",
                 file=sys.stderr,
             )
-        # KEEP agent-ready label — user fixes infra, ralph retries next run.
+        # KEEP agent-ready label — item stays eligible for resume.
         # Don't mark processed — item stays eligible.
+        await self._tracker.ensure_label(
+            "agent-failed",
+            color="d93f0b",
+            description="Cog attempted this and hit an error; retry is still eligible",
+        )
+        await self._tracker.add_label(ctx.item, "agent-failed")
         await self._write_telemetry(ctx, results, "error", error=error)
         await self.write_report(ctx, results, "error", error=error)
 
@@ -414,12 +445,14 @@ class RalphWorkflow(Workflow):
                 f"warning: failed to comment push-fail on #{ctx.item.item_id}",
                 file=sys.stderr,
             )
-        try:
-            await self._tracker.remove_label(ctx.item, "agent-ready")
-        except Exception:
-            pass
-        # Don't mark processed — local commits exist; next run either reuses the
-        # branch (v1.1 orphan-resume) or fails cleanly on create_branch (v1).
+        # KEEP agent-ready — next run will resume + retry push.
+        # Don't mark processed — local commits exist; resume path handles it.
+        await self._tracker.ensure_label(
+            "agent-failed",
+            color="d93f0b",
+            description="Cog attempted this and hit an error; retry is still eligible",
+        )
+        await self._tracker.add_label(ctx.item, "agent-failed")
         await self._write_telemetry(ctx, results, "push-failed", error=error)
         await self.write_report(ctx, results, "error", error=error)
 
@@ -440,6 +473,7 @@ class RalphWorkflow(Workflow):
                 cause_class = type(error.cause).__name__
         if ctx.telemetry is None:
             return
+        resumed = self._resumed_this_iteration.get(ctx.item.item_id, False)  # type: ignore[union-attr]
         record = TelemetryRecord.build(
             project=project_slug(ctx.project_dir),
             workflow=self.name,
@@ -451,5 +485,6 @@ class RalphWorkflow(Workflow):
             duration_seconds=sum(r.duration_seconds for r in results),
             error=error_str,
             cause_class=cause_class,
+            resumed=resumed,
         )
         await ctx.telemetry.write(record)

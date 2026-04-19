@@ -7,12 +7,14 @@ import pytest
 
 from cog.core.errors import GitError
 from cog.git import (
+    branch_exists,
     checkout_branch,
     commits_between,
     create_branch,
     current_branch,
     current_head_sha,
     default_branch,
+    delete_branch,
     fetch_origin,
     merge_ff_only,
 )
@@ -157,3 +159,34 @@ async def test_create_branch_raises_when_exists(tmp_path: Path) -> None:
     with _patch_exec(registry):
         with pytest.raises(GitError):
             await create_branch(tmp_path, "cog/42-my-branch")
+
+
+async def test_branch_exists_returns_true_when_present(tmp_path: Path) -> None:
+    registry = FakeSubprocessRegistry()
+    registry.expect(
+        ("git", "rev-parse", "--verify", "refs/heads/cog/42-my-branch"),
+        stdout=b"abc1234\n",
+    )
+    with _patch_exec(registry):
+        result = await branch_exists(tmp_path, "cog/42-my-branch")
+    assert result is True
+
+
+async def test_branch_exists_returns_false_when_absent(tmp_path: Path) -> None:
+    registry = FakeSubprocessRegistry()
+    registry.expect(
+        ("git", "rev-parse", "--verify", "refs/heads/cog/42-my-branch"),
+        returncode=128,
+        stderr=b"fatal: Needed a single revision\n",
+    )
+    with _patch_exec(registry):
+        result = await branch_exists(tmp_path, "cog/42-my-branch")
+    assert result is False
+
+
+async def test_delete_branch_removes_branch(tmp_path: Path) -> None:
+    registry = FakeSubprocessRegistry()
+    registry.expect(("git", "branch", "-D", "cog/42-my-branch"), stdout=b"")
+    with _patch_exec(registry):
+        await delete_branch(tmp_path, "cog/42-my-branch")
+    assert ("git", "branch", "-D", "cog/42-my-branch") in registry.calls

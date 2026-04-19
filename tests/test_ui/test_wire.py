@@ -386,3 +386,37 @@ async def test_build_run_screen_sets_ctx_app_for_textual_workflows(tmp_path: Pat
         await run_textual(wf, ctx, loop=False, tracker=None)
 
     assert ctx.app is not None
+
+
+async def test_build_and_run_forwards_restart_to_workflow_constructor(tmp_path: Path) -> None:
+    from cog.ui.wire import build_and_run
+
+    captured_workflow: list = []
+
+    async def _run_headless(workflow, ctx, *, loop, max_iterations=None):
+        captured_workflow.append(workflow)
+        return 0
+
+    patches = _patched_wire_context(tmp_path)
+    with (
+        patches[0],
+        patches[1],
+        patches[2],
+        patches[3],
+        patches[4],
+        patches[5],
+        patches[6],
+        patches[7],
+        patch("cog.ui.wire.run_headless", _run_headless),
+    ):
+        await build_and_run(
+            _FakeWorkflow,  # type: ignore[arg-type]
+            tmp_path,
+            item_id=None,
+            loop=False,
+            headless=True,
+            restart=True,
+        )
+
+    assert len(captured_workflow) == 1
+    assert captured_workflow[0]._kwargs.get("restart") is True

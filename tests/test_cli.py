@@ -162,6 +162,36 @@ def test_cog_ralph_keyboard_interrupt_exits_130(monkeypatch, tmp_path):
     assert "aborted." in result.output or "aborted." in (result.stderr or "")
 
 
+# --- ralph --restart flag ---
+
+
+def test_cog_ralph_restart_flag_forwards_to_build_and_run(monkeypatch, tmp_path):
+    calls: list[dict] = []
+
+    async def fake_build_and_run(*args: Any, **kwargs: Any) -> int:
+        calls.append({"args": args, **kwargs})
+        return 0
+
+    monkeypatch.setattr("cog.cli.build_and_run", fake_build_and_run)
+    result = runner.invoke(app, ["ralph", "--project-dir", str(tmp_path), "--restart"])
+    assert result.exit_code == 0
+    assert len(calls) == 1
+    assert calls[0]["restart"] is True
+
+
+def test_cog_ralph_without_restart_defaults_to_false(monkeypatch, tmp_path):
+    calls: list[dict] = []
+
+    async def fake_build_and_run(*args: Any, **kwargs: Any) -> int:
+        calls.append({"args": args, **kwargs})
+        return 0
+
+    monkeypatch.setattr("cog.cli.build_and_run", fake_build_and_run)
+    result = runner.invoke(app, ["ralph", "--project-dir", str(tmp_path)])
+    assert result.exit_code == 0
+    assert calls[0]["restart"] is False
+
+
 # --- refine subcommand ---
 
 
