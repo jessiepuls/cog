@@ -61,6 +61,43 @@ has been observed to hang indefinitely. To avoid this:
   `head -c 30000` or equivalent defensively.
 - Prefer per-file inspection via `Read <file>` over broad shell expansions.
 
+## Testing and linting cadence
+
+Tool calls inside the sandbox are expensive. Each test-suite or type-check
+invocation typically rebuilds the project's dependency environment
+(~30-60s cold) before running the tool itself. Running these after every
+small edit adds up fast and dominates iteration wall-clock.
+
+Default cadence:
+
+- **During iteration**: run only the test file(s) affected by your
+  current change. Pass a specific test file (not the whole suite) to
+  the project's test runner. Fail-fast flags (e.g., `-x` for pytest,
+  `-failfast` for go test, equivalents elsewhere) help you see the
+  first error quickly.
+- **After you have all intended changes complete**: run the full test
+  suite and any additional verification (type checker, linter) once
+  each to confirm.
+- **Type checkers**: run once at the end, not after every edit.
+- **Linters / formatters**: run once at the end. They're fast but
+  routinely produce auto-fixable nits that don't affect your logic.
+
+Full-suite and type-check runs during iteration should be the exception,
+not the routine. If an unexpected test starts failing after a final
+full-suite run, expand back to targeted runs to isolate.
+
+Consult the project's CLAUDE.md for the specific commands (test runner,
+type checker, linter) this project uses. If CLAUDE.md doesn't list them,
+infer from the project's config files (pyproject.toml, package.json,
+go.mod, etc.).
+
+## Commit discipline
+
+Commit once your intended change passes the full suite, not after each
+fix within an iteration. Multiple commits within one iteration are fine
+only if they represent distinct logical moves (e.g., "refactor X" then
+"add feature Y"), not "fix first typo, fix second typo."
+
 ## Final message format
 
 End your final message with three structured sections in this order:
