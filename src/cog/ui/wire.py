@@ -3,6 +3,7 @@
 import sys
 import tempfile
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from cog.core.context import ExecutionContext
 from cog.core.preflight import PreflightResult, print_results, run_checks
@@ -14,6 +15,55 @@ from cog.state import JsonFileStateCache
 from cog.state_paths import project_state_dir
 from cog.telemetry import TelemetryWriter
 from cog.trackers.github import GitHubIssueTracker
+
+if TYPE_CHECKING:
+    from textual.app import App
+
+    from cog.ui.screens.run import RunScreen
+
+
+async def build_run_screen(
+    workflow_cls: type[Workflow],
+    project_dir: Path,
+    app: "App",
+    *,
+    item_id: int | None = None,
+) -> "RunScreen":
+    """Assemble the full dep stack and return a RunScreen.
+
+    Does NOT run preflight — caller handles that separately.
+    """
+    sandbox = DockerSandbox()
+    runner = ClaudeCliRunner(sandbox)
+    tracker = GitHubIssueTracker(project_dir)
+    state_dir = project_state_dir(project_dir)
+    cache = JsonFileStateCache(state_dir / "state.json")
+    cache.load()
+    from cog.hosts.github import GitHubGitHost
+
+    host = GitHubGitHost(project_dir)
+    if cache.was_corrupt() or cache.is_empty():
+        await cache.recover_from_remote(tracker, host, workflow_cls.queue_label)
+    telemetry = TelemetryWriter(state_dir)
+    workflow = workflow_cls(runner=runner, tracker=tracker, host=host)  # type: ignore[call-arg]
+    tmp_dir = Path(tempfile.mkdtemp(prefix="cog-"))
+    ctx = ExecutionContext(
+        project_dir=project_dir,
+        tmp_dir=tmp_dir,
+        state_cache=cache,
+        headless=False,
+        telemetry=telemetry,
+    )
+    ctx.app = app
+    if item_id is not None:
+        ctx.item = await tracker.get(str(item_id))
+    if workflow_cls.needs_item_picker and ctx.item is None:
+        from cog.ui.picker import TextualItemPicker
+
+        ctx.item_picker = TextualItemPicker(app, tracker)
+    from cog.ui.screens.run import RunScreen
+
+    return RunScreen(workflow, ctx, loop=False, max_iterations=1)
 
 
 async def build_and_run(

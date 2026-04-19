@@ -420,3 +420,189 @@ async def test_build_and_run_forwards_restart_to_workflow_constructor(tmp_path: 
 
     assert len(captured_workflow) == 1
     assert captured_workflow[0]._kwargs.get("restart") is True
+
+
+# ---------------------------------------------------------------------------
+# build_run_screen tests
+# ---------------------------------------------------------------------------
+
+
+def _patched_build_run_screen_context(tmp_path: Path):
+    """Patch all external I/O for build_run_screen (no preflight)."""
+    cache_mock = MagicMock()
+    cache_mock.was_corrupt.return_value = False
+    cache_mock.is_empty.return_value = False
+    return (
+        patch("cog.ui.wire.DockerSandbox", return_value=MagicMock()),
+        patch("cog.ui.wire.ClaudeCliRunner", return_value=MagicMock()),
+        patch("cog.ui.wire.GitHubIssueTracker", return_value=MagicMock()),
+        patch("cog.ui.wire.JsonFileStateCache", return_value=cache_mock),
+        patch("cog.ui.wire.TelemetryWriter"),
+        patch("cog.ui.wire.project_state_dir", return_value=tmp_path / ".cog"),
+        patch("cog.hosts.github.GitHubGitHost", return_value=MagicMock()),
+    )
+
+
+async def test_build_run_screen_returns_run_screen_with_pre_set_item_when_item_id_given(
+    tmp_path: Path,
+) -> None:
+    from datetime import UTC, datetime
+
+    from cog.core.item import Item
+    from cog.ui.screens.run import RunScreen
+    from cog.ui.wire import build_run_screen
+
+    fake_item = Item(
+        tracker_id="gh",
+        item_id="7",
+        title="t",
+        body="",
+        labels=(),
+        comments=(),
+        state="open",
+        created_at=datetime.now(UTC),
+        updated_at=datetime.now(UTC),
+        url="",
+    )
+    fake_tracker = AsyncMock()
+    fake_tracker.get = AsyncMock(return_value=fake_item)
+    fake_app = MagicMock()
+
+    patches = _patched_build_run_screen_context(tmp_path)
+    with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5], patches[6]:
+        with patch("cog.ui.wire.GitHubIssueTracker", return_value=fake_tracker):
+            screen = await build_run_screen(
+                _FakeWorkflow,  # type: ignore[arg-type]
+                tmp_path,
+                fake_app,
+                item_id=7,
+            )
+
+    assert isinstance(screen, RunScreen)
+    assert screen._base_ctx.item == fake_item
+
+
+async def test_build_run_screen_omits_item_picker_when_workflow_does_not_need_one(
+    tmp_path: Path,
+) -> None:
+    from cog.ui.wire import build_run_screen
+
+    fake_app = MagicMock()
+    patches = _patched_build_run_screen_context(tmp_path)
+    with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5], patches[6]:
+        screen = await build_run_screen(
+            _FakeWorkflow,  # type: ignore[arg-type]
+            tmp_path,
+            fake_app,
+        )
+
+    assert screen._base_ctx.item_picker is None
+
+
+async def test_build_run_screen_injects_item_picker_when_workflow_needs_one_and_no_preset_item(
+    tmp_path: Path,
+) -> None:
+    from cog.ui.picker import TextualItemPicker
+    from cog.ui.wire import build_run_screen
+
+    fake_app = MagicMock()
+    patches = _patched_build_run_screen_context(tmp_path)
+    with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5], patches[6]:
+        screen = await build_run_screen(
+            _NeedsPickerWorkflow,  # type: ignore[arg-type]
+            tmp_path,
+            fake_app,
+        )
+
+    assert isinstance(screen._base_ctx.item_picker, TextualItemPicker)
+
+
+async def test_build_run_screen_skips_item_picker_when_item_id_given(tmp_path: Path) -> None:
+    from datetime import UTC, datetime
+
+    from cog.core.item import Item
+    from cog.ui.wire import build_run_screen
+
+    fake_item = Item(
+        tracker_id="gh",
+        item_id="9",
+        title="t",
+        body="",
+        labels=(),
+        comments=(),
+        state="open",
+        created_at=datetime.now(UTC),
+        updated_at=datetime.now(UTC),
+        url="",
+    )
+    fake_tracker = AsyncMock()
+    fake_tracker.get = AsyncMock(return_value=fake_item)
+    fake_app = MagicMock()
+
+    patches = _patched_build_run_screen_context(tmp_path)
+    with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5], patches[6]:
+        with patch("cog.ui.wire.GitHubIssueTracker", return_value=fake_tracker):
+            screen = await build_run_screen(
+                _NeedsPickerWorkflow,  # type: ignore[arg-type]
+                tmp_path,
+                fake_app,
+                item_id=9,
+            )
+
+    assert screen._base_ctx.item_picker is None
+    assert screen._base_ctx.item == fake_item
+
+
+async def test_build_run_screen_context_has_fresh_tmp_dir(tmp_path: Path) -> None:
+    from cog.ui.wire import build_run_screen
+
+    fake_app = MagicMock()
+    patches = _patched_build_run_screen_context(tmp_path)
+    with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5], patches[6]:
+        screen = await build_run_screen(
+            _FakeWorkflow,  # type: ignore[arg-type]
+            tmp_path,
+            fake_app,
+        )
+
+    assert screen._base_ctx.tmp_dir.exists()
+    assert screen._base_ctx.tmp_dir != tmp_path
+
+
+async def test_build_run_screen_binds_item_picker_to_provided_app(tmp_path: Path) -> None:
+    from cog.ui.picker import TextualItemPicker
+    from cog.ui.wire import build_run_screen
+
+    fake_app = MagicMock()
+    patches = _patched_build_run_screen_context(tmp_path)
+    with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5], patches[6]:
+        screen = await build_run_screen(
+            _NeedsPickerWorkflow,  # type: ignore[arg-type]
+            tmp_path,
+            fake_app,
+        )
+
+    picker = screen._base_ctx.item_picker
+    assert isinstance(picker, TextualItemPicker)
+    assert picker._app is fake_app
+
+
+async def test_build_and_run_still_runs_preflight_before_app_starts(tmp_path: Path) -> None:
+    """Regression: subcommand path must still run preflight before launching the app."""
+    from cog.ui.wire import build_and_run
+
+    run_checks_mock = AsyncMock(return_value=[_error_result()])
+    with (
+        patch("cog.ui.wire.run_checks", run_checks_mock),
+        patch("cog.ui.wire.print_results"),
+    ):
+        code = await build_and_run(
+            _FakeWorkflow,  # type: ignore[arg-type]
+            tmp_path,
+            item_id=None,
+            loop=False,
+            headless=False,
+        )
+
+    assert code == 1
+    run_checks_mock.assert_awaited_once()

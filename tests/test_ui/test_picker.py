@@ -198,3 +198,24 @@ async def test_picker_screen_selecting_other_pushes_input_screen():
         await _set_input_value(pilot, "#other-input", "55")
         await pilot.press("enter")
     assert app.result == expected
+
+
+async def test_picker_screen_shows_empty_queue_hint_when_no_items():
+    tracker = AsyncMock(spec=IssueTracker)
+    screen = PickerScreen([], tracker)
+    app = _PickerApp(screen)
+    async with app.run_test() as _:
+        list_view = app.query_one("#picker-list")
+        labels = [str(child.query_one(Label).renderable) for child in list_view.children]
+        assert any("No items in queue" in lbl for lbl in labels)
+
+
+async def test_picker_screen_empty_row_is_disabled():
+    tracker = AsyncMock(spec=IssueTracker)
+    screen = PickerScreen([], tracker)
+    app = _PickerApp(screen)
+    async with app.run_test() as _:
+        list_view = app.query_one("#picker-list")
+        empty_row = list_view.get_child_by_id("pick-empty")
+        assert empty_row is not None
+        assert empty_row.disabled is True

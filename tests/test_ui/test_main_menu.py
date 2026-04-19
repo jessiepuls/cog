@@ -2,7 +2,7 @@
 
 from datetime import UTC, datetime
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from textual.app import App, ComposeResult
 from textual.widgets import ListView
@@ -31,8 +31,10 @@ def _item(n: int) -> Item:
 class _FakeTracker:
     def __init__(self, items: list[Item] | None = None) -> None:
         self._items = items or []
+        self.list_by_label_calls: list[tuple[str, str | None]] = []
 
     async def list_by_label(self, label: str, *, assignee: str | None = None) -> list[Item]:
+        self.list_by_label_calls.append((label, assignee))
         return self._items
 
     async def get(self, item_id: str) -> Item:  # pragma: no cover
@@ -125,9 +127,7 @@ async def test_main_menu_q_quits() -> None:
 
 
 def test_main_menu_uses_populated_workflow_registry() -> None:
-    # Regression guard: MainMenuScreen imports WORKFLOWS from the real registry
-    # (cog.workflows), not a stale empty one. A silently-wrong import path renders
-    # an empty menu even when concrete workflows are registered.
+    # Regression guard: MainMenuScreen imports WORKFLOWS from the real registry.
     from cog.ui.screens import main_menu
     from cog.workflows import WORKFLOWS as registry
     from cog.workflows import RalphWorkflow
@@ -136,37 +136,153 @@ def test_main_menu_uses_populated_workflow_registry() -> None:
     assert RalphWorkflow in main_menu.WORKFLOWS
 
 
-async def test_main_menu_enter_pushes_run_screen() -> None:
-    from textual.screen import Screen
-
-    pushed: list[Screen] = []
-
-    class _Sentinel(Screen):
-        def compose(self) -> ComposeResult:
-            return iter([])
-
-    def _factory(cls: type[Workflow]) -> Screen:
-        s = _Sentinel()
-        pushed.append(s)
-        return s
-
+async def test_main_menu_refreshes_counts_on_screen_resume() -> None:
     tracker = _FakeTracker(items=[_item(1)])
+    initial_calls = [0]
+
     with patch("cog.ui.screens.main_menu.WORKFLOWS", [_FakeWorkflow]):
-        screen = MainMenuScreen(Path("/tmp"), tracker, run_screen_factory=_factory)  # noqa: S108
-
-        class _TestApp(App):
-            def compose(self) -> ComposeResult:
-                return iter([])
-
-            def on_mount(self) -> None:
-                self.push_screen(screen)
-
-        async with _TestApp().run_test(headless=True) as pilot:
+        async with _make_app(tracker).run_test(headless=True) as pilot:
             await pilot.pause()
-            # Ensure the ListView is focused so Enter triggers action_select_cursor
+            initial_calls[0] = len(tracker.list_by_label_calls)
+
+            # Push a dummy screen then pop it to trigger on_screen_resume
+            from textual.screen import Screen as TScreen
+
+            class _Dummy(TScreen):
+                def compose(self) -> ComposeResult:
+                    return iter([])
+
+            await pilot.app.push_screen(_Dummy())
+            await pilot.pause()
+            pilot.app.pop_screen()
+            await pilot.pause()
+
+    assert len(tracker.list_by_label_calls) > initial_calls[0]
+
+
+async def test_main_menu_r_key_refreshes_counts() -> None:
+    tracker = _FakeTracker(items=[_item(1)])
+
+    with patch("cog.ui.screens.main_menu.WORKFLOWS", [_FakeWorkflow]):
+        async with _make_app(tracker).run_test(headless=True) as pilot:
+            await pilot.pause()
+            before = len(tracker.list_by_label_calls)
+            await pilot.press("r")
+            await pilot.pause()
+
+    assert len(tracker.list_by_label_calls) > before
+
+
+async def test_main_menu_selection_pushes_preflight_then_picker_then_run_screen() -> None:
+    fake_item = _item(1)
+    fake_run_screen = MagicMock()
+    push_order: list[str] = []
+
+    class _SentinelPreflight:
+        pass
+
+    class _SentinelPicker:
+        pass
+
+    async def fake_push_screen_wait(screen):
+        push_order.append(type(screen).__name__)
+        if isinstance(screen, _SentinelPreflight):
+            return True
+        return fake_item
+
+    async def fake_push_screen(screen):
+        push_order.append(type(screen).__name__)
+
+    tracker = _FakeTracker(items=[fake_item])
+    with (
+        patch("cog.ui.screens.main_menu.WORKFLOWS", [_FakeWorkflow]),
+        patch("cog.ui.preflight.PreflightScreen", return_value=_SentinelPreflight()),
+        patch("cog.ui.picker.PickerScreen", return_value=_SentinelPicker()),
+        patch("cog.ui.wire.build_run_screen", new=AsyncMock(return_value=fake_run_screen)),
+    ):
+        async with _make_app(tracker).run_test(headless=True) as pilot:
+            pilot.app.push_screen_wait = fake_push_screen_wait  # type: ignore[method-assign]
+            pilot.app.push_screen = fake_push_screen  # type: ignore[method-assign]
+            await pilot.pause()
             list_view = pilot.app.query_one("#workflows", ListView)
             list_view.focus()
             await pilot.pause()
             await pilot.press("enter")
             await pilot.pause()
-            assert len(pushed) == 1
+
+    assert "_SentinelPreflight" in push_order
+    assert "_SentinelPicker" in push_order
+    assert "MagicMock" in push_order
+
+
+async def test_main_menu_preflight_fails_does_not_show_picker() -> None:
+    fake_item = _item(1)
+    picker_shown = [False]
+
+    class _SentinelPreflight:
+        pass
+
+    class _SentinelPicker:
+        pass
+
+    async def fake_push_screen_wait(screen):
+        if isinstance(screen, _SentinelPreflight):
+            return False  # preflight failed
+        picker_shown[0] = True
+        return fake_item
+
+    tracker = _FakeTracker(items=[fake_item])
+    with (
+        patch("cog.ui.screens.main_menu.WORKFLOWS", [_FakeWorkflow]),
+        patch("cog.ui.preflight.PreflightScreen", return_value=_SentinelPreflight()),
+        patch("cog.ui.picker.PickerScreen", return_value=_SentinelPicker()),
+        patch("cog.ui.wire.build_run_screen", new=AsyncMock(return_value=MagicMock())),
+    ):
+        async with _make_app(tracker).run_test(headless=True) as pilot:
+            pilot.app.push_screen_wait = fake_push_screen_wait  # type: ignore[method-assign]
+            await pilot.pause()
+            list_view = pilot.app.query_one("#workflows", ListView)
+            list_view.focus()
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause()
+
+    assert not picker_shown[0]
+
+
+async def test_main_menu_picker_cancel_does_not_push_run_screen() -> None:
+    fake_item = _item(1)
+    run_screen_pushed = [False]
+
+    class _SentinelPreflight:
+        pass
+
+    class _SentinelPicker:
+        pass
+
+    async def fake_push_screen_wait(screen):
+        if isinstance(screen, _SentinelPreflight):
+            return True
+        return None  # picker cancelled
+
+    async def fake_push_screen(screen):
+        run_screen_pushed[0] = True
+
+    tracker = _FakeTracker(items=[fake_item])
+    with (
+        patch("cog.ui.screens.main_menu.WORKFLOWS", [_FakeWorkflow]),
+        patch("cog.ui.preflight.PreflightScreen", return_value=_SentinelPreflight()),
+        patch("cog.ui.picker.PickerScreen", return_value=_SentinelPicker()),
+        patch("cog.ui.wire.build_run_screen", new=AsyncMock(return_value=MagicMock())),
+    ):
+        async with _make_app(tracker).run_test(headless=True) as pilot:
+            pilot.app.push_screen_wait = fake_push_screen_wait  # type: ignore[method-assign]
+            pilot.app.push_screen = fake_push_screen  # type: ignore[method-assign]
+            await pilot.pause()
+            list_view = pilot.app.query_one("#workflows", ListView)
+            list_view.focus()
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause()
+
+    assert not run_screen_pushed[0]

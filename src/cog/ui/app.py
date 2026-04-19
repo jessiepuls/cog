@@ -49,15 +49,5 @@ async def _run_main_menu(project_dir: Path) -> None:
     from cog.ui.screens.main_menu import MainMenuScreen
 
     tracker = GitHubIssueTracker(project_dir)
-
-    def _run_screen_factory(workflow_cls: type[Workflow]) -> Screen:
-        # Assembles the full stack for a main-menu-initiated run.
-        # Full context construction happens in wire.py for real subcommand runs;
-        # here we just sketch the shape — concrete wiring finalizes with #12/#18.
-        raise NotImplementedError(
-            "Main-menu run wiring not yet complete (#12/#18). "
-            "Use `cog ralph` or `cog refine` subcommands instead."
-        )
-
-    app = CogApp(MainMenuScreen(project_dir, tracker, run_screen_factory=_run_screen_factory))
+    app = CogApp(MainMenuScreen(project_dir, tracker))
     await app.run_async()
