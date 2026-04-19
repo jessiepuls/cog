@@ -93,5 +93,5 @@ async def rebase_in_progress(project_dir: Path) -> bool:
 
 
 async def rebase_abort(project_dir: Path) -> None:
-    """`git rebase --abort`. No-op if no rebase in progress."""
+    """`git rebase --abort`. Raises GitError if no rebase is in progress."""
     await _run(["git", "rebase", "--abort"], project_dir)
