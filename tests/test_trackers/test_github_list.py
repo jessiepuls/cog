@@ -6,7 +6,7 @@ from cog.trackers.github import GitHubIssueTracker
 from tests.fakes import FakeSubprocessRegistry
 from tests.test_trackers.conftest import load_fixture, register_repo
 
-LIST_FIELDS = "number,title,body,labels,createdAt,updatedAt,url"
+LIST_FIELDS = "number,title,body,labels,state,createdAt,updatedAt,url"
 LIST_BASE_ARGV = (
     "gh",
     "issue",
@@ -95,7 +95,25 @@ async def test_list_by_label_json_fields(
     json_idx = list(list_call).index("--json")
     field_str = list_call[json_idx + 1]
     fields = set(field_str.split(","))
-    assert fields == {"number", "title", "body", "labels", "createdAt", "updatedAt", "url"}
+    assert fields == {"number", "title", "body", "labels", "state", "createdAt", "updatedAt", "url"}
+
+
+async def test_list_by_label_json_field_list_includes_state(
+    registry: FakeSubprocessRegistry, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    register_repo(registry)
+    registry.expect(LIST_BASE_ARGV, stdout=load_fixture("list_by_label_happy.json"))
+    items = await list_by_label(registry, tmp_path, monkeypatch=monkeypatch)
+    assert all(item.state == "open" for item in items)
+
+
+async def test_list_by_label_state_lowercased(
+    registry: FakeSubprocessRegistry, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    register_repo(registry)
+    registry.expect(LIST_BASE_ARGV, stdout=load_fixture("list_by_label_happy.json"))
+    items = await list_by_label(registry, tmp_path, monkeypatch=monkeypatch)
+    assert all(item.state == item.state.lower() for item in items)
 
 
 async def test_list_by_label_label_normalization(

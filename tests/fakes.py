@@ -57,6 +57,7 @@ def make_item(
     body: str = "",
     labels: tuple[str, ...] = (),
     comments: tuple[Comment, ...] = (),
+    state: str = "open",
     created_at: datetime | None = None,
     updated_at: datetime | None = None,
     url: str = "https://github.com/org/repo/issues/1",
@@ -68,10 +69,17 @@ def make_item(
         body=body,
         labels=labels,
         comments=comments,
+        state=state,
         created_at=created_at or _EPOCH,
         updated_at=updated_at or _EPOCH,
         url=url,
     )
+
+
+def make_item_with_blocker_refs(refs: list[int], *, item_id: str = "1") -> Item:
+    """Construct an Item whose body contains 'blocked by #N' for each ref."""
+    body = " ".join(f"blocked by #{n}" for n in refs)
+    return make_item(item_id=item_id, body=body)
 
 
 @dataclass

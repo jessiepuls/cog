@@ -73,6 +73,7 @@ async def test_build_and_run_preselects_item_when_item_id_given(tmp_path: Path) 
         body="",
         labels=(),
         comments=(),
+        state="open",
         created_at=datetime.now(UTC),
         updated_at=datetime.now(UTC),
         url="",

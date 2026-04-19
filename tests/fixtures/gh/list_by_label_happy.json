@@ -4,6 +4,7 @@
     "title": "Fix login bug",
     "body": "Users can't log in with SSO.",
     "labels": [{"name": "agent-ready", "color": "0075ca", "description": "Ready for agent"}, {"name": "bug", "color": "d73a4a", "description": "Something isn't working"}],
+    "state": "OPEN",
     "createdAt": "2026-04-01T10:00:00Z",
     "updatedAt": "2026-04-10T12:30:00Z",
     "url": "https://github.com/jessiepuls/cog/issues/10"
@@ -13,6 +14,7 @@
     "title": "Add dark mode",
     "body": "Users want a dark theme option.",
     "labels": [{"name": "agent-ready", "color": "0075ca", "description": "Ready for agent"}, {"name": "enhancement", "color": "a2eeef", "description": "New feature or request"}],
+    "state": "OPEN",
     "createdAt": "2026-04-05T08:00:00Z",
     "updatedAt": "2026-04-15T09:00:00Z",
     "url": "https://github.com/jessiepuls/cog/issues/11"
@@ -22,6 +24,7 @@
     "title": "Update dependencies",
     "body": "Several packages are out of date.",
     "labels": [{"name": "agent-ready", "color": "0075ca", "description": "Ready for agent"}],
+    "state": "OPEN",
     "createdAt": "2026-04-08T14:00:00Z",
     "updatedAt": "2026-04-17T16:45:00Z",
     "url": "https://github.com/jessiepuls/cog/issues/12"

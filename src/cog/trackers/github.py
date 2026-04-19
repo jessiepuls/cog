@@ -34,7 +34,7 @@ class GitHubIssueTracker(IssueTracker):
             "--state",
             "open",
             "--json",
-            "number,title,body,labels,createdAt,updatedAt,url",
+            "number,title,body,labels,state,createdAt,updatedAt,url",
         ]
         if assignee is not None:
             args += ["--assignee", assignee]
@@ -148,6 +148,7 @@ class GitHubIssueTracker(IssueTracker):
             body=record["body"] or "",
             labels=tuple(lbl["name"] for lbl in record.get("labels", [])),
             comments=comments,
+            state=(record.get("state") or "open").lower(),
             created_at=datetime.fromisoformat(record["createdAt"].replace("Z", "+00:00")),
             updated_at=datetime.fromisoformat(record["updatedAt"].replace("Z", "+00:00")),
             url=record["url"],

@@ -19,6 +19,7 @@ def _make_item() -> Item:
         body="",
         labels=(),
         comments=(),
+        state="open",
         created_at=datetime.now(UTC),
         updated_at=datetime.now(UTC),
         url="",

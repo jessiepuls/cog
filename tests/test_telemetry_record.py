@@ -18,6 +18,7 @@ def _make_item(item_id: str = "42") -> Item:
         body="",
         labels=(),
         comments=(),
+        state="open",
         created_at=datetime.now(UTC),
         updated_at=datetime.now(UTC),
         url="https://github.com/owner/repo/issues/42",
