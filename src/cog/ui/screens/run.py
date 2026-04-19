@@ -11,7 +11,6 @@ from textual.widgets import Footer, Header, Static
 from textual.worker import Worker
 
 from cog.core.context import ExecutionContext
-from cog.core.outcomes import StageResult
 from cog.core.runner import RunEvent, StageEndEvent
 from cog.core.workflow import StageExecutor, Workflow
 from cog.loop import LoopState, fresh_iteration_context
@@ -121,7 +120,6 @@ class RunScreen(Screen):
                 if not results:
                     self._loop_state.iteration -= 1  # empty-queue probe: don't count
                     break
-                self._loop_state.cumulative_cost_usd += sum(r.cost_usd for r in results)
                 self._refresh_footer()
         except asyncio.CancelledError:
             self._state = "cancelled"
@@ -160,17 +158,13 @@ class RunScreen(Screen):
 
     def _show_loop_summary_panel(self) -> None:
         iterations = self._loop_state.iteration
-        cost = self._loop_state.cumulative_cost_usd
+        cost = self._cumulative_cost
         if self._loop:
             self._set_result_panel(
                 f"[green]✓ Complete[/green] — {iterations} iteration(s), ${cost:.3f}"
             )
         else:
             self._set_result_panel(f"[green]✓ Complete[/green] — ${cost:.3f}")
-
-    def _show_completion_panel(self, results: list[StageResult]) -> None:
-        cost = sum(r.cost_usd for r in results)
-        self._set_result_panel(f"[green]✓ Complete[/green] — ${cost:.3f}")
 
     def _show_error_panel(self, e: Exception) -> None:
         self._set_result_panel(f"[red]✗ Failed:[/red] {e!s}")
