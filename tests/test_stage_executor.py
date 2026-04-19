@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from cog.core.context import ExecutionContext
-from cog.core.errors import GitError, StageError
+from cog.core.errors import GitError, RunnerStalledError, StageError
 from cog.core.item import Item
 from cog.core.outcomes import Outcome, StageResult
 from cog.core.runner import AgentRunner, ResultEvent, RunEvent, RunResult
@@ -240,6 +240,55 @@ async def test_tolerate_failure_nonzero_exit_stores_stage_error_as_error(ctx_fac
     result = await executor._run_stage(stage, ctx_factory())
     assert isinstance(result.error, StageError)
     assert result.exit_status == 2
+
+
+async def test_stage_executor_wraps_runner_stalled_in_stage_error(ctx_factory):
+    stalled = RunnerStalledError(inactivity_seconds=120, last_event_summary="Bash: echo hi")
+
+    class _StalledRunner(AgentRunner):
+        async def stream(self, prompt: str, *, model: str) -> AsyncIterator[RunEvent]:
+            raise stalled
+            yield  # type: ignore[misc]
+
+    wf = _SimpleWorkflow(_StalledRunner())
+    with pytest.raises(StageError) as exc_info:
+        await StageExecutor().run(wf, ctx_factory())
+    assert isinstance(exc_info.value.cause, RunnerStalledError)
+    assert wf.finalize_called == "error"
+
+
+async def test_stalled_error_cause_preserved_through_stage_error(ctx_factory):
+    original = RunnerStalledError(inactivity_seconds=60, last_event_summary="Read: /tmp/x")
+
+    class _StalledRunner(AgentRunner):
+        async def stream(self, prompt: str, *, model: str) -> AsyncIterator[RunEvent]:
+            raise original
+            yield  # type: ignore[misc]
+
+    wf = _SimpleWorkflow(_StalledRunner())
+    with pytest.raises(StageError) as exc_info:
+        await StageExecutor().run(wf, ctx_factory())
+    assert exc_info.value.cause is original
+
+
+async def test_stage_executor_stalled_path_has_exit_minus_one_and_error(ctx_factory):
+    stalled = RunnerStalledError(inactivity_seconds=120)
+
+    class _StalledRunner(AgentRunner):
+        async def stream(self, prompt: str, *, model: str) -> AsyncIterator[RunEvent]:
+            raise stalled
+            yield  # type: ignore[misc]
+
+    stage = Stage(
+        name="s1",
+        prompt_source=lambda _: "hello",
+        model="m",
+        runner=_StalledRunner(),
+        tolerate_failure=True,
+    )
+    result = await StageExecutor()._run_stage(stage, ctx_factory())
+    assert result.exit_status == -1
+    assert result.error is stalled
 
 
 async def test_subsequent_stages_run_after_tolerated_failure(ctx_factory):
