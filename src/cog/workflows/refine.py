@@ -16,7 +16,6 @@ from cog.core.errors import WorkflowError
 from cog.core.item import Item
 from cog.core.outcomes import Outcome, StageResult
 from cog.core.runner import AgentRunner, ResultEvent
-from cog.core.section_extractor import extract_sections
 from cog.core.stage import Stage
 from cog.core.tracker import IssueTracker
 from cog.core.workflow import Workflow
@@ -27,6 +26,18 @@ from cog.ui.widgets.chat_pane import ChatPaneWidget
 _INTERVIEW_COMPLETE = "<<interview-complete>>"
 _SLUG_RE = re.compile(r"[^a-z0-9-]+")
 _COLLAPSE_RE = re.compile(r"-+")
+_SECTION_RE = re.compile(
+    r"^###\s+(Title|Body)\s*\n(.*?)(?=\n###\s|\Z)",
+    re.MULTILINE | re.DOTALL | re.IGNORECASE,
+)
+
+
+def _extract_title_body(message: str) -> dict[str, str]:
+    sections: dict[str, str] = {}
+    for match in _SECTION_RE.finditer(message):
+        key = match.group(1).lower()
+        sections[key] = match.group(2).strip()
+    return sections
 
 
 class InterviewEnd(Enum):
@@ -120,7 +131,7 @@ class RefineWorkflow(Workflow):
         from cog.ui.screens.review import ReviewScreen
 
         rewrite_result = next(r for r in results if r.stage.name == "rewrite")
-        sections = extract_sections(rewrite_result.final_message, ["Title", "Body"])
+        sections = _extract_title_body(rewrite_result.final_message)
         proposed_title = (sections.get("title") or ctx.item.title).strip() or ctx.item.title
         proposed_body = (sections.get("body") or rewrite_result.final_message).strip()
 

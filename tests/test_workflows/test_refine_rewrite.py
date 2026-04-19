@@ -8,8 +8,12 @@ from unittest.mock import AsyncMock
 import pytest
 
 from cog.core.context import ExecutionContext
-from cog.core.section_extractor import extract_sections
-from cog.workflows.refine import InterviewEnd, InterviewTurn, RefineWorkflow
+from cog.workflows.refine import (
+    InterviewEnd,
+    InterviewTurn,
+    RefineWorkflow,
+    _extract_title_body,
+)
 from tests.fakes import InMemoryStateCache, ScriptedRewriteRunner, make_item
 
 
@@ -137,21 +141,21 @@ def test_rewrite_prompt_includes_early_end_block_on_user_end(tmp_path):
 
 def test_extract_title_and_body_from_structured_message():
     message = "### Title\nNew issue title\n\n### Body\nNew body content here."
-    sections = extract_sections(message, ["Title", "Body"])
+    sections = _extract_title_body(message)
     assert sections["title"] == "New issue title"
     assert sections["body"] == "New body content here."
 
 
 def test_extract_body_only_when_title_missing_leaves_title_unchanged():
     message = "### Body\nJust the body."
-    sections = extract_sections(message, ["Title", "Body"])
+    sections = _extract_title_body(message)
     assert "title" not in sections
     assert sections["body"] == "Just the body."
 
 
 def test_extract_body_only_when_no_structured_sections_uses_full_message_as_body():
     message = "No sections here at all."
-    sections = extract_sections(message, ["Title", "Body"])
+    sections = _extract_title_body(message)
     assert not sections
 
 

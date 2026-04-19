@@ -18,7 +18,6 @@ from cog.core.host import GitHost
 from cog.core.item import Item
 from cog.core.outcomes import Outcome, StageResult
 from cog.core.runner import AgentRunner
-from cog.core.section_extractor import extract_sections
 from cog.core.stage import Stage
 from cog.core.tracker import IssueTracker
 from cog.core.workflow import Workflow
@@ -30,8 +29,10 @@ _PRIORITY_RE = re.compile(r"^p(\d+)$")
 _SLUG_RE = re.compile(r"[^a-z0-9-]+")
 _COLLAPSE_RE = re.compile(r"-+")
 _BLOCKER_RE = re.compile(r"\b(?:blocked by|depends on)\s+#(\d+)", re.IGNORECASE)
-
-_RALPH_SECTIONS = ["Summary", "Key changes", "Test plan"]
+_SECTION_RE = re.compile(
+    r"^###\s+(Summary|Key changes|Test plan)\s*\n(.*?)(?=\n###\s|\Z)",
+    re.MULTILINE | re.DOTALL | re.IGNORECASE,
+)
 
 
 def _priority_tier(item: Item) -> int:
@@ -77,7 +78,11 @@ def _make_prompt_source(stage_name: str) -> Callable[[ExecutionContext], str]:
 
 
 def _split_final_message(message: str) -> dict[str, str]:
-    return extract_sections(message, _RALPH_SECTIONS)
+    sections: dict[str, str] = {}
+    for match in _SECTION_RE.finditer(message):
+        key = match.group(1).lower().replace(" ", "_")
+        sections[key] = match.group(2).strip()
+    return sections
 
 
 class RalphWorkflow(Workflow):
