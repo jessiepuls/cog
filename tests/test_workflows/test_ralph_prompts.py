@@ -142,17 +142,13 @@ def test_build_prompt_final_message_format_mentions_wrapper_extraction():
 
 
 def _key_changes_section(content: str) -> str:
-    match = re.search(
-        r"### Key changes\n(.*?)(?=\n### Test plan\b)", content, re.DOTALL
-    )
+    match = re.search(r"### Key changes\n(.*?)(?=\n### Test plan\b)", content, re.DOTALL)
     assert match, "### Key changes section not found in build.md"
     return match.group(1)
 
 
 def _test_plan_section(content: str) -> str:
-    match = re.search(
-        r"### Test plan\n(.*?)(?=\n## |\Z)", content, re.DOTALL
-    )
+    match = re.search(r"### Test plan\n(.*?)(?=\n## |\Z)", content, re.DOTALL)
     assert match, "### Test plan section not found in build.md"
     return match.group(1)
 
@@ -198,7 +194,8 @@ def test_build_prompt_test_plan_lists_change_type_categories():
 
 def test_build_prompt_test_plan_excludes_ci_items_block():
     content = _load_prompt("build")
-    assert "Do not include tool-execution items that CI runs automatically" in _test_plan_section(content)
+    test_plan = _test_plan_section(content)
+    assert "Do not include tool-execution items that CI runs automatically" in test_plan
 
 
 def test_build_prompt_test_plan_ci_exclusion_is_multi_ecosystem():
