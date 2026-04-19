@@ -6,7 +6,7 @@ from pathlib import Path
 
 from textual.app import ComposeResult
 from textual.binding import Binding
-from textual.containers import ScrollableContainer
+from textual.containers import Container, ScrollableContainer
 from textual.screen import ModalScreen
 from textual.widgets import Footer, Header, Static
 
@@ -70,15 +70,18 @@ class ReviewScreen(ModalScreen[ReviewOutcome]):
     def compose(self) -> ComposeResult:
         yield Header()
         yield Static(self._title_strip_text(), id="review-header-strip")
-        yield ScrollableContainer(
-            Static(self._original_body, id="original-body"),
-            id="original-pane",
-            classes="body-pane",
-        )
-        yield ScrollableContainer(
-            Static(self._proposed_body, id="proposed-body"),
-            id="proposed-pane",
-            classes="body-pane",
+        yield Container(
+            ScrollableContainer(
+                Static(self._original_body, id="original-body"),
+                id="original-pane",
+                classes="body-pane",
+            ),
+            ScrollableContainer(
+                Static(self._proposed_body, id="proposed-body"),
+                id="proposed-pane",
+                classes="body-pane",
+            ),
+            id="panes-container",
         )
         yield Footer()
 
@@ -92,14 +95,11 @@ class ReviewScreen(ModalScreen[ReviewOutcome]):
             self._apply_layout(event.size.width)
 
     def _apply_layout(self, width: int) -> None:
-        original = self.query_one("#original-pane")
-        proposed = self.query_one("#proposed-pane")
+        container = self.query_one("#panes-container")
         if width < 100:
-            original.add_class("vertical")
-            proposed.add_class("vertical")
+            container.add_class("vertical")
         else:
-            original.remove_class("vertical")
-            proposed.remove_class("vertical")
+            container.remove_class("vertical")
 
     def _title_strip_text(self) -> str:
         if self._proposed_title == self._original_title:

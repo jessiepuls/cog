@@ -223,5 +223,5 @@ async def test_review_screen_narrow_terminal_stacks_vertically(tmp_path):
     app = _App()
     async with app.run_test(size=(80, 24)) as pilot:
         await pilot.pause()
-        original = screen.query_one("#original-pane")
-        assert "vertical" in original.classes
+        container = screen.query_one("#panes-container")
+        assert "vertical" in container.classes

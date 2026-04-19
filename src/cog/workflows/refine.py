@@ -189,6 +189,24 @@ class RefineWorkflow(Workflow):
             "proposed rewrite. The `needs-refinement` label is preserved; run "
             "`cog refine --item <N>` to try again.",
         )
+
+        if ctx.telemetry is not None and transcript:
+            model = os.environ.get("COG_REFINE_INTERVIEW_MODEL", "claude-sonnet-4-6")
+            interview_stage = self._interview_telemetry_stage(transcript, model)
+            record = TelemetryRecord.build(
+                project=project_slug(ctx.project_dir),
+                workflow=self.name,
+                item=ctx.item,
+                outcome="noop",
+                results=results,
+                extra_stages=(interview_stage,),
+                duration_seconds=(
+                    sum(t.duration_seconds for t in transcript)
+                    + sum(r.duration_seconds for r in results)
+                ),
+            )
+            await ctx.telemetry.write(record)
+
         if review is not None:
             await self._write_report(ctx, results, transcript, review, outcome="noop")
 
