@@ -213,7 +213,7 @@ def test_telemetry_outcome_literal_accepts_rebase_conflict():
         project="p",
         workflow="ralph",
         item=_make_item(),
-        outcome="rebase-conflict",  # type: ignore[arg-type]
+        outcome="rebase-conflict",
         results=[],
         duration_seconds=1.0,
         cause_class="RebaseUnresolvedError",
