@@ -9,6 +9,8 @@ from pathlib import Path
 
 from cog.core.errors import DockerImageBuildError, DockerUnavailableError, SandboxError
 
+_EXPECTED_IMAGE_VERSION = "2"
+
 
 def _read_bundled_dockerfile() -> bytes:
     resource = importlib.resources.files("cog.resources") / "Dockerfile"
@@ -69,7 +71,9 @@ class DockerSandbox:
             self._image,
             "sh",
             "-c",
-            "claude --version && gh --version && jq --version && uv --version",
+            "claude --version && gh --version && jq --version && uv --version "
+            "&& python3 -c 'import sys; assert sys.version_info >= (3, 12), "
+            'f"Python 3.12+ required, got {sys.version_info}"\'',
         )
         await proc.wait()
         if proc.returncode != 0:
@@ -107,12 +111,16 @@ class DockerSandbox:
             "docker",
             "image",
             "inspect",
+            "--format",
+            '{{ index .Config.Labels "cog.image-version" }}',
             self._image,
-            stdout=asyncio.subprocess.DEVNULL,
+            stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.DEVNULL,
         )
-        await proc.wait()
-        return proc.returncode == 0
+        stdout, _ = await proc.communicate()
+        if proc.returncode != 0:
+            return False
+        return stdout.decode().strip() == _EXPECTED_IMAGE_VERSION
 
     async def _run_build(self, dockerfile: str, ctx: str, *, quiet: bool) -> None:
         if quiet:

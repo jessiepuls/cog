@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from cog.core.errors import DockerImageBuildError, DockerUnavailableError, SandboxError
-from cog.runners.docker_sandbox import DockerSandbox
+from cog.runners.docker_sandbox import _EXPECTED_IMAGE_VERSION, DockerSandbox
 
 _PATCH_DOCKERFILE = "cog.runners.docker_sandbox._read_bundled_dockerfile"
 _FAKE_DOCKERFILE = lambda: b"FROM scratch\n"  # noqa: E731
@@ -43,9 +43,10 @@ def _exec_mock(*procs: FakeProc) -> AsyncMock:
 
 def _standard_build_procs(*, image_exists: bool, build_rc: int = 0) -> list[FakeProc]:
     """Ordered procs for one full _ensure_image_built call."""
+    inspect_stdout = f"{_EXPECTED_IMAGE_VERSION}\n".encode() if image_exists else b""
     return [
         FakeProc(0),  # docker info
-        FakeProc(0 if image_exists else 1),  # docker image inspect
+        FakeProc(0 if image_exists else 1, inspect_stdout),  # docker image inspect
         FakeProc(build_rc),  # docker build
     ]
 
@@ -146,7 +147,10 @@ async def test_cached_build_uses_quiet_mode(
 
     async def tracking_exec(*args: str, **kwargs: Any) -> FakeProc:
         captured.append(args)
-        return FakeProc(0, b'{"t":"x"}')  # image exists → quiet build
+        # image inspect returns matching version label → image exists → quiet build
+        if len(args) > 2 and args[1] == "image" and args[2] == "inspect":
+            return FakeProc(0, f"{_EXPECTED_IMAGE_VERSION}\n".encode())
+        return FakeProc(0, b'{"t":"x"}')
 
     with (
         _patch_which(),
@@ -501,3 +505,50 @@ async def test_docker_build_fail_raises(tmp_path: Path, monkeypatch: pytest.Monk
         sandbox = DockerSandbox()
         with pytest.raises(DockerImageBuildError):
             await sandbox.prepare()
+
+
+# ---------------------------------------------------------------------------
+# _image_exists label check
+# ---------------------------------------------------------------------------
+
+
+async def test_image_exists_returns_true_when_label_matches_expected_version() -> None:
+    with _patch_exec(FakeProc(0, f"{_EXPECTED_IMAGE_VERSION}\n".encode())):
+        sandbox = DockerSandbox()
+        assert await sandbox._image_exists() is True
+
+
+async def test_image_exists_returns_false_when_label_mismatches() -> None:
+    with _patch_exec(FakeProc(0, b"1\n")):
+        sandbox = DockerSandbox()
+        assert await sandbox._image_exists() is False
+
+
+async def test_image_exists_returns_false_when_label_absent() -> None:
+    with _patch_exec(FakeProc(0, b"\n")):
+        sandbox = DockerSandbox()
+        assert await sandbox._image_exists() is False
+
+
+async def test_image_exists_returns_false_when_tag_not_found() -> None:
+    with _patch_exec(FakeProc(1)):
+        sandbox = DockerSandbox()
+        assert await sandbox._image_exists() is False
+
+
+async def test_smoke_test_includes_python_version_check() -> None:
+    captured: list[tuple[str, ...]] = []
+
+    async def tracking_exec(*args: str, **kwargs: Any) -> FakeProc:
+        captured.append(args)
+        return FakeProc(0)
+
+    with patch(
+        "cog.runners.docker_sandbox.asyncio.create_subprocess_exec",
+        new=AsyncMock(side_effect=tracking_exec),
+    ):
+        sandbox = DockerSandbox()
+        await sandbox.smoke_test()
+
+    shell_cmd = captured[0][-1]
+    assert "sys.version_info >= (3, 12)" in shell_cmd
