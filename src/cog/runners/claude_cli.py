@@ -91,6 +91,13 @@ class ClaudeCliRunner(AgentRunner):
 
         proc = await asyncio.create_subprocess_exec(*argv, env=env, stdout=PIPE, stderr=PIPE)
         assert proc.stdout is not None  # guaranteed by stdout=PIPE
+        # Drain stderr concurrently so the pipe buffer (~64KB on Linux) can't fill and
+        # block claude's stderr writes — which would cascade into stdout stalling and
+        # trip RunnerStalledError (#48). Real stderr content is discarded in this
+        # minimal drain; #44 layers on capture-for-diagnostics.
+        stderr_drain: asyncio.Task[bytes] | None = (
+            asyncio.create_task(proc.stderr.read()) if proc.stderr is not None else None
+        )
         start = time.monotonic()
 
         final_text = ""
@@ -166,6 +173,13 @@ class ClaudeCliRunner(AgentRunner):
         finally:
             if not _waited:
                 await proc.wait()
+            if stderr_drain is not None and not stderr_drain.done():
+                stderr_drain.cancel()
+            if stderr_drain is not None:
+                try:
+                    await stderr_drain
+                except (asyncio.CancelledError, Exception):
+                    pass
 
         duration = time.monotonic() - start
         cost = float(result_record.get("total_cost_usd", 0.0)) if result_record else 0.0
