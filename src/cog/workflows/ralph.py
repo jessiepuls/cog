@@ -6,6 +6,7 @@ import os
 import re
 import sys
 from collections.abc import Callable
+from dataclasses import dataclass
 from importlib.resources import files
 from pathlib import Path
 from typing import ClassVar, Literal
@@ -13,17 +14,24 @@ from typing import ClassVar, Literal
 import cog.git as git
 from cog.checks import RALPH_CHECKS
 from cog.core.context import ExecutionContext
-from cog.core.errors import HostError, StageError, TrackerError
+from cog.core.errors import GitError, HostError, RebaseUnresolvedError, StageError, TrackerError
 from cog.core.host import GitHost
 from cog.core.item import Item
 from cog.core.outcomes import Outcome, StageResult
 from cog.core.runner import AgentRunner
 from cog.core.stage import Stage
 from cog.core.tracker import IssueTracker
-from cog.core.workflow import Workflow
+from cog.core.workflow import StageExecutor, Workflow
 from cog.state_paths import project_slug, project_state_dir
 from cog.telemetry import TelemetryRecord
 from cog.ui.widgets.log_pane import LogPaneWidget
+
+
+@dataclass(frozen=True)
+class RebaseOutcome:
+    status: Literal["clean", "conflict"]
+    final_message: str = ""  # claude's analysis on conflict; empty on clean
+
 
 _PRIORITY_RE = re.compile(r"^p(\d+)$")
 _SLUG_RE = re.compile(r"[^a-z0-9-]+")
@@ -235,6 +243,12 @@ class RalphWorkflow(Workflow):
     ) -> None:
         assert ctx.item is not None and ctx.work_branch is not None
         assert self._host is not None, "RalphWorkflow.finalize_success requires host"
+
+        rebase = await self._rebase_before_push(ctx)
+        if rebase.status == "conflict":
+            await self._handle_rebase_conflict(ctx, results, rebase.final_message)
+            return
+
         try:
             await self._host.push_branch(ctx.work_branch)
         except HostError as e:
@@ -425,6 +439,83 @@ class RalphWorkflow(Workflow):
             body += f"\n⚠ Document stage failed: {doc.error}. Docs may be out of date.\n"
         return body
 
+    async def _rebase_before_push(self, ctx: ExecutionContext) -> RebaseOutcome:
+        assert ctx.work_branch is not None
+        default = await git.default_branch(ctx.project_dir)
+        await git.fetch_origin(ctx.project_dir)
+
+        # Cheap pre-check: skip stage invocation when work branch already
+        # contains everything from origin/<default>. Common no-op on quiet
+        # iterations; saves ~$0.05-0.10 per iteration.
+        try:
+            behind = await git.commits_between(
+                ctx.project_dir, ctx.work_branch, f"origin/{default}"
+            )
+        except GitError:
+            # Transient git error — assume rebase is needed, fall through.
+            behind = 1
+
+        if behind == 0:
+            return RebaseOutcome(status="clean")
+
+        stage = Stage(
+            name="rebase",
+            prompt_source=_make_prompt_source("rebase"),
+            model=os.environ.get("COG_RALPH_BUILD_MODEL", "claude-sonnet-4-6"),
+            runner=self._runner,
+            tolerate_failure=False,
+        )
+        result = await StageExecutor()._run_stage(stage, ctx)
+
+        if await git.rebase_in_progress(ctx.project_dir):
+            # Claude exited mid-rebase — safety net abort.
+            await git.rebase_abort(ctx.project_dir)
+            return RebaseOutcome(status="conflict", final_message=result.final_message)
+
+        return RebaseOutcome(status="clean")
+
+    async def _handle_rebase_conflict(
+        self,
+        ctx: ExecutionContext,
+        results: list[StageResult],
+        claude_final_message: str,
+    ) -> None:
+        assert ctx.item is not None
+        default = await git.default_branch(ctx.project_dir)
+        body = (
+            f"🤖 Cog finished stages but could not rebase onto the latest "
+            f"`origin/{default}` due to conflicts claude couldn't semantically "
+            f"resolve.\n\n"
+            f"Claude's analysis:\n\n> {claude_final_message}\n\n"
+            f"The work branch is intact locally. Cog will retry on the next "
+            f"`cog ralph` invocation — the conflict may resolve once main "
+            f"advances further, or a human can resolve manually and re-run."
+        )
+        await self._tracker.comment(ctx.item, body)
+
+        # Additive agent-failed signal (matches #51 pattern)
+        await self._tracker.ensure_label(
+            "agent-failed",
+            color="d93f0b",
+            description="Cog attempted this and hit an error; retry is still eligible",
+        )
+        await self._tracker.add_label(ctx.item, "agent-failed")
+
+        # Keep agent-ready — user / next iteration re-triggers.
+        # Don't mark_processed — item stays eligible.
+        # Prevent same-loop re-pick.
+        self._processed_this_loop.add((ctx.item.tracker_id, ctx.item.item_id))
+
+        err = RebaseUnresolvedError(final_message=claude_final_message)
+        await self._write_telemetry(
+            ctx,
+            results,
+            "rebase-conflict",
+            error=err,
+            cause_class=type(err).__name__,
+        )
+        await self.write_report(ctx, results, "error", error=err)
+
     async def _handle_push_failed(
         self,
         ctx: ExecutionContext,
@@ -464,13 +555,14 @@ class RalphWorkflow(Workflow):
         *,
         pr_url: str | None = None,
         error: Exception | None = None,
+        cause_class: str | None = None,
     ) -> None:
         error_str: str | None = None
-        cause_class: str | None = None
+        resolved_cause_class = cause_class
         if error is not None:
             error_str = str(error)
-            if isinstance(error, StageError) and error.cause is not None:
-                cause_class = type(error.cause).__name__
+            if cause_class is None and isinstance(error, StageError) and error.cause is not None:
+                resolved_cause_class = type(error.cause).__name__
         if ctx.telemetry is None:
             return
         resumed = self._resumed_this_iteration.get(ctx.item.item_id, False)  # type: ignore[union-attr]
@@ -484,7 +576,7 @@ class RalphWorkflow(Workflow):
             pr_url=pr_url,
             duration_seconds=sum(r.duration_seconds for r in results),
             error=error_str,
-            cause_class=cause_class,
+            cause_class=resolved_cause_class,
             resumed=resumed,
         )
         await ctx.telemetry.write(record)

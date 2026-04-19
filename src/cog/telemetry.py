@@ -13,7 +13,14 @@ from cog import __version__ as cog_version
 from cog.core.item import Item
 from cog.core.outcomes import StageResult
 
-TelemetryOutcome = Literal["success", "no-op", "error", "push-failed", "deferred-by-blocker"]
+TelemetryOutcome = Literal[
+    "success",
+    "no-op",
+    "error",
+    "push-failed",
+    "deferred-by-blocker",
+    "rebase-conflict",
+]
 
 
 @dataclass(frozen=True)

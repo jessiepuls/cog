@@ -75,3 +75,13 @@ class DockerImageBuildError(SandboxError):
 
 class GitError(Exception):
     """Non-zero exit or unexpected output from a git subprocess."""
+
+
+class RebaseUnresolvedError(Exception):
+    """Raised (conceptually) when claude's rebase stage exits mid-state."""
+
+    def __init__(self, final_message: str) -> None:
+        self.final_message = final_message
+        super().__init__(
+            f"Rebase could not be completed by claude. Analysis: {final_message[:200]}"
+        )

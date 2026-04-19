@@ -80,3 +80,18 @@ async def log_short_shas(project_dir: Path, revision_range: str) -> list[str]:
         project_dir,
     )
     return [s for s in result.splitlines() if s]
+
+
+async def rebase_in_progress(project_dir: Path) -> bool:
+    """True if a git rebase is currently paused (conflict or interactive).
+
+    Checks for .git/rebase-merge/ or .git/rebase-apply/ — git's canonical
+    mid-rebase markers.
+    """
+    git_dir = project_dir / ".git"
+    return (git_dir / "rebase-merge").is_dir() or (git_dir / "rebase-apply").is_dir()
+
+
+async def rebase_abort(project_dir: Path) -> None:
+    """`git rebase --abort`. No-op if no rebase in progress."""
+    await _run(["git", "rebase", "--abort"], project_dir)
