@@ -88,28 +88,53 @@ preserved.
 
 ### Key changes
 
-Bullet list of the files you touched, with a brief note per file. Not
-a changelog of every line edit — highlight the interesting ones. Note
-files that are new (`(new)`) or that got structural changes.
+3-7 bullets summarizing the *conceptual* changes a reviewer should notice —
+new abstractions, architectural shifts, behavioral changes, structural
+moves. NOT a file-by-file changelog; mention a file only when the change
+hinges on the specific file (e.g., a new module, or a structural rework).
+
+A single conceptual change may touch 5 files; list it as one bullet.
+Minor edits (docstring tweaks, test name fixes, import reshuffles) don't
+belong here — they're visible in the diff.
 
 Example:
 ```
 ### Key changes
 
-- `src/cog/loop.py` (new): `LoopState` + `fresh_iteration_context` primitives
-- `src/cog/headless.py`: `run_headless` now loops until queue drained
-- `src/cog/ui/screens/run.py`: `_run_loop` replaces `_run_once`
-- `src/cog/cli.py`: new `--max-iterations` flag; implies `--loop`
+- New `LoopState` + `fresh_iteration_context` primitives in `cog/loop.py`;
+  shared across headless and Textual call sites
+- `run_headless` and `RunScreen._run_loop` both iterate through the same
+  primitives until the queue drains, the cap is hit, or a stage errors
+- CLI gains `--max-iterations N`, which implies `--loop`
 ```
 
 ### Test plan
 
-Manual verification steps for a reviewer. Be thorough: list every
-meaningful thing to check, not just the happy path. Include edge cases,
-error states, responsive/layout checks if UI, accessibility concerns,
-and anything else that matters for this specific change. Don't pad
-with generic items like "review the diff"; every item should be
-concrete and specific to what you changed.
+Manual verification steps written from the perspective of someone using
+what you built. Match the shape of the test plan to the change type:
+
+- **UI / app code** → exercise the user-facing flow (navigate, click,
+  observe states).
+- **CLI / tooling** → run the commands, inspect outputs, try error paths.
+- **Data migration / script** → run it, then use database queries or
+  file inspection to confirm the data changed correctly.
+- **API / library** → call the public surface, observe returns and
+  side effects.
+- **Config / infrastructure** → exercise the configured system, not the
+  config file itself.
+
+List every meaningful behavior to check for THIS change — edge cases,
+error states, UX concerns. Don't pad with generic items like "review
+the diff."
+
+**Do not include tool-execution items that CI runs automatically**:
+- Test runners (e.g. `pytest`, `jest`, `go test`, `cargo test`)
+- Type checkers (e.g. `mypy`, `tsc`, `flow`)
+- Linters / formatters (e.g. `ruff`, `eslint`, `prettier`)
+- Package / build steps (e.g. `python -m build`, `npm run build`)
+
+These run on every PR; listing them adds noise. The project's CLAUDE.md
+is the authority on which commands are CI-gated.
 
 Example format:
 ```
