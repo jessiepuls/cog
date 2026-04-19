@@ -49,6 +49,12 @@ def test_class_attributes():
     assert RalphWorkflow.preflight_checks is RALPH_CHECKS
 
 
+def test_content_widget_cls_is_log_pane_widget():
+    from cog.ui.widgets.log_pane import LogPaneWidget
+
+    assert RalphWorkflow.content_widget_cls is LogPaneWidget
+
+
 async def test_classify_outcome_success_when_any_commits(tmp_path):
     wf = RalphWorkflow(EchoRunner(), AsyncMock(spec=IssueTracker))
     results = [_make_stage_result(2)]
