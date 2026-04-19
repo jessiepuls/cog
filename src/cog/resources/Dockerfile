@@ -1,6 +1,7 @@
-FROM debian:bookworm-slim
+FROM python:3.12-slim-bookworm
 
 LABEL cog.fat-image="true"
+LABEL cog.image-version="2"
 
 # Core system packages
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -11,8 +12,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     jq \
     ca-certificates \
     gnupg \
-    python3 \
-    python3-pip \
     && rm -rf /var/lib/apt/lists/*
 
 # Node 20 (LTS) via NodeSource
