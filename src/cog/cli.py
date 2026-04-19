@@ -32,11 +32,19 @@ def callback(
 def ralph(
     item: int | None = typer.Option(None, "--item", help="Skip selection; run on this issue."),
     loop: bool = typer.Option(False, "--loop", help="Autonomous queue-drain mode (#16)."),
+    max_iterations: int | None = typer.Option(
+        None,
+        "--max-iterations",
+        help="Stop after N iterations (implies --loop).",
+    ),
     headless: bool = typer.Option(False, "--headless", help="Bypass Textual; log to stderr."),
     project_dir: Path | None = typer.Option(None, "--project-dir"),  # noqa: B008
 ) -> None:
     """Autonomous agent: picks next agent-ready issue, runs build/review/document, opens PR."""
     from cog.workflows.ralph import RalphWorkflow
+
+    if max_iterations is not None:
+        loop = True  # --max-iterations N implies --loop
 
     try:
         exit_code = asyncio.run(
@@ -45,6 +53,7 @@ def ralph(
                 project_dir or Path.cwd(),
                 item_id=item,
                 loop=loop,
+                max_iterations=max_iterations,
                 headless=headless,
             )
         )

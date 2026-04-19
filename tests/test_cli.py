@@ -105,6 +105,47 @@ def test_cog_ralph_headless_forwards_flag(monkeypatch, tmp_path):
     assert calls[0]["headless"] is True
 
 
+def test_cog_ralph_max_iterations_forwards(monkeypatch, tmp_path):
+    calls: list[dict] = []
+
+    async def fake_build_and_run(*args: Any, **kwargs: Any) -> int:
+        calls.append({"args": args, **kwargs})
+        return 0
+
+    monkeypatch.setattr("cog.cli.build_and_run", fake_build_and_run)
+    result = runner.invoke(app, ["ralph", "--project-dir", str(tmp_path), "--max-iterations", "3"])
+    assert result.exit_code == 0
+    assert len(calls) == 1
+    assert calls[0]["max_iterations"] == 3
+
+
+def test_cog_ralph_max_iterations_implies_loop(monkeypatch, tmp_path):
+    calls: list[dict] = []
+
+    async def fake_build_and_run(*args: Any, **kwargs: Any) -> int:
+        calls.append({"args": args, **kwargs})
+        return 0
+
+    monkeypatch.setattr("cog.cli.build_and_run", fake_build_and_run)
+    result = runner.invoke(app, ["ralph", "--project-dir", str(tmp_path), "--max-iterations", "3"])
+    assert result.exit_code == 0
+    assert calls[0]["loop"] is True
+
+
+def test_cog_ralph_loop_without_max_iterations(monkeypatch, tmp_path):
+    calls: list[dict] = []
+
+    async def fake_build_and_run(*args: Any, **kwargs: Any) -> int:
+        calls.append({"args": args, **kwargs})
+        return 0
+
+    monkeypatch.setattr("cog.cli.build_and_run", fake_build_and_run)
+    result = runner.invoke(app, ["ralph", "--project-dir", str(tmp_path), "--loop"])
+    assert result.exit_code == 0
+    assert calls[0]["loop"] is True
+    assert calls[0]["max_iterations"] is None
+
+
 def test_cog_ralph_keyboard_interrupt_exits_130(monkeypatch, tmp_path):
     import asyncio
     import inspect

@@ -21,9 +21,14 @@ class CogApp(App):
         self.push_screen(self._initial)
 
 
-async def run_textual(workflow: Workflow, ctx: ExecutionContext, *, loop: bool) -> int:
-    """Single-run launcher. Loop semantics live in #16."""
-    run_screen = RunScreen(workflow, ctx)
+async def run_textual(
+    workflow: Workflow,
+    ctx: ExecutionContext,
+    *,
+    loop: bool,
+    max_iterations: int | None = None,
+) -> int:
+    run_screen = RunScreen(workflow, ctx, loop=loop, max_iterations=max_iterations)
     app = CogApp(run_screen)
     await app.run_async()
     return 0 if run_screen._state in ("completed", "cancelled") else 1

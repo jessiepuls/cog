@@ -86,15 +86,16 @@ async def test_run_headless_happy_path(tmp_path, capsys):
     exit_code = await run_headless(wf, _make_ctx(tmp_path))
     assert exit_code == 0
     captured = capsys.readouterr()
-    assert "outcome=success" in captured.err
+    assert "iteration complete:" in captured.err
 
 
 async def test_run_headless_empty_queue(tmp_path, capsys):
     wf = _EmptyQueueWorkflow(EchoRunner())
     exit_code = await run_headless(wf, _make_ctx(tmp_path))
     assert exit_code == 0
+    # Queue drained immediately: no iteration summary, no loop summary
     captured = capsys.readouterr()
-    assert "outcome=no-op" in captured.err
+    assert "loop complete" not in captured.err
 
 
 async def test_run_headless_stage_error_returns_1(tmp_path, capsys):

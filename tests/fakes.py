@@ -3,6 +3,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from unittest.mock import AsyncMock
 
 from textual.app import ComposeResult
 from textual.widget import Widget
@@ -185,6 +186,29 @@ class ExitNonZeroRunner(AgentRunner):
                 duration_seconds=0.0,
             )
         )
+
+
+def make_queue_tracker(items_per_call: list[list[Item]]) -> AsyncMock:
+    """AsyncMock IssueTracker whose list_by_label returns successive lists.
+
+    Simulates items disappearing as ralph processes them. The final empty list
+    signals queue drained. If more calls occur than lists provided, returns [].
+    """
+    call_index = 0
+    responses = list(items_per_call)
+
+    async def _list_by_label(*args: Any, **kwargs: Any) -> list[Item]:
+        nonlocal call_index
+        if call_index < len(responses):
+            result = responses[call_index]
+        else:
+            result = []
+        call_index += 1
+        return result
+
+    mock = AsyncMock()
+    mock.list_by_label.side_effect = _list_by_label
+    return mock
 
 
 class FakeSubprocessRegistry:

@@ -234,6 +234,143 @@ async def test_run_screen_shows_error_panel_on_workflow_exception(tmp_path: Path
         assert len(pilot.app.query("#result-panel")) > 0
 
 
+class _MultiItemWorkflow(_FakeWorkflow):
+    """Workflow that serves N items then returns None (queue empty)."""
+
+    def __init__(self, runner: EchoRunner, item_count: int) -> None:
+        super().__init__(runner)
+        self._remaining = item_count
+
+    async def select_item(self, ctx: ExecutionContext) -> Item | None:
+        if self._remaining > 0:
+            self._remaining -= 1
+            return _item()
+        return None
+
+
+def _make_loop_app(
+    workflow: Workflow,
+    ctx: ExecutionContext,
+    *,
+    loop: bool = True,
+    max_iterations: int | None = None,
+) -> App:
+    class _TestApp(App):
+        def compose(self) -> ComposeResult:
+            return iter([])
+
+        def on_mount(self) -> None:
+            self.push_screen(RunScreen(workflow, ctx, loop=loop, max_iterations=max_iterations))
+
+    return _TestApp()
+
+
+async def test_run_screen_loop_mode_iterates_multiple_times(tmp_path: Path) -> None:
+    workflow = _MultiItemWorkflow(EchoRunner(), item_count=3)
+    ctx = _ctx(tmp_path)
+    async with _make_loop_app(workflow, ctx).run_test(headless=True) as pilot:
+        for _ in range(20):
+            await pilot.pause()
+        screen = pilot.app.query_one(RunScreen)
+        assert screen._state == "completed"
+        assert screen._loop_state.iteration == 3
+
+
+async def test_run_screen_loop_mode_divider_between_iterations(tmp_path: Path) -> None:
+    workflow = _MultiItemWorkflow(EchoRunner(), item_count=2)
+    ctx = _ctx(tmp_path)
+    async with _make_loop_app(workflow, ctx).run_test(headless=True) as pilot:
+        for _ in range(20):
+            await pilot.pause()
+        dividers = pilot.app.query(".iteration-divider")
+        assert len(dividers) >= 1
+
+
+async def test_run_screen_loop_mode_iteration_counter_in_footer(tmp_path: Path) -> None:
+    workflow = _MultiItemWorkflow(EchoRunner(), item_count=2)
+    ctx = _ctx(tmp_path)
+    async with _make_loop_app(workflow, ctx).run_test(headless=True) as pilot:
+        for _ in range(20):
+            await pilot.pause()
+        screen = pilot.app.query_one(RunScreen)
+        assert screen._loop_state.iteration == 2
+
+
+async def test_run_screen_loop_mode_exits_on_queue_empty(tmp_path: Path) -> None:
+    workflow = _MultiItemWorkflow(EchoRunner(), item_count=1)
+    ctx = _ctx(tmp_path)
+    async with _make_loop_app(workflow, ctx).run_test(headless=True) as pilot:
+        for _ in range(20):
+            await pilot.pause()
+        screen = pilot.app.query_one(RunScreen)
+        assert screen._state == "completed"
+
+
+async def test_run_screen_loop_mode_respects_max_iterations(tmp_path: Path) -> None:
+    workflow = _MultiItemWorkflow(EchoRunner(), item_count=10)
+    ctx = _ctx(tmp_path)
+    async with _make_loop_app(workflow, ctx, loop=True, max_iterations=2).run_test(
+        headless=True
+    ) as pilot:
+        for _ in range(20):
+            await pilot.pause()
+        screen = pilot.app.query_one(RunScreen)
+        assert screen._state == "completed"
+        assert screen._loop_state.iteration == 2
+
+
+async def test_run_screen_loop_mode_ctrl_c_cancels_current_iteration(tmp_path: Path) -> None:
+    workflow = _MultiItemWorkflow(_SlowRunner(), item_count=5)
+    ctx = _ctx(tmp_path)
+    async with _make_loop_app(workflow, ctx).run_test(headless=True) as pilot:
+        await pilot.pause()
+        screen = pilot.app.query_one(RunScreen)
+        assert screen._state == "running"
+        await pilot.press("ctrl+c")
+        for _ in range(10):
+            await pilot.pause()
+        assert screen._state == "cancelled"
+
+
+async def test_run_screen_loop_mode_stage_error_shows_error_panel_and_exits(
+    tmp_path: Path,
+) -> None:
+    class _ErrWorkflow(_FakeWorkflow):
+        def stages(self, ctx: ExecutionContext):
+            async def _err(prompt: str, *, model: str):
+                raise RuntimeError("stage boom")
+                yield  # type: ignore[misc]
+
+            class _R:
+                def stream(self, prompt, *, model):
+                    return _err(prompt, model=model)
+
+                async def run(self, prompt, *, model):  # pragma: no cover
+                    pass
+
+            return [Stage(name="s", prompt_source=lambda _: "hi", model="m", runner=_R())]
+
+    workflow = _ErrWorkflow(EchoRunner())
+    ctx = _ctx(tmp_path)
+    async with _make_loop_app(workflow, ctx).run_test(headless=True) as pilot:
+        for _ in range(10):
+            await pilot.pause()
+        screen = pilot.app.query_one(RunScreen)
+        assert screen._state == "failed"
+        assert len(pilot.app.query("#result-panel")) > 0
+
+
+async def test_run_screen_loop_mode_completion_panel_after_clean_exit(tmp_path: Path) -> None:
+    workflow = _MultiItemWorkflow(EchoRunner(), item_count=1)
+    ctx = _ctx(tmp_path)
+    async with _make_loop_app(workflow, ctx).run_test(headless=True) as pilot:
+        for _ in range(20):
+            await pilot.pause()
+        screen = pilot.app.query_one(RunScreen)
+        assert screen._state == "completed"
+        assert len(pilot.app.query("#result-panel")) > 0
+
+
 async def test_run_screen_shows_cancellation_panel_after_cancel(tmp_path: Path) -> None:
     # Verify that _show_cancellation_panel mounts the result panel when called
     # while the screen is still attached. (During real ctrl+c, the screen may

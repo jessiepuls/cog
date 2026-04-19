@@ -81,7 +81,7 @@ async def test_build_and_run_preselects_item_when_item_id_given(tmp_path: Path) 
 
     captured_ctx = {}
 
-    async def _fake_run_textual(workflow, ctx, *, loop):
+    async def _fake_run_textual(workflow, ctx, *, loop, max_iterations=None):
         captured_ctx["ctx"] = ctx
         return 0
 
@@ -180,3 +180,82 @@ async def test_build_and_run_wires_full_stack(tmp_path: Path) -> None:
     run_textual_mock.assert_awaited_once()
     _, call_ctx = run_textual_mock.call_args[0]
     assert call_ctx.state_cache is cache_mock
+
+
+def _patched_wire_context(tmp_path: Path):
+    """Context manager that patches all wire.py external dependencies."""
+    cache_mock = MagicMock()
+    cache_mock.was_corrupt.return_value = False
+    cache_mock.is_empty.return_value = False
+    return (
+        patch("cog.ui.wire.run_checks", new=AsyncMock(return_value=[])),
+        patch("cog.ui.wire.print_results"),
+        patch("cog.ui.wire.DockerSandbox", return_value=MagicMock()),
+        patch("cog.ui.wire.ClaudeCliRunner", return_value=MagicMock()),
+        patch("cog.ui.wire.GitHubIssueTracker", return_value=MagicMock()),
+        patch("cog.ui.wire.JsonFileStateCache", return_value=cache_mock),
+        patch("cog.ui.wire.TelemetryWriter"),
+        patch("cog.ui.wire.project_state_dir", return_value=tmp_path / ".cog"),
+    )
+
+
+async def test_build_and_run_forwards_max_iterations_to_run_headless(tmp_path: Path) -> None:
+    from cog.ui.wire import build_and_run
+
+    run_headless_mock = AsyncMock(return_value=0)
+
+    patches = _patched_wire_context(tmp_path)
+    with (
+        patches[0],
+        patches[1],
+        patches[2],
+        patches[3],
+        patches[4],
+        patches[5],
+        patches[6],
+        patches[7],
+        patch("cog.ui.wire.run_headless", run_headless_mock),
+    ):
+        await build_and_run(
+            _FakeWorkflow,  # type: ignore[arg-type]
+            tmp_path,
+            item_id=None,
+            loop=True,
+            headless=True,
+            max_iterations=3,
+        )
+
+    _, kwargs = run_headless_mock.call_args
+    assert kwargs.get("max_iterations") == 3
+    assert kwargs.get("loop") is True
+
+
+async def test_build_and_run_forwards_max_iterations_to_run_textual(tmp_path: Path) -> None:
+    from cog.ui.wire import build_and_run
+
+    run_textual_mock = AsyncMock(return_value=0)
+
+    patches = _patched_wire_context(tmp_path)
+    with (
+        patches[0],
+        patches[1],
+        patches[2],
+        patches[3],
+        patches[4],
+        patches[5],
+        patches[6],
+        patches[7],
+        patch("cog.ui.app.run_textual", run_textual_mock),
+    ):
+        await build_and_run(
+            _FakeWorkflow,  # type: ignore[arg-type]
+            tmp_path,
+            item_id=None,
+            loop=True,
+            headless=False,
+            max_iterations=5,
+        )
+
+    _, kwargs = run_textual_mock.call_args
+    assert kwargs.get("max_iterations") == 5
+    assert kwargs.get("loop") is True

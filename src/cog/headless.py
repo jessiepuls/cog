@@ -11,6 +11,7 @@ from cog.core.runner import (
     ToolUseEvent,
 )
 from cog.core.workflow import StageExecutor, Workflow
+from cog.loop import LoopState, fresh_iteration_context
 
 
 class StderrEventSink:
@@ -37,33 +38,55 @@ class StderrEventSink:
 
 async def run_headless(
     workflow: Workflow,
-    ctx: ExecutionContext,
+    base_ctx: ExecutionContext,
     *,
-    loop: bool = False,  # unused here; the #16 loop wrapper consumes this
+    loop: bool = False,
+    max_iterations: int | None = None,
 ) -> int:
-    """Run one workflow iteration in headless mode. Returns 0/1 exit code."""
-    ctx.event_sink = StderrEventSink()
-    # ctx.input_provider stays None — headless cannot prompt
-
+    """Run workflow iterations in headless mode. Returns 0/1 exit code."""
+    base_ctx.event_sink = StderrEventSink()
+    state = LoopState()
     start = time.monotonic()
-    try:
-        results = await StageExecutor().run(workflow, ctx)
-    except StageError as e:
-        duration = time.monotonic() - start
+    while True:
+        if max_iterations is not None and state.iteration >= max_iterations:
+            break
+        state.iteration += 1
+        if loop:
+            sys.stderr.write(f"\n═══ iteration {state.iteration} ═══\n")
+        ctx = fresh_iteration_context(base_ctx)
+        try:
+            results = await StageExecutor().run(workflow, ctx)
+        except StageError as e:
+            duration = time.monotonic() - start
+            sys.stderr.write(
+                f"\niteration FAILED: stage {e.stage.name!r} failed after {duration:.0f}s\n"
+            )
+            return 1
+        except Exception as e:  # noqa: BLE001 - surface any unexpected failure
+            duration = time.monotonic() - start
+            sys.stderr.write(
+                f"\niteration FAILED: {type(e).__name__}: {e} (after {duration:.0f}s)\n"
+            )
+            return 1
+        if not results:
+            state.iteration -= 1  # empty-queue probe: don't count as an iteration
+            break
+        state.cumulative_cost_usd += sum(r.cost_usd for r in results)
+        iter_duration = sum(r.duration_seconds for r in results)
+        outcome = "success" if any(r.commits_created > 0 for r in results) else "no-op"
         sys.stderr.write(
-            f"\niteration FAILED: stage {e.stage.name!r} failed after {duration:.0f}s\n"
+            f"iteration complete: outcome={outcome}, "
+            f"cost=${sum(r.cost_usd for r in results):.3f}, "
+            f"duration={iter_duration:.0f}s\n"
         )
-        return 1
-    except Exception as e:  # noqa: BLE001 - surface any unexpected failure
-        duration = time.monotonic() - start
-        sys.stderr.write(f"\niteration FAILED: {type(e).__name__}: {e} (after {duration:.0f}s)\n")
-        return 1
+        if not loop:
+            break
 
-    duration = time.monotonic() - start
-    total_cost = sum(r.cost_usd for r in results)
-    outcome = "success" if results else "no-op"
-    sys.stderr.write(
-        f"\niteration complete: outcome={outcome}, "
-        f"cost=${total_cost:.3f}, duration={duration:.0f}s\n"
-    )
+    total = time.monotonic() - start
+    if loop:
+        sys.stderr.write(
+            f"\nloop complete: {state.iteration} iteration(s), "
+            f"total cost ${state.cumulative_cost_usd:.3f}, "
+            f"total duration {total:.0f}s\n"
+        )
     return 0
