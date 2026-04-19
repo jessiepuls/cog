@@ -26,17 +26,30 @@ class PickerScreen(ModalScreen[Item | None]):
     def compose(self) -> ComposeResult:
         yield Header()
         list_items = []
-        for i, item in enumerate(self._items):
-            title = (
-                item.title if len(item.title) <= _TITLE_MAX else item.title[: _TITLE_MAX - 1] + "…"
+        if not self._items:
+            list_items.append(
+                ListItem(
+                    Label('[dim]No items in queue — select "Other" to enter an issue number[/dim]'),
+                    id="pick-empty",
+                    disabled=True,
+                )
             )
-            list_items.append(ListItem(Label(f"#{item.item_id} — {title}"), id=f"pick-{i}"))
+        else:
+            for i, item in enumerate(self._items):
+                title = (
+                    item.title
+                    if len(item.title) <= _TITLE_MAX
+                    else item.title[: _TITLE_MAX - 1] + "…"
+                )
+                list_items.append(ListItem(Label(f"#{item.item_id} — {title}"), id=f"pick-{i}"))
         list_items.append(ListItem(Label("Other — enter item number"), id="pick-other"))
         yield ListView(*list_items, id="picker-list")
         yield Footer()
 
     def on_list_view_selected(self, event: ListView.Selected) -> None:
         chosen_id = event.item.id or ""
+        if chosen_id == "pick-empty":
+            return
         if chosen_id == "pick-other":
             self._pick_other()
             return
