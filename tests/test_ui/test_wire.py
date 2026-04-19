@@ -115,6 +115,38 @@ async def test_build_and_run_preselects_item_when_item_id_given(tmp_path: Path) 
     assert captured_ctx["ctx"].item == fake_item
 
 
+async def test_build_and_run_headless_invokes_run_headless(tmp_path: Path) -> None:
+    """--headless path dispatches to cog.headless.run_headless."""
+    from cog.ui.wire import build_and_run
+
+    run_headless_mock = AsyncMock(return_value=0)
+    cache_mock = MagicMock()
+    cache_mock.was_corrupt.return_value = False
+    cache_mock.is_empty.return_value = False
+
+    with (
+        patch("cog.ui.wire.run_checks", new=AsyncMock(return_value=[])),
+        patch("cog.ui.wire.print_results"),
+        patch("cog.ui.wire.DockerSandbox", return_value=MagicMock()),
+        patch("cog.ui.wire.ClaudeCliRunner", return_value=MagicMock()),
+        patch("cog.ui.wire.GitHubIssueTracker", return_value=MagicMock()),
+        patch("cog.ui.wire.JsonFileStateCache", return_value=cache_mock),
+        patch("cog.ui.wire.TelemetryWriter"),
+        patch("cog.ui.wire.project_state_dir", return_value=tmp_path / ".cog"),
+        patch("cog.ui.wire.run_headless", run_headless_mock),
+    ):
+        code = await build_and_run(
+            _FakeWorkflow,  # type: ignore[arg-type]
+            tmp_path,
+            item_id=None,
+            loop=False,
+            headless=True,
+        )
+
+    assert code == 0
+    run_headless_mock.assert_awaited_once()
+
+
 async def test_build_and_run_wires_full_stack(tmp_path: Path) -> None:
     """Verify ctx has state_cache set and run_textual is invoked."""
     from cog.ui.wire import build_and_run
