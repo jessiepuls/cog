@@ -13,7 +13,7 @@ from typing import ClassVar, Literal
 import cog.git as git
 from cog.checks import RALPH_CHECKS
 from cog.core.context import ExecutionContext
-from cog.core.errors import HostError, StageError
+from cog.core.errors import HostError, StageError, TrackerError
 from cog.core.host import GitHost
 from cog.core.item import Item
 from cog.core.outcomes import Outcome, StageResult
@@ -145,7 +145,7 @@ class RalphWorkflow(Workflow):
         for blocker_id in sorted(referenced):
             try:
                 blocker = await self._tracker.get(str(blocker_id))
-            except Exception:
+            except TrackerError:
                 continue  # ghost reference; don't defer on an item we can't fetch
             if blocker.state == "open":
                 open_blockers.append(blocker_id)
