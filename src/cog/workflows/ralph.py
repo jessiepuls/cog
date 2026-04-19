@@ -78,12 +78,6 @@ def _make_prompt_source(stage_name: str) -> Callable[[ExecutionContext], str]:
 
 
 def _split_final_message(message: str) -> dict[str, str]:
-    """Extract named sections from claude's structured final message.
-
-    Returns dict with keys 'summary', 'key_changes', 'test_plan' (lowercase,
-    underscore-separated). Missing sections are not present in the dict.
-    Unknown sections (e.g. '### Rationale') are ignored.
-    """
     sections: dict[str, str] = {}
     for match in _SECTION_RE.finditer(message):
         key = match.group(1).lower().replace(" ", "_")

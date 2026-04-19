@@ -274,6 +274,37 @@ class ScriptedInputProvider:
         return reply
 
 
+class ScriptedRewriteRunner(AgentRunner):
+    """Returns a scripted final message with ### Title + ### Body sections."""
+
+    def __init__(self, response: str, cost_usd: float = 0.5) -> None:
+        self._response = response
+        self._cost = cost_usd
+
+    async def stream(self, prompt: str, *, model: str) -> AsyncIterator[RunEvent]:
+        yield ResultEvent(
+            result=RunResult(
+                final_message=self._response,
+                total_cost_usd=self._cost,
+                exit_status=0,
+                stream_json_path=Path("/dev/null"),
+                duration_seconds=0.0,
+            )
+        )
+
+
+@dataclass
+class FakeEditor:
+    """Simulate $EDITOR. body_after_edit=None means exit-without-save."""
+
+    body_after_edit: str | None
+    called_with: list[str] = field(default_factory=list)
+
+    async def edit(self, app: object, initial_text: str, tmp_dir: object) -> str | None:
+        self.called_with.append(initial_text)
+        return self.body_after_edit
+
+
 class FakeSubprocessRegistry:
     """Maps argv tuples to FakeProc results.
 

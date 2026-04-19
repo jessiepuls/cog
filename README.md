@@ -22,13 +22,23 @@ Options for `cog refine`:
     --item N              Skip selection; run on issue number N
     --project-dir PATH    Project directory (default: cwd)
 
-### Refine interview
+Without `--item`, `cog refine` loops through the `needs-refinement` queue
+until it is drained or you cancel the picker. With `--item N`, it runs a
+single iteration on that issue and exits.
 
-`cog refine` runs a multi-turn interview in the Textual chat pane. Claude
-asks one question at a time; the user replies until Claude has enough context
-and emits `<<interview-complete>>`, or the user ends early.
+### Refine workflow
 
-Keyboard bindings in the chat pane:
+Each iteration runs in three phases:
+
+1. **Interview** — multi-turn chat in the Textual chat pane. Claude asks
+   one question at a time; the user replies until Claude emits
+   `<<interview-complete>>` or the user ends early.
+2. **Rewrite** — non-interactive Claude call that translates the interview
+   transcript into a rewritten issue body and title.
+3. **Review** — `ReviewScreen` (modal) lets you accept, edit, or abandon
+   the proposed rewrite before anything is applied to the tracker.
+
+#### Interview keyboard bindings
 
 | Key | Action |
 |-----|--------|
@@ -36,15 +46,39 @@ Keyboard bindings in the chat pane:
 | `Shift+Enter` | Insert newline |
 | `Escape` / `Ctrl+D` | End interview early |
 
-Environment variables:
+#### ReviewScreen keyboard bindings
+
+| Key | Action |
+|-----|--------|
+| `a` | Accept proposed rewrite — applies body + title, swaps labels |
+| `e` | Open `$EDITOR` on the proposed body; resume on exit |
+| `q` / `Escape` | Abandon — no body change; preserves `needs-refinement` |
+
+Pressing `e` drops you into `$EDITOR` (falls back to `nano`, then `vi`).
+Exiting the editor without saving returns you to the review prompt — it does
+not trigger abandon. Press `q` explicitly to abandon.
+
+#### Outcomes
+
+- **Accept** — body + title updated on tracker; `needs-refinement` removed,
+  `agent-ready` applied. If the interview ended early (user pressed Escape),
+  `partially-refined` is also applied and the body includes a ⚠ warning line.
+- **Abandon** — no label changes; a comment is posted on the issue explaining
+  the rewrite was not applied. Re-run `cog refine --item N` to retry.
+
+#### Reports
+
+After each iteration (accept or abandon) a report is written to
+`~/.local/state/cog/<slug>/reports/<ts>-refine-<item-slug>.md` containing
+the full original body, the proposed/applied body, the full interview
+transcript, and a stage cost table.
+
+#### Environment variables
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `COG_REFINE_INTERVIEW_MODEL` | `claude-sonnet-4-6` | Claude model used for each interview turn |
-
-When the user ends early via `Escape`/`Ctrl+D`, the interview transcript is
-preserved and the rewrite pass (landing in #19) produces a best-effort rewrite
-from the partial conversation.
+| `COG_REFINE_INTERVIEW_MODEL` | `claude-sonnet-4-6` | Model for each interview turn |
+| `COG_REFINE_REWRITE_MODEL` | `claude-opus-4-6` | Model for the rewrite stage |
 
 ## Telemetry
 

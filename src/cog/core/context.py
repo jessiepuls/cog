@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -9,6 +9,8 @@ from cog.core.sinks import ItemPicker, RunEventSink, UserInputProvider
 from cog.core.state import StateCache
 
 if TYPE_CHECKING:
+    from textual.app import App
+
     from cog.telemetry import TelemetryWriter
 
 
@@ -24,3 +26,4 @@ class ExecutionContext:
     input_provider: UserInputProvider | None = None
     item_picker: ItemPicker | None = None
     telemetry: TelemetryWriter | None = None
+    app: App | None = field(default=None, repr=False)
