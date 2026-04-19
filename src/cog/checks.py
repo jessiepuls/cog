@@ -335,8 +335,14 @@ ALL_CHECKS: tuple[PreflightCheck, ...] = (
     CheckClaudeAuth(),
 )
 
-# Reusable subsets — workflow issues (#12, #18) will use these
-RALPH_CHECKS: tuple[PreflightCheck, ...] = ALL_CHECKS
-REFINE_CHECKS: tuple[PreflightCheck, ...] = tuple(
+# Workflow preflight — excludes git-state checks (clean_tree, default_branch).
+# Those are redundant at startup: RalphWorkflow.pre_stages does
+# `checkout default → fetch → merge-ff → create work branch` and git itself
+# will fail cleanly if the tree isn't checkout-able at that moment. Preempting
+# before the user has even picked an item is friction without coverage.
+# `cog doctor` still surfaces git-state via ALL_CHECKS for diagnostic use.
+_WORKFLOW_CHECKS: tuple[PreflightCheck, ...] = tuple(
     c for c in ALL_CHECKS if c.name not in ("clean_tree", "default_branch")
 )
+RALPH_CHECKS: tuple[PreflightCheck, ...] = _WORKFLOW_CHECKS
+REFINE_CHECKS: tuple[PreflightCheck, ...] = _WORKFLOW_CHECKS

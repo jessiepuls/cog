@@ -49,6 +49,25 @@ def test_class_attributes():
     assert RalphWorkflow.preflight_checks is RALPH_CHECKS
 
 
+def test_ralph_checks_exclude_git_state_so_startup_is_low_friction():
+    # Intent pin: pre_stages does checkout+fetch+merge-ff+create-branch and
+    # git will fail cleanly if the tree isn't checkout-able at that point.
+    # Preempting clean_tree / default_branch at startup is redundant and
+    # adds friction — particularly when resuming an existing cog/N-* branch
+    # where the user is by definition NOT on default.
+    names = {c.name for c in RALPH_CHECKS}
+    assert "clean_tree" not in names
+    assert "default_branch" not in names
+
+
+def test_refine_checks_exclude_git_state_same_as_ralph():
+    from cog.checks import REFINE_CHECKS
+
+    names = {c.name for c in REFINE_CHECKS}
+    assert "clean_tree" not in names
+    assert "default_branch" not in names
+
+
 def test_content_widget_cls_is_log_pane_widget():
     from cog.ui.widgets.log_pane import LogPaneWidget
 
