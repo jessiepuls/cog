@@ -119,3 +119,23 @@ def test_tracker_agnostic_language():
 def test_build_prompt_uses_tracked_item_language():
     content = _load_prompt("build")
     assert "tracked item" in content
+
+
+def test_build_prompt_contains_summary_section_instruction():
+    content = _load_prompt("build")
+    assert "### Summary" in content
+
+
+def test_build_prompt_contains_key_changes_section_instruction():
+    content = _load_prompt("build")
+    assert "### Key changes" in content
+
+
+def test_build_prompt_keeps_test_plan_instruction():
+    content = _load_prompt("build")
+    assert "### Test plan" in content
+
+
+def test_build_prompt_final_message_format_mentions_wrapper_extraction():
+    content = _load_prompt("build")
+    assert "wrapper extracts" in content

@@ -63,14 +63,53 @@ has been observed to hang indefinitely. To avoid this:
 
 ## Final message format
 
-End your final message with a `### Test plan` section listing specific
-manual verification steps a human reviewer should follow to confirm your
-changes work correctly. Be thorough — list every meaningful thing to
-verify, not just the happy path. Include edge cases, error states,
-responsive/layout checks, accessibility concerns, and anything else that
-matters for this specific change. Don't pad with generic items like
-"review the diff"; every item should be concrete and specific to what
-you changed.
+End your final message with three structured sections in this order:
+`### Summary`, `### Key changes`, `### Test plan`. The wrapper extracts
+each section into the PR body; keeping them structured is load-bearing.
+
+### Summary
+
+2–4 sentences explaining WHAT changed and WHY — enough for a reviewer to
+understand the PR without reading the diff. Focus on intent and the
+approach chosen; the code shows the details.
+
+Example:
+```
+### Summary
+
+Adds `--max-iterations` to `cog ralph --loop` so unattended queue-drain
+runs can be bounded. Implemented via a new `LoopState` counter in the
+shared loop module; both headless and Textual call sites inherit.
+Introduces a `fresh_iteration_context` helper so per-iteration state
+(item, work_branch, tmp_dir) is reset cleanly between iterations while
+cross-iteration state (cumulative cost, processed-this-loop set) is
+preserved.
+```
+
+### Key changes
+
+Bullet list of the files you touched, with a brief note per file. Not
+a changelog of every line edit — highlight the interesting ones. Note
+files that are new (`(new)`) or that got structural changes.
+
+Example:
+```
+### Key changes
+
+- `src/cog/loop.py` (new): `LoopState` + `fresh_iteration_context` primitives
+- `src/cog/headless.py`: `run_headless` now loops until queue drained
+- `src/cog/ui/screens/run.py`: `_run_loop` replaces `_run_once`
+- `src/cog/cli.py`: new `--max-iterations` flag; implies `--loop`
+```
+
+### Test plan
+
+Manual verification steps for a reviewer. Be thorough: list every
+meaningful thing to check, not just the happy path. Include edge cases,
+error states, responsive/layout checks if UI, accessibility concerns,
+and anything else that matters for this specific change. Don't pad
+with generic items like "review the diff"; every item should be
+concrete and specific to what you changed.
 
 Example format:
 ```
@@ -78,7 +117,6 @@ Example format:
 - [ ] Navigate to /settings and verify the new "Skip" toggle appears
 - [ ] Toggle skip on for breakfast, save, reload — confirm it persists
 - [ ] Verify skipped meals don't appear on the weekly planner
-- [ ] Check mobile layout doesn't overflow with long meal names
 ```
 
 ## Git rules (hard)

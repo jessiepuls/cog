@@ -11,7 +11,7 @@ from cog.core.context import ExecutionContext
 from cog.core.errors import HostError, StageError
 from cog.core.host import GitHost, PullRequest
 from cog.core.tracker import IssueTracker
-from cog.workflows.ralph import RalphWorkflow, _split_summary_and_test_plan
+from cog.workflows.ralph import RalphWorkflow, _split_final_message
 from tests.fakes import InMemoryStateCache, make_item, make_stage_result
 
 
@@ -95,29 +95,88 @@ def _make_wf(
 
 
 # ---------------------------------------------------------------------------
-# _split_summary_and_test_plan unit tests
+# _split_final_message unit tests
 # ---------------------------------------------------------------------------
 
-
-def test_split_test_plan_extracts_section() -> None:
-    msg = "Some summary here.\n\n### Test plan\n\n- [ ] Check it works\n- [ ] Edge case"
-    summary, test_plan = _split_summary_and_test_plan(msg)
-    assert "Some summary here." in summary
-    assert "- [ ] Check it works" in test_plan
-    assert "- [ ] Edge case" in test_plan
+_STRUCTURED = (
+    "### Summary\n\nDid the thing.\n\n"
+    "### Key changes\n\n- `src/foo.py`: new helper\n\n"
+    "### Test plan\n\n- [ ] Check it works\n- [ ] Edge case"
+)
 
 
-def test_split_test_plan_fallback_when_missing_returns_placeholder_bullet() -> None:
-    msg = "Just a summary with no test plan section."
-    summary, test_plan = _split_summary_and_test_plan(msg)
-    assert summary == "Just a summary with no test plan section."
-    assert test_plan == "- [ ] Manual verification of the change"
+def test_split_final_message_extracts_all_three_sections() -> None:
+    sections = _split_final_message(_STRUCTURED)
+    assert sections["summary"] == "Did the thing."
+    assert sections["key_changes"] == "- `src/foo.py`: new helper"
+    assert "- [ ] Check it works" in sections["test_plan"]
+    assert "- [ ] Edge case" in sections["test_plan"]
 
 
-def test_split_test_plan_header_matching_is_case_insensitive() -> None:
-    msg = "Summary.\n\n### TEST PLAN\n\n- [ ] step"
-    summary, test_plan = _split_summary_and_test_plan(msg)
-    assert "step" in test_plan
+def test_split_final_message_case_insensitive_headings() -> None:
+    msg = "### SUMMARY\n\nSome text.\n\n### KEY CHANGES\n\n- file.py\n\n### TEST PLAN\n\n- [ ] step"
+    sections = _split_final_message(msg)
+    assert sections["summary"] == "Some text."
+    assert sections["key_changes"] == "- file.py"
+    assert "step" in sections["test_plan"]
+
+
+def test_split_final_message_missing_summary_section() -> None:
+    msg = "### Key changes\n\n- file.py\n\n### Test plan\n\n- [ ] step"
+    sections = _split_final_message(msg)
+    assert "summary" not in sections
+    assert "key_changes" in sections
+    assert "test_plan" in sections
+
+
+def test_split_final_message_missing_key_changes_section() -> None:
+    msg = "### Summary\n\nSome text.\n\n### Test plan\n\n- [ ] step"
+    sections = _split_final_message(msg)
+    assert "summary" in sections
+    assert "key_changes" not in sections
+    assert "test_plan" in sections
+
+
+def test_split_final_message_missing_test_plan_section() -> None:
+    msg = "### Summary\n\nSome text.\n\n### Key changes\n\n- file.py"
+    sections = _split_final_message(msg)
+    assert "summary" in sections
+    assert "key_changes" in sections
+    assert "test_plan" not in sections
+
+
+def test_split_final_message_empty_message_returns_empty_dict() -> None:
+    assert _split_final_message("") == {}
+
+
+def test_split_final_message_strips_section_whitespace() -> None:
+    msg = "### Summary\n\n  Padded text.  \n\n### Test plan\n\n  - [ ] step  "
+    sections = _split_final_message(msg)
+    assert sections["summary"] == "Padded text."
+    assert sections["test_plan"] == "- [ ] step"
+
+
+def test_split_final_message_preserves_section_internal_markdown() -> None:
+    msg = (
+        "### Key changes\n\n"
+        "- `src/foo.py`: added helper\n"
+        "- `src/bar.py`: updated logic\n\n"
+        "```python\nprint('hello')\n```"
+    )
+    sections = _split_final_message(msg)
+    assert "- `src/foo.py`" in sections["key_changes"]
+    assert "```python" in sections["key_changes"]
+
+
+def test_split_final_message_ignores_unknown_sections() -> None:
+    msg = (
+        "### Summary\n\nSome text.\n\n"
+        "### Rationale\n\nWhy we did this.\n\n"
+        "### Test plan\n\n- [ ] step"
+    )
+    sections = _split_final_message(msg)
+    assert set(sections.keys()) == {"summary", "test_plan"}
+    assert "rationale" not in sections
 
 
 # ---------------------------------------------------------------------------
@@ -161,6 +220,111 @@ def test_pr_body_fallback_test_plan_when_missing(tmp_path: Path) -> None:
     results = [make_stage_result("build", final_message="summary without test plan")]
     body = wf._build_pr_body(ctx, results)
     assert "Manual verification" in body
+
+
+def test_build_pr_body_uses_extracted_summary_when_present(tmp_path: Path) -> None:
+    wf = _make_wf()
+    ctx = _make_ctx(tmp_path)
+    msg = "### Summary\n\nThis is the summary.\n\n### Test plan\n\n- [ ] step"
+    results = [make_stage_result("build", final_message=msg)]
+    body = wf._build_pr_body(ctx, results)
+    assert "This is the summary." in body
+    assert body.index("This is the summary.") < body.index("## Closes")
+
+
+def test_build_pr_body_falls_back_to_full_final_message_when_summary_missing(
+    tmp_path: Path,
+) -> None:
+    wf = _make_wf()
+    ctx = _make_ctx(tmp_path)
+    results = [make_stage_result("build", final_message="Done.")]
+    body = wf._build_pr_body(ctx, results)
+    assert "Done." in body
+    assert "## Key changes" not in body
+
+
+def test_build_pr_body_includes_key_changes_section_when_present(tmp_path: Path) -> None:
+    wf = _make_wf()
+    ctx = _make_ctx(tmp_path)
+    msg = (
+        "### Summary\n\nSummary.\n\n"
+        "### Key changes\n\n- file.py: updated\n\n"
+        "### Test plan\n\n- [ ] step"
+    )
+    results = [make_stage_result("build", final_message=msg)]
+    body = wf._build_pr_body(ctx, results)
+    assert "## Key changes\n\n- file.py: updated" in body
+
+
+def test_build_pr_body_omits_key_changes_when_missing(tmp_path: Path) -> None:
+    wf = _make_wf()
+    ctx = _make_ctx(tmp_path)
+    msg = "### Summary\n\nSummary.\n\n### Test plan\n\n- [ ] step"
+    results = [make_stage_result("build", final_message=msg)]
+    body = wf._build_pr_body(ctx, results)
+    assert "## Key changes" not in body
+
+
+def test_build_pr_body_uses_extracted_test_plan(tmp_path: Path) -> None:
+    wf = _make_wf()
+    ctx = _make_ctx(tmp_path)
+    msg = "### Summary\n\nSummary.\n\n### Test plan\n\n- [ ] Verify the feature works"
+    results = [make_stage_result("build", final_message=msg)]
+    body = wf._build_pr_body(ctx, results)
+    assert "- [ ] Verify the feature works" in body
+    assert "Manual verification" not in body
+
+
+def test_build_pr_body_test_plan_fallback_when_missing(tmp_path: Path) -> None:
+    wf = _make_wf()
+    ctx = _make_ctx(tmp_path)
+    results = [make_stage_result("build", final_message="Committed.")]
+    body = wf._build_pr_body(ctx, results)
+    assert "- [ ] Manual verification of the change" in body
+
+
+def test_build_pr_body_section_order_preserved(tmp_path: Path) -> None:
+    wf = _make_wf()
+    ctx = _make_ctx(tmp_path)
+    msg = (
+        "### Summary\n\nSummary text.\n\n"
+        "### Key changes\n\n- file.py: change\n\n"
+        "### Test plan\n\n- [ ] step"
+    )
+    results = [make_stage_result("build", final_message=msg)]
+    body = wf._build_pr_body(ctx, results)
+    summary_pos = body.index("## Summary")
+    key_changes_pos = body.index("## Key changes")
+    closes_pos = body.index("## Closes")
+    test_plan_pos = body.index("## Test plan")
+    footer_pos = body.index("---")
+    assert summary_pos < key_changes_pos < closes_pos < test_plan_pos < footer_pos
+
+
+def test_build_pr_body_doc_warning_still_appended_on_document_error(tmp_path: Path) -> None:
+    wf = _make_wf()
+    ctx = _make_ctx(tmp_path)
+    results = [
+        make_stage_result(
+            "build",
+            final_message="### Summary\n\nDone.\n\n### Test plan\n\n- [ ] step",
+        ),
+        make_stage_result("document", error=RuntimeError("doc failed")),
+    ]
+    body = wf._build_pr_body(ctx, results)
+    assert "Document stage failed" in body
+    assert body.index("---") < body.index("Document stage failed")
+
+
+def test_build_pr_body_cost_line_still_appears(tmp_path: Path) -> None:
+    wf = _make_wf()
+    ctx = _make_ctx(tmp_path)
+    results = [
+        make_stage_result("build", cost=0.03, final_message="### Summary\n\nDone."),
+        make_stage_result("review", cost=0.02),
+    ]
+    body = wf._build_pr_body(ctx, results)
+    assert "0.050" in body
 
 
 # ---------------------------------------------------------------------------
