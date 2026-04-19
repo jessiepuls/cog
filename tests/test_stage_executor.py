@@ -17,6 +17,25 @@ from cog.core.workflow import StageExecutor, Workflow
 from tests.fakes import EchoRunner, ExitNonZeroRunner, FailingRunner
 
 
+class _ResultThenRaisingRunner(AgentRunner):
+    """Yields a ResultEvent with given cost, then raises RuntimeError."""
+
+    def __init__(self, cost: float = 0.42) -> None:
+        self._cost = cost
+
+    async def stream(self, prompt: str, *, model: str) -> AsyncIterator[RunEvent]:
+        yield ResultEvent(
+            result=RunResult(
+                final_message="partial",
+                total_cost_usd=self._cost,
+                exit_status=0,
+                stream_json_path=Path("/dev/null"),
+                duration_seconds=0.0,
+            )
+        )
+        raise RuntimeError("died after result")
+
+
 def _make_item() -> Item:
     return Item(
         tracker_id="test",
@@ -130,7 +149,8 @@ async def test_runner_raises_wraps_in_stage_error_with_cause(ctx_factory):
         await StageExecutor().run(wf, ctx_factory())
     err = exc_info.value
     assert err.stage.name == "s1"
-    assert err.result is None
+    assert err.result is not None
+    assert err.result.exit_status == -1
     assert isinstance(err.cause, RuntimeError)
     assert wf.finalize_called == "error"
 
@@ -330,3 +350,165 @@ async def test_subsequent_stages_run_after_tolerated_failure(ctx_factory):
     assert results[1].error is not None
     assert results[0].error is None
     assert results[2].error is None
+
+
+# --- partial-result capture on runner exception ---
+
+
+async def test_stage_executor_runner_exception_attaches_partial_stage_result(ctx_factory):
+    stage = _make_tolerate_stage(FailingRunner(), tolerate=False)
+    with pytest.raises(StageError) as exc_info:
+        await StageExecutor()._run_stage(stage, ctx_factory())
+    err = exc_info.value
+    assert err.result is not None
+    assert err.result.exit_status == -1
+    assert err.result.duration_seconds >= 0
+
+
+async def test_stage_executor_runner_exception_partial_result_has_commits_count(ctx_factory):
+    stage = _make_tolerate_stage(FailingRunner(), tolerate=False)
+    with (
+        patch("cog.core.workflow.git.current_head_sha", new=AsyncMock(return_value="abc123")),
+        patch("cog.core.workflow.git.commits_between", new=AsyncMock(return_value=2)),
+        pytest.raises(StageError) as exc_info,
+    ):
+        await StageExecutor()._run_stage(stage, ctx_factory())
+    assert exc_info.value.result is not None
+    assert exc_info.value.result.commits_created == 2
+
+
+async def test_stage_executor_runner_exception_partial_result_has_cost_when_result_emitted(
+    ctx_factory,
+):
+    stage = _make_tolerate_stage(_ResultThenRaisingRunner(cost=0.42), tolerate=False)
+    with pytest.raises(StageError) as exc_info:
+        await StageExecutor()._run_stage(stage, ctx_factory())
+    assert exc_info.value.result is not None
+    assert exc_info.value.result.cost_usd == pytest.approx(0.42)
+
+
+async def test_stage_executor_runner_exception_partial_result_zero_cost_when_no_result_event(
+    ctx_factory,
+):
+    stage = _make_tolerate_stage(FailingRunner(), tolerate=False)
+    with pytest.raises(StageError) as exc_info:
+        await StageExecutor()._run_stage(stage, ctx_factory())
+    assert exc_info.value.result is not None
+    assert exc_info.value.result.cost_usd == 0.0
+
+
+async def test_stage_executor_runner_exception_partial_result_captures_error(ctx_factory):
+    exc = RuntimeError("boom")
+    stage = _make_tolerate_stage(FailingRunner(exc), tolerate=False)
+    with pytest.raises(StageError) as exc_info:
+        await StageExecutor()._run_stage(stage, ctx_factory())
+    assert exc_info.value.result is not None
+    assert exc_info.value.result.error is exc
+
+
+# --- StageExecutor.run propagation ---
+
+
+async def test_stage_executor_appends_partial_result_from_stage_error_before_finalize_error(
+    ctx_factory,
+):
+    captured: list[StageResult] = []
+
+    class _CapturingWorkflow(_SimpleWorkflow):
+        async def finalize_error(self, ctx, error, results):
+            captured.extend(results)
+            await super().finalize_error(ctx, error, results)
+
+    wf = _CapturingWorkflow(_RaisingRunner())
+    with pytest.raises(StageError):
+        await StageExecutor().run(wf, ctx_factory())
+    assert len(captured) == 1
+    assert captured[0].exit_status == -1
+
+
+async def test_stage_executor_does_not_double_append_existing_result(ctx_factory):
+    captured: list[StageResult] = []
+
+    class _CapturingWorkflow(_SimpleWorkflow):
+        async def finalize_error(self, ctx, error, results):
+            captured.extend(results)
+            await super().finalize_error(ctx, error, results)
+
+    wf = _CapturingWorkflow(_FailRunner())
+    with pytest.raises(StageError):
+        await StageExecutor().run(wf, ctx_factory())
+    assert len(captured) == 1
+
+
+async def test_stage_executor_generic_exception_does_not_append_partial(ctx_factory):
+    captured: list[StageResult] = []
+
+    class _PreRaisingWorkflow(_SimpleWorkflow):
+        async def pre_stages(self, ctx):
+            raise RuntimeError("pre_stages failed")
+
+        async def finalize_error(self, ctx, error, results):
+            captured.extend(results)
+            await super().finalize_error(ctx, error, results)
+
+    wf = _PreRaisingWorkflow(EchoRunner())
+    with pytest.raises(RuntimeError):
+        await StageExecutor().run(wf, ctx_factory())
+    assert captured == []
+
+
+# --- _make_partial_stage_result unit tests ---
+
+
+async def test_make_partial_stage_result_with_run_result(ctx_factory):
+    executor = StageExecutor()
+    stage = _make_tolerate_stage(EchoRunner(), tolerate=False)
+    run_result = RunResult(
+        final_message="hello",
+        total_cost_usd=0.5,
+        exit_status=1,
+        stream_json_path=Path("/dev/null"),
+        duration_seconds=0.0,
+    )
+    import time
+
+    start = time.monotonic()
+    result = await executor._make_partial_stage_result(
+        stage, start, None, ctx_factory(), run_result, None
+    )
+    assert result.cost_usd == pytest.approx(0.5)
+    assert result.exit_status == 1
+    assert result.final_message == "hello"
+    assert result.commits_created == 0
+
+
+async def test_make_partial_stage_result_without_run_result(ctx_factory):
+    executor = StageExecutor()
+    stage = _make_tolerate_stage(EchoRunner(), tolerate=False)
+    import time
+
+    start = time.monotonic()
+    result = await executor._make_partial_stage_result(
+        stage, start, None, ctx_factory(), None, None
+    )
+    assert result.exit_status == -1
+    assert result.cost_usd == 0.0
+    assert result.final_message == ""
+    assert result.stream_json_path == Path("/dev/null")
+    assert result.commits_created == 0
+
+
+async def test_make_partial_stage_result_commits_count_tolerates_git_error(ctx_factory):
+    executor = StageExecutor()
+    stage = _make_tolerate_stage(EchoRunner(), tolerate=False)
+    import time
+
+    start = time.monotonic()
+    with patch(
+        "cog.core.workflow.git.commits_between",
+        new=AsyncMock(side_effect=GitError("counting failed")),
+    ):
+        result = await executor._make_partial_stage_result(
+            stage, start, "abc123", ctx_factory(), None, None
+        )
+    assert result.commits_created == 0

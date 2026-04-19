@@ -712,3 +712,83 @@ async def test_full_iteration_end_to_end_noop(tmp_path: Path) -> None:
     tracker.add_label.assert_awaited_once_with(ctx.item, "agent-abandoned")
     tracker.remove_label.assert_awaited_once_with(ctx.item, "agent-ready")
     assert cache.is_processed(ctx.item)
+
+
+# ---------------------------------------------------------------------------
+# _write_telemetry cause_class population
+# ---------------------------------------------------------------------------
+
+
+async def test_finalize_error_telemetry_cause_class_populated_for_stage_error_with_cause(
+    tmp_path: Path,
+) -> None:
+    from cog.core.errors import RunnerStalledError
+    from cog.core.stage import Stage
+
+    tel = _make_telemetry()
+    wf = _make_wf()
+    ctx = _make_ctx(tmp_path, telemetry=tel)
+    stage = Stage(name="build", prompt_source=lambda _: "", model="m", runner=None)  # type: ignore[arg-type]
+    cause = RunnerStalledError(inactivity_seconds=120)
+    err = StageError(stage, cause=cause)
+    await wf.finalize_error(ctx, err, [])
+    record = tel.write.call_args.args[0]
+    assert record.cause_class == "RunnerStalledError"
+
+
+async def test_finalize_error_telemetry_cause_class_none_for_generic_exception(
+    tmp_path: Path,
+) -> None:
+    tel = _make_telemetry()
+    wf = _make_wf()
+    ctx = _make_ctx(tmp_path, telemetry=tel)
+    await wf.finalize_error(ctx, RuntimeError("boom"), [])
+    record = tel.write.call_args.args[0]
+    assert record.cause_class is None
+
+
+async def test_finalize_error_telemetry_cause_class_none_for_stage_error_without_cause(
+    tmp_path: Path,
+) -> None:
+    from cog.core.stage import Stage
+
+    tel = _make_telemetry()
+    wf = _make_wf()
+    ctx = _make_ctx(tmp_path, telemetry=tel)
+    stage = Stage(name="build", prompt_source=lambda _: "", model="m", runner=None)  # type: ignore[arg-type]
+    err = StageError(stage, result=make_stage_result("build"))
+    await wf.finalize_error(ctx, err, [])
+    record = tel.write.call_args.args[0]
+    assert record.cause_class is None
+
+
+async def test_finalize_error_includes_partial_stage_result_in_telemetry(
+    tmp_path: Path,
+) -> None:
+    from cog.core.stage import Stage
+
+    tel = _make_telemetry()
+    wf = _make_wf()
+    ctx = _make_ctx(tmp_path, telemetry=tel)
+    stage = Stage(name="build", prompt_source=lambda _: "", model="m", runner=None)  # type: ignore[arg-type]
+    partial = make_stage_result("build", cost=0.25, duration=5.0)
+    err = StageError(stage, result=partial, cause=RuntimeError("crash"))
+    await wf.finalize_error(ctx, err, [partial])
+    record = tel.write.call_args.args[0]
+    assert len(record.stages) == 1
+    assert record.stages[0].stage == "build"
+
+
+async def test_finalize_error_telemetry_error_string_contains_cause(tmp_path: Path) -> None:
+    from cog.core.stage import Stage
+
+    tel = _make_telemetry()
+    wf = _make_wf()
+    ctx = _make_ctx(tmp_path, telemetry=tel)
+    stage = Stage(name="build", prompt_source=lambda _: "", model="m", runner=None)  # type: ignore[arg-type]
+    cause = RuntimeError("runner exploded")
+    err = StageError(stage, cause=cause)
+    await wf.finalize_error(ctx, err, [])
+    record = tel.write.call_args.args[0]
+    assert record.error is not None
+    assert "runner exploded" in record.error

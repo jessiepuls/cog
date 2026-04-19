@@ -16,7 +16,12 @@ class StageError(WorkflowError):
         self.stage = stage
         self.result = result
         self.cause = cause
-        super().__init__(f"stage {stage.name!r} failed")
+        parts = [f"stage {stage.name!r} failed"]
+        if cause is not None:
+            parts.append(f"cause={type(cause).__name__}: {cause}")
+        if result is not None and result.exit_status not in (0, None):
+            parts.append(f"exit_status={result.exit_status}")
+        super().__init__(" | ".join(parts))
 
 
 class RunnerError(Exception):

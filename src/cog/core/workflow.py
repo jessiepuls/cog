@@ -89,6 +89,11 @@ class StageExecutor:
                 await workflow.finalize_success(ctx, results)
             else:
                 await workflow.finalize_noop(ctx, results)
+        except StageError as e:
+            if e.result is not None and e.result not in results:
+                results.append(e.result)
+            await workflow.finalize_error(ctx, e, results)
+            raise
         except Exception as e:
             await workflow.finalize_error(ctx, e, results)
             raise
@@ -117,7 +122,10 @@ class StageExecutor:
                     await sink.emit(event)
         except Exception as e:
             if not stage.tolerate_failure:
-                raise StageError(stage, cause=e) from e
+                partial = await self._make_partial_stage_result(
+                    stage, start, head_before, ctx, run_result, e
+                )
+                raise StageError(stage, result=partial, cause=e) from e
             error = e
         duration = time.monotonic() - start
 
@@ -173,3 +181,42 @@ class StageExecutor:
                 raise StageError(stage, stage_result)
             stage_result = replace(stage_result, error=StageError(stage, stage_result))
         return stage_result
+
+    async def _make_partial_stage_result(
+        self,
+        stage: Stage,
+        start: float,
+        head_before: str | None,
+        ctx: ExecutionContext,
+        run_result: RunResult | None,
+        error: Exception | None,
+    ) -> StageResult:
+        """Best-effort StageResult for error paths."""
+        duration = time.monotonic() - start
+        commits_created = 0
+        if head_before is not None:
+            try:
+                commits_created = await git.commits_between(ctx.project_dir, head_before)
+            except GitError:
+                pass
+        if run_result is not None:
+            return StageResult(
+                stage=stage,
+                duration_seconds=duration,
+                cost_usd=run_result.total_cost_usd,
+                exit_status=run_result.exit_status,
+                final_message=run_result.final_message,
+                stream_json_path=run_result.stream_json_path,
+                commits_created=commits_created,
+                error=error,
+            )
+        return StageResult(
+            stage=stage,
+            duration_seconds=duration,
+            cost_usd=0.0,
+            exit_status=-1,
+            final_message="",
+            stream_json_path=Path("/dev/null"),
+            commits_created=commits_created,
+            error=error,
+        )
