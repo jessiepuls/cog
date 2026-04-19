@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from cog.core.context import ExecutionContext
+from cog.core.errors import CiTimeoutError
 from cog.core.host import CheckRun, GitHost, PrChecks, PullRequest
 from cog.core.runner import StatusEvent
 from cog.core.tracker import IssueTracker
@@ -357,7 +358,7 @@ async def test_wait_honors_cog_ci_poll_interval_env_override(
 async def test_wait_honors_cog_ci_timeout_env_override(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A very small timeout causes the wait to raise TimeoutError."""
+    """A very small timeout causes the wait to raise CiTimeoutError."""
     monkeypatch.setenv("COG_CI_POLL_INTERVAL_SECONDS", "0.001")
     monkeypatch.setenv("COG_CI_TIMEOUT_SECONDS", "0.01")
 
@@ -371,8 +372,9 @@ async def test_wait_honors_cog_ci_timeout_env_override(
     sink = RecordingEventSink()
     ctx = _make_ctx(tmp_path, event_sink=sink)
 
-    with pytest.raises(TimeoutError):
+    with pytest.raises(CiTimeoutError) as exc_info:
         await wf._wait_for_ci(ctx, _make_pr())
+    assert exc_info.value.timeout_seconds == pytest.approx(0.01)
 
 
 # ---------------------------------------------------------------------------
@@ -528,7 +530,7 @@ async def test_finalize_success_ci_timeout_writes_telemetry_with_cause_class_ci_
     ctx = _make_ctx(tmp_path, telemetry=tel)
 
     with patch.object(wf, "_wait_for_ci", new_callable=AsyncMock) as mock_wait:
-        mock_wait.side_effect = TimeoutError()
+        mock_wait.side_effect = CiTimeoutError(timeout_seconds=1800.0)
         await wf.finalize_success(ctx, [make_stage_result("build", commits=1)])
 
     tel.write.assert_awaited_once()

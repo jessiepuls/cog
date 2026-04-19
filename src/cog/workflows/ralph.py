@@ -50,8 +50,8 @@ def _parse_float_env(key: str, default: float) -> float:
         return default
 
 
-_POLL_INTERVAL = _parse_float_env("COG_CI_POLL_INTERVAL_SECONDS", 15.0)
-_CI_TIMEOUT = _parse_float_env("COG_CI_TIMEOUT_SECONDS", 1800.0)
+_DEFAULT_POLL_INTERVAL = 15.0
+_DEFAULT_CI_TIMEOUT = 1800.0
 _HEARTBEAT_INTERVAL = 60.0
 
 
@@ -288,56 +288,56 @@ class RalphWorkflow(Workflow):
 
         await self._tracker.comment(ctx.item, f"🤖 Cog opened a PR for this: {pr.url}")
 
-        ci_error: CiChecksFailedError | CiTimeoutError | None = None
         try:
             checks = await self._wait_for_ci(ctx, pr)
-        except TimeoutError:
-            ci_error = CiTimeoutError(timeout_seconds=_CI_TIMEOUT)
-            checks = None
-        except asyncio.CancelledError:
-            raise
+        except CiTimeoutError as e:
+            await self._handle_ci_failure(ctx, results, pr, None, e)
+            return
 
-        if ci_error is None and checks is not None and checks.all_passed:
+        if checks.all_passed:
             await self._mark_ci_success(ctx, results, pr)
         else:
-            effective_error = ci_error or CiChecksFailedError(
-                failing=tuple(r.name for r in (checks.failed if checks else ()))
+            error = CiChecksFailedError(
+                failing=tuple(r.name for r in checks.failed)
             )
-            await self._handle_ci_failure(ctx, results, pr, checks, effective_error)
+            await self._handle_ci_failure(ctx, results, pr, checks, error)
 
     async def _wait_for_ci(self, ctx: ExecutionContext, pr: PullRequest) -> PrChecks:
-        poll_interval = _parse_float_env("COG_CI_POLL_INTERVAL_SECONDS", _POLL_INTERVAL)
-        ci_timeout = _parse_float_env("COG_CI_TIMEOUT_SECONDS", _CI_TIMEOUT)
+        poll_interval = _parse_float_env("COG_CI_POLL_INTERVAL_SECONDS", _DEFAULT_POLL_INTERVAL)
+        ci_timeout = _parse_float_env("COG_CI_TIMEOUT_SECONDS", _DEFAULT_CI_TIMEOUT)
         await self._emit(ctx, StatusEvent(message=f"⏳ Waiting for CI on PR #{pr.number}..."))
 
         started = time.monotonic()
         last_heartbeat = started
         checks: PrChecks | None = None
 
-        async with asyncio.timeout(ci_timeout):
-            while True:
-                checks = await self._host.get_pr_checks(pr.number)  # type: ignore[union-attr]
-                if not checks.pending:
-                    break
+        try:
+            async with asyncio.timeout(ci_timeout):
+                while True:
+                    checks = await self._host.get_pr_checks(pr.number)  # type: ignore[union-attr]
+                    if not checks.pending:
+                        break
 
-                now = time.monotonic()
-                if now - last_heartbeat >= _HEARTBEAT_INTERVAL:
-                    passed = sum(1 for r in checks.runs if r.state == "passed")
-                    total = len(checks.runs)
-                    pending = sum(1 for r in checks.runs if r.state == "pending")
-                    elapsed_m = int((now - started) / 60)
-                    await self._emit(
-                        ctx,
-                        StatusEvent(
-                            message=(
-                                f"⏳ CI: {passed}/{total} passed, "
-                                f"{pending} pending ({elapsed_m}m elapsed)"
-                            )
-                        ),
-                    )
-                    last_heartbeat = now
+                    now = time.monotonic()
+                    if now - last_heartbeat >= _HEARTBEAT_INTERVAL:
+                        passed = sum(1 for r in checks.runs if r.state == "passed")
+                        total = len(checks.runs)
+                        pending = sum(1 for r in checks.runs if r.state == "pending")
+                        elapsed_m = int((now - started) / 60)
+                        await self._emit(
+                            ctx,
+                            StatusEvent(
+                                message=(
+                                    f"⏳ CI: {passed}/{total} passed, "
+                                    f"{pending} pending ({elapsed_m}m elapsed)"
+                                )
+                            ),
+                        )
+                        last_heartbeat = now
 
-                await asyncio.sleep(poll_interval)
+                    await asyncio.sleep(poll_interval)
+        except TimeoutError:
+            raise CiTimeoutError(timeout_seconds=ci_timeout) from None
 
         assert checks is not None
         if checks.all_passed:
