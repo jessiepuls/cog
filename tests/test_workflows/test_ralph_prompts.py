@@ -209,3 +209,76 @@ def test_build_prompt_test_plan_defers_to_claude_md():
     content = _load_prompt("build")
     test_plan = _test_plan_section(content)
     assert "CLAUDE.md" in test_plan
+
+
+def _cadence_section(content: str) -> str:
+    match = re.search(r"## Testing and linting cadence\n(.*?)(?=\n## |\Z)", content, re.DOTALL)
+    assert match, "## Testing and linting cadence section not found"
+    return match.group(1)
+
+
+def test_build_prompt_has_testing_cadence_section():
+    content = _load_prompt("build")
+    assert "## Testing and linting cadence" in content
+
+
+def test_build_prompt_cadence_describes_target_specific_file_during_iteration():
+    content = _load_prompt("build")
+    cadence = _cadence_section(content)
+    assert "specific test file" in cadence or "test file(s)" in cadence
+
+
+def test_build_prompt_cadence_describes_full_suite_only_at_end():
+    content = _load_prompt("build")
+    cadence = _cadence_section(content)
+    assert "full test" in cadence or "full suite" in cadence
+
+
+def test_build_prompt_cadence_mentions_type_checker_and_linter_once_at_end():
+    content = _load_prompt("build")
+    cadence = _cadence_section(content)
+    assert "type checker" in cadence or "Type checker" in cadence
+    assert "linter" in cadence.lower()
+
+
+def test_build_prompt_cadence_is_language_agnostic():
+    content = _load_prompt("build")
+    cadence = _cadence_section(content)
+    # Tool names may appear only as parenthetical examples following "e.g.,"
+    for tool in ("pytest", "mypy", "ruff"):
+        # Strip all "e.g., ..." parentheticals and check no bare references remain
+        stripped = re.sub(r"e\.g\.,\s*[^)]+", "", cadence)
+        assert tool not in stripped, (
+            f"'{tool}' appears outside a parenthetical e.g. example in cadence section"
+        )
+
+
+def test_build_prompt_references_claude_md_for_project_commands():
+    content = _load_prompt("build")
+    cadence = _cadence_section(content)
+    assert "CLAUDE.md" in cadence
+
+
+def test_build_prompt_has_commit_discipline_section():
+    content = _load_prompt("build")
+    assert "## Commit discipline" in content
+
+
+def test_review_prompt_has_testing_cadence_section():
+    content = _load_prompt("review")
+    assert "## Testing and linting cadence" in content
+
+
+def test_review_prompt_cadence_is_language_agnostic():
+    content = _load_prompt("review")
+    cadence = _cadence_section(content)
+    for tool in ("pytest", "mypy", "ruff"):
+        stripped = re.sub(r"e\.g\.,\s*[^)]+", "", cadence)
+        assert tool not in stripped, (
+            f"'{tool}' appears outside a parenthetical e.g. example in review cadence section"
+        )
+
+
+def test_review_prompt_does_not_have_commit_discipline_section():
+    content = _load_prompt("review")
+    assert "## Commit discipline" not in content
