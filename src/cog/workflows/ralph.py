@@ -23,6 +23,7 @@ from cog.core.tracker import IssueTracker
 from cog.core.workflow import Workflow
 from cog.state_paths import project_slug, project_state_dir
 from cog.telemetry import TelemetryRecord
+from cog.ui.widgets.log_pane import LogPaneWidget
 
 _PRIORITY_RE = re.compile(r"^p(\d+)$")
 _SLUG_RE = re.compile(r"[^a-z0-9-]+")
@@ -90,6 +91,7 @@ class RalphWorkflow(Workflow):
     name: ClassVar[str] = "ralph"
     queue_label: ClassVar[str] = "agent-ready"
     supports_headless: ClassVar[bool] = True
+    content_widget_cls = LogPaneWidget
     preflight_checks = RALPH_CHECKS
 
     def __init__(
