@@ -62,8 +62,13 @@ class ClaudeCliRunner(AgentRunner):
     def __init__(self, sandbox: Sandbox) -> None:
         self._sandbox = sandbox
         self._timeout_seconds = _parse_float_env("COG_RUNNER_TIMEOUT_SECONDS", 1800.0)
+        # Idle timeout: no outstanding tool calls AND no new stream events.
         self._inactivity_timeout_seconds = _parse_float_env(
             "COG_RUNNER_INACTIVITY_TIMEOUT_SECONDS", 120.0
+        )
+        # Tool-call timeout: a tool is in progress (tool_use without matching tool_result).
+        self._tool_call_timeout_seconds = _parse_float_env(
+            "COG_RUNNER_TOOL_CALL_TIMEOUT_SECONDS", 600.0
         )
         self._sigterm_grace_seconds = 5.0
 
@@ -105,14 +110,21 @@ class ClaudeCliRunner(AgentRunner):
         last_event_summary: str | None = None
         _waited = False
         _proc_cleaned = False
+        outstanding_tool_ids: set[str] = set()
+        outstanding_tool_names: dict[str, str] = {}  # id → name, for stall diagnostics
 
         try:
             async with asyncio.timeout(self._timeout_seconds):
                 while True:
+                    timeout = (
+                        self._tool_call_timeout_seconds
+                        if outstanding_tool_ids
+                        else self._inactivity_timeout_seconds
+                    )
                     try:
                         raw_line = await asyncio.wait_for(
                             proc.stdout.readline(),
-                            timeout=self._inactivity_timeout_seconds,
+                            timeout=timeout,
                         )
                     except TimeoutError:
                         proc.terminate()
@@ -124,7 +136,7 @@ class ClaudeCliRunner(AgentRunner):
                         _proc_cleaned = True
                         _waited = True
                         raise RunnerStalledError(
-                            inactivity_seconds=self._inactivity_timeout_seconds,
+                            inactivity_seconds=timeout,
                             last_event_summary=last_event_summary,
                         ) from None
 
@@ -145,6 +157,24 @@ class ClaudeCliRunner(AgentRunner):
                         result_record = record
                         continue
 
+                    record_type = record.get("type")
+
+                    if record_type == "assistant":
+                        for block in record.get("message", {}).get("content", []):
+                            if block.get("type") == "tool_use":
+                                tool_id = block.get("id", "")
+                                if tool_id:
+                                    outstanding_tool_ids.add(tool_id)
+                                    outstanding_tool_names[tool_id] = block.get("name", "")
+                    elif record_type == "user":
+                        for block in record.get("message", {}).get("content", []):
+                            if block.get("type") == "tool_result":
+                                tool_id = block.get("tool_use_id", "")
+                                drained_name = outstanding_tool_names.pop(tool_id, None)
+                                outstanding_tool_ids.discard(tool_id)
+                                if drained_name and not outstanding_tool_ids:
+                                    last_event_summary = f"completed: {drained_name}"
+
                     for event in _record_to_events(record):
                         if isinstance(event, AssistantTextEvent):
                             final_text = event.text
@@ -153,7 +183,7 @@ class ClaudeCliRunner(AgentRunner):
                             cmd_or_path = (
                                 event.input.get("command") or event.input.get("file_path") or ""
                             )
-                            last_event_summary = f"{event.tool}: {cmd_or_path[:120]}"
+                            last_event_summary = f"in-progress: {event.tool}: {cmd_or_path[:120]}"
                         yield event
         except TimeoutError:
             proc.terminate()
