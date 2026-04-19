@@ -197,7 +197,7 @@ class RefineWorkflow(Workflow):
                 project=project_slug(ctx.project_dir),
                 workflow=self.name,
                 item=ctx.item,
-                outcome="noop",
+                outcome="no-op",
                 results=results,
                 extra_stages=(interview_stage,),
                 duration_seconds=(
