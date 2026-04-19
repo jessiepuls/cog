@@ -1,4 +1,4 @@
-"""RunScreen — single-run lifecycle. Loop semantics deferred to #16."""
+"""RunScreen — multi-iteration lifecycle (#16)."""
 
 import asyncio
 import time
@@ -11,9 +11,9 @@ from textual.widgets import Footer, Header, Static
 from textual.worker import Worker
 
 from cog.core.context import ExecutionContext
-from cog.core.outcomes import StageResult
 from cog.core.runner import RunEvent, StageEndEvent
 from cog.core.workflow import StageExecutor, Workflow
+from cog.loop import LoopState, fresh_iteration_context
 
 
 class _CountingSink:
@@ -37,12 +37,23 @@ class RunScreen(Screen):
         ("q", "quit_or_return", "Quit / back"),
     ]
 
-    def __init__(self, workflow: Workflow, ctx: ExecutionContext) -> None:
+    def __init__(
+        self,
+        workflow: Workflow,
+        ctx: ExecutionContext,
+        *,
+        loop: bool = False,
+        max_iterations: int | None = None,
+    ) -> None:
         super().__init__()
         self._workflow = workflow
-        self._ctx = ctx
+        self._base_ctx = ctx
+        self._loop = loop
+        # Single-run is implemented as loop with max_iterations=1
+        self._max_iterations = max_iterations if loop else 1
         self._state: Literal["running", "completed", "failed", "cancelled"] = "running"
         self._cumulative_cost = 0.0
+        self._loop_state = LoopState()
         self._started_at = 0.0
         self._content: Widget | None = None
         self._footer_widget: Static | None = None
@@ -62,11 +73,11 @@ class RunScreen(Screen):
 
     def on_mount(self) -> None:
         self._started_at = time.monotonic()
-        self._ctx.event_sink = _CountingSink(self._content, self)
+        self._base_ctx.event_sink = _CountingSink(self._content, self)
         if hasattr(self._content, "prompt"):
-            self._ctx.input_provider = self._content
+            self._base_ctx.input_provider = self._content
         self.set_interval(1.0, self._update_clock)
-        self._worker = self.run_worker(self._run_once(), exclusive=True)
+        self._worker = self.run_worker(self._run_loop(), exclusive=True)
 
     def _elapsed(self) -> str:
         if self._started_at == 0.0:
@@ -77,7 +88,15 @@ class RunScreen(Screen):
         return f"{secs // 60}m{secs % 60:02d}s"
 
     def _footer_text(self) -> str:
-        return f"state={self._state}  elapsed={self._elapsed()}  cost=${self._cumulative_cost:.3f}"
+        iteration = self._loop_state.iteration
+        max_iter = self._max_iterations
+        if self._loop and max_iter is not None:
+            counter = f"iteration {iteration}/{max_iter}"
+        elif self._loop:
+            counter = f"iteration {iteration}"
+        else:
+            counter = f"state={self._state}"
+        return f"{counter}  cost=${self._cumulative_cost:.3f}  elapsed={self._elapsed()}"
 
     def _refresh_footer(self) -> None:
         if self._footer_widget is not None:
@@ -86,19 +105,46 @@ class RunScreen(Screen):
     def _update_clock(self) -> None:
         self._refresh_footer()
 
-    async def _run_once(self) -> None:
+    async def _run_loop(self) -> None:
         try:
-            results = await StageExecutor().run(self._workflow, self._ctx)
-            self._state = "completed"
-            self._show_completion_panel(results)
+            while True:
+                if (
+                    self._max_iterations is not None
+                    and self._loop_state.iteration >= self._max_iterations
+                ):
+                    break
+                self._loop_state.iteration += 1
+                self._announce_iteration_divider()
+                ctx = fresh_iteration_context(self._base_ctx)
+                results = await StageExecutor().run(self._workflow, ctx)
+                if not results:
+                    self._loop_state.iteration -= 1  # empty-queue probe: don't count
+                    break
+                self._refresh_footer()
         except asyncio.CancelledError:
             self._state = "cancelled"
             self._show_cancellation_panel()
+            raise
         except Exception as e:
             self._state = "failed"
             self._show_error_panel(e)
-        finally:
-            self._refresh_footer()
+            return
+        self._state = "completed"
+        self._show_loop_summary_panel()
+        self._refresh_footer()
+
+    def _announce_iteration_divider(self) -> None:
+        if not self._loop or self._loop_state.iteration <= 1:
+            return
+        if not self.is_attached:
+            return
+        self.mount(
+            Static(
+                f"═══ iteration {self._loop_state.iteration} ═══",
+                classes="iteration-divider",
+            ),
+            before=self._footer_widget,
+        )
 
     def _set_result_panel(self, markup: str) -> None:
         """Mount or update the result panel."""
@@ -110,9 +156,15 @@ class RunScreen(Screen):
         else:
             self.mount(Static(markup, id="result-panel"))
 
-    def _show_completion_panel(self, results: list[StageResult]) -> None:
-        cost = sum(r.cost_usd for r in results)
-        self._set_result_panel(f"[green]✓ Complete[/green] — ${cost:.3f}")
+    def _show_loop_summary_panel(self) -> None:
+        iterations = self._loop_state.iteration
+        cost = self._cumulative_cost
+        if self._loop:
+            self._set_result_panel(
+                f"[green]✓ Complete[/green] — {iterations} iteration(s), ${cost:.3f}"
+            )
+        else:
+            self._set_result_panel(f"[green]✓ Complete[/green] — ${cost:.3f}")
 
     def _show_error_panel(self, e: Exception) -> None:
         self._set_result_panel(f"[red]✗ Failed:[/red] {e!s}")

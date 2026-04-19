@@ -23,6 +23,7 @@ async def build_and_run(
     item_id: int | None,
     loop: bool,
     headless: bool,
+    max_iterations: int | None = None,
 ) -> int:
     # 1. Preflight
     results: list[PreflightResult] = await run_checks(workflow_cls.preflight_checks, project_dir)
@@ -67,8 +68,8 @@ async def build_and_run(
         ctx.item = await tracker.get(str(item_id))
 
     if headless:
-        return await run_headless(workflow, ctx)
+        return await run_headless(workflow, ctx, loop=loop, max_iterations=max_iterations)
 
     from cog.ui.app import run_textual
 
-    return await run_textual(workflow, ctx, loop=loop)
+    return await run_textual(workflow, ctx, loop=loop, max_iterations=max_iterations)
