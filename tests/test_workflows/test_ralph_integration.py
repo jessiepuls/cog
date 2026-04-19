@@ -9,12 +9,12 @@ from unittest.mock import AsyncMock
 import pytest
 
 from cog.core.context import ExecutionContext
-from cog.core.host import GitHost
+from cog.core.host import GitHost, PullRequest
 from cog.core.stage import Stage
 from cog.core.tracker import IssueTracker
 from cog.core.workflow import StageExecutor
 from cog.workflows.ralph import RalphWorkflow
-from tests.fakes import EchoRunner, InMemoryStateCache, make_item
+from tests.fakes import EchoRunner, InMemoryStateCache, ScriptedFinalMessageRunner, make_item
 
 
 @pytest.fixture(autouse=True)
@@ -137,3 +137,107 @@ async def test_end_to_end_with_real_git(git_env: Path) -> None:
 
     # Stage ran
     assert len(results) == 1
+
+
+# ---------------------------------------------------------------------------
+# PR body with structured / unstructured final message
+# ---------------------------------------------------------------------------
+
+_FIXTURE_DIR = Path(__file__).parent.parent / "fixtures" / "ralph"
+
+
+def _make_pr(number: int = 1, url: str = "https://github.com/org/repo/pull/1") -> PullRequest:
+    return PullRequest(
+        number=number,
+        url=url,
+        state="open",
+        body="",
+        head_branch="cog/1-test-item",
+    )
+
+
+async def test_finalize_success_pr_body_with_structured_final_message(tmp_path: Path) -> None:
+    """ScriptedFinalMessageRunner emitting structured output → all three sections in PR body."""
+    final_message = (_FIXTURE_DIR / "final_message_structured.md").read_text()
+
+    tracker = AsyncMock(spec=IssueTracker)
+    host = AsyncMock(spec=GitHost)
+    host.push_branch.return_value = None
+    host.get_pr_for_branch.return_value = None
+    pr = _make_pr()
+    host.create_pr.return_value = pr
+
+    wf = RalphWorkflow(
+        runner=ScriptedFinalMessageRunner(final_message, cost=0.05),
+        tracker=tracker,
+        host=host,
+    )
+
+    async def _noop_pre_stages(ctx: ExecutionContext) -> None:
+        return
+
+    wf.pre_stages = _noop_pre_stages  # type: ignore[method-assign]
+
+    ctx = ExecutionContext(
+        project_dir=tmp_path,
+        tmp_dir=tmp_path,
+        state_cache=InMemoryStateCache(),
+        headless=True,
+        item=make_item(item_id="99", title="Structured test"),
+        work_branch="cog/99-structured-test",
+    )
+
+    results = await StageExecutor().run(wf, ctx)
+    await wf.finalize_success(ctx, results)
+
+    body = host.create_pr.call_args.kwargs["body"]
+    assert "## Summary" in body
+    assert "Adds `--max-iterations`" in body
+    assert "## Key changes" in body
+    assert "src/cog/loop.py" in body
+    assert "## Test plan" in body
+    assert "- [ ] Run `cog ralph --loop --max-iterations 2`" in body
+    assert "## Closes" in body
+    assert "Closes #99" in body
+
+
+async def test_finalize_success_pr_body_with_unstructured_final_message(tmp_path: Path) -> None:
+    """Terse final message → Summary = full message, no Key changes, test-plan fallback."""
+    final_message = (_FIXTURE_DIR / "final_message_terse.md").read_text().strip()
+
+    tracker = AsyncMock(spec=IssueTracker)
+    host = AsyncMock(spec=GitHost)
+    host.push_branch.return_value = None
+    host.get_pr_for_branch.return_value = None
+    host.create_pr.return_value = _make_pr()
+
+    wf = RalphWorkflow(
+        runner=ScriptedFinalMessageRunner(final_message, cost=0.01),
+        tracker=tracker,
+        host=host,
+    )
+
+    async def _noop_pre_stages(ctx: ExecutionContext) -> None:
+        return
+
+    wf.pre_stages = _noop_pre_stages  # type: ignore[method-assign]
+
+    ctx = ExecutionContext(
+        project_dir=tmp_path,
+        tmp_dir=tmp_path,
+        state_cache=InMemoryStateCache(),
+        headless=True,
+        item=make_item(item_id="41", title="Terse test"),
+        work_branch="cog/41-terse-test",
+    )
+
+    results = await StageExecutor().run(wf, ctx)
+    await wf.finalize_success(ctx, results)
+
+    body = host.create_pr.call_args.kwargs["body"]
+    assert "## Summary" in body
+    assert "Committed. All tests and linters pass." in body
+    assert "## Key changes" not in body
+    assert "## Test plan" in body
+    assert "Manual verification" in body
+    assert "Closes #41" in body

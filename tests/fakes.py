@@ -158,6 +158,25 @@ class FakeProc:
         return self.stdout, self.stderr
 
 
+class ScriptedFinalMessageRunner(AgentRunner):
+    """Returns a preconfigured final_message. Used in integration tests."""
+
+    def __init__(self, final_message: str, cost: float = 0.0) -> None:
+        self._final_message = final_message
+        self._cost = cost
+
+    async def stream(self, prompt: str, *, model: str) -> AsyncIterator[RunEvent]:
+        yield ResultEvent(
+            result=RunResult(
+                final_message=self._final_message,
+                total_cost_usd=self._cost,
+                exit_status=0,
+                stream_json_path=Path("/dev/null"),
+                duration_seconds=0.0,
+            )
+        )
+
+
 class FailingRunner(AgentRunner):
     """Raises exc from stream(), simulating a runner crash."""
 
