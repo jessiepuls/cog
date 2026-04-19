@@ -24,6 +24,7 @@ class Workflow(ABC):
     name: ClassVar[str]
     queue_label: ClassVar[str]  # "agent-ready" / "needs-refinement"
     supports_headless: ClassVar[bool]  # no default — subclasses declare
+    needs_item_picker: ClassVar[bool] = False
     preflight_checks: ClassVar[Sequence[PreflightCheck]] = ()
     content_widget_cls: ClassVar[type[Widget] | None] = None
 

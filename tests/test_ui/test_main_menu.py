@@ -129,8 +129,8 @@ def test_main_menu_uses_populated_workflow_registry() -> None:
     # (cog.workflows), not a stale empty one. A silently-wrong import path renders
     # an empty menu even when concrete workflows are registered.
     from cog.ui.screens import main_menu
-    from cog.workflows import RalphWorkflow
     from cog.workflows import WORKFLOWS as registry
+    from cog.workflows import RalphWorkflow
 
     assert main_menu.WORKFLOWS is registry
     assert RalphWorkflow in main_menu.WORKFLOWS
