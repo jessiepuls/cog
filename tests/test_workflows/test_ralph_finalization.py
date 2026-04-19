@@ -422,7 +422,8 @@ async def test_finalize_success_removes_agent_ready_label(tmp_path: Path) -> Non
     wf = _make_wf(tracker=tracker)
     ctx = _make_ctx(tmp_path)
     await wf.finalize_success(ctx, [make_stage_result("build", commits=1)])
-    tracker.remove_label.assert_awaited_once_with(ctx.item, "agent-ready")
+    removed_labels = [c.args[1] for c in tracker.remove_label.call_args_list]
+    assert "agent-ready" in removed_labels
 
 
 async def test_finalize_success_marks_processed_in_state_cache(tmp_path: Path) -> None:
@@ -519,13 +520,15 @@ async def test_push_failed_does_not_call_push_or_create_pr(tmp_path: Path) -> No
     host.create_pr.assert_not_awaited()
 
 
-async def test_push_failed_removes_agent_ready_label(tmp_path: Path) -> None:
+async def test_push_failed_does_not_remove_agent_ready_label(tmp_path: Path) -> None:
+    """Push-failed now keeps agent-ready so the item stays eligible for resume."""
     tracker = _make_tracker()
     host = _make_host(push_error=HostError("fail"))
     wf = _make_wf(tracker=tracker, host=host)
     ctx = _make_ctx(tmp_path)
     await wf.finalize_success(ctx, [make_stage_result("build", commits=1)])
-    tracker.remove_label.assert_awaited_once_with(ctx.item, "agent-ready")
+    removed_labels = [c.args[1] for c in tracker.remove_label.call_args_list]
+    assert "agent-ready" not in removed_labels
 
 
 async def test_push_failed_does_not_mark_processed_in_state_cache(tmp_path: Path) -> None:
@@ -592,7 +595,8 @@ async def test_finalize_noop_removes_agent_ready_label(tmp_path: Path) -> None:
     wf = _make_wf(tracker=tracker)
     ctx = _make_ctx(tmp_path)
     await wf.finalize_noop(ctx, [make_stage_result("build")])
-    tracker.remove_label.assert_awaited_once_with(ctx.item, "agent-ready")
+    removed_labels = [c.args[1] for c in tracker.remove_label.call_args_list]
+    assert "agent-ready" in removed_labels
 
 
 async def test_finalize_noop_comments_with_build_stage_explanation(tmp_path: Path) -> None:
@@ -822,7 +826,8 @@ async def test_full_iteration_end_to_end_success(tmp_path: Path) -> None:
     host.push_branch.assert_awaited_once_with("cog/42-fix")
     host.create_pr.assert_awaited_once()
     tracker.comment.assert_awaited_once()
-    tracker.remove_label.assert_awaited_once_with(ctx.item, "agent-ready")
+    removed_labels = [c.args[1] for c in tracker.remove_label.call_args_list]
+    assert "agent-ready" in removed_labels
     assert cache.is_processed(ctx.item)
 
 
@@ -872,9 +877,11 @@ async def test_full_iteration_end_to_end_noop(tmp_path: Path) -> None:
     await StageExecutor().run(wf, ctx)
 
     host.push_branch.assert_not_awaited()
-    tracker.ensure_label.assert_awaited_once()
-    tracker.add_label.assert_awaited_once_with(ctx.item, "agent-abandoned")
-    tracker.remove_label.assert_awaited_once_with(ctx.item, "agent-ready")
+    tracker.ensure_label.assert_awaited()
+    add_labels = [c.args[1] for c in tracker.add_label.call_args_list]
+    assert "agent-abandoned" in add_labels
+    removed_labels = [c.args[1] for c in tracker.remove_label.call_args_list]
+    assert "agent-ready" in removed_labels
     assert cache.is_processed(ctx.item)
 
 

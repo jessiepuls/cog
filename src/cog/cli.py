@@ -38,6 +38,11 @@ def ralph(
         help="Stop after N iterations (implies --loop).",
     ),
     headless: bool = typer.Option(False, "--headless", help="Bypass Textual; log to stderr."),
+    restart: bool = typer.Option(
+        False,
+        "--restart",
+        help="Delete and recreate any existing cog/N-* branch instead of resuming.",
+    ),
     project_dir: Path | None = typer.Option(None, "--project-dir"),  # noqa: B008
 ) -> None:
     """Autonomous agent: picks next agent-ready issue, runs build/review/document, opens PR."""
@@ -55,6 +60,7 @@ def ralph(
                 loop=loop,
                 max_iterations=max_iterations,
                 headless=headless,
+                restart=restart,
             )
         )
     except KeyboardInterrupt:

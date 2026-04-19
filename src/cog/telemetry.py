@@ -54,6 +54,7 @@ class TelemetryRecord:
     total_cost_usd: float
     error: str | None
     cause_class: str | None = None
+    resumed: bool = False
 
     @classmethod
     def build(
@@ -70,6 +71,7 @@ class TelemetryRecord:
         duration_seconds: float,
         error: str | None = None,
         cause_class: str | None = None,
+        resumed: bool = False,
     ) -> "TelemetryRecord":
         result_stages = tuple(StageTelemetry.from_stage_result(r) for r in results)
         all_stages = tuple(extra_stages) + result_stages
@@ -87,6 +89,7 @@ class TelemetryRecord:
             total_cost_usd=sum(r.cost_usd for r in results) + sum(s.cost_usd for s in extra_stages),
             error=error,
             cause_class=cause_class,
+            resumed=resumed,
         )
 
 

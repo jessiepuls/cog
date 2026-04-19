@@ -59,6 +59,20 @@ async def create_branch(project_dir: Path, name: str, start_point: str = "HEAD")
     await _run(["git", "checkout", "-b", name, start_point], project_dir)
 
 
+async def branch_exists(project_dir: Path, name: str) -> bool:
+    """`git rev-parse --verify refs/heads/<name>` → True if branch exists locally."""
+    try:
+        await _run(["git", "rev-parse", "--verify", f"refs/heads/{name}"], project_dir)
+        return True
+    except GitError:
+        return False
+
+
+async def delete_branch(project_dir: Path, name: str) -> None:
+    """`git branch -D <name>` — force delete (branch may not be merged)."""
+    await _run(["git", "branch", "-D", name], project_dir)
+
+
 async def log_short_shas(project_dir: Path, revision_range: str) -> list[str]:
     """`git log --format=%h --no-merges <range>` → list of short SHAs (oldest-first empty ok)."""
     result = await _run(

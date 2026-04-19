@@ -24,6 +24,7 @@ async def build_and_run(
     loop: bool,
     headless: bool,
     max_iterations: int | None = None,
+    restart: bool = False,
 ) -> int:
     # 1. Preflight
     results: list[PreflightResult] = await run_checks(workflow_cls.preflight_checks, project_dir)
@@ -53,7 +54,7 @@ async def build_and_run(
         await cache.recover_from_remote(tracker, host, workflow_cls.queue_label)
     telemetry = TelemetryWriter(state_dir)
 
-    workflow = workflow_cls(runner=runner, tracker=tracker, host=host)  # type: ignore[call-arg]
+    workflow = workflow_cls(runner=runner, tracker=tracker, host=host, restart=restart)  # type: ignore[call-arg]
 
     tmp_dir = Path(tempfile.mkdtemp(prefix="cog-"))
     ctx = ExecutionContext(

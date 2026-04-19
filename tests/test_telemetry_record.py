@@ -332,3 +332,49 @@ def test_telemetry_record_backward_compat_missing_cause_class():
     # Re-constructing from dict without cause_class uses the default
     reconstructed = TelemetryRecord(**{**d, "stages": tuple(d["stages"])})  # type: ignore[arg-type]
     assert reconstructed.cause_class is None
+
+
+def test_telemetry_record_resumed_defaults_to_false():
+    record = TelemetryRecord.build(
+        project="p",
+        workflow="w",
+        item=_make_item(),
+        outcome="success",
+        results=[],
+        duration_seconds=1.0,
+    )
+    assert record.resumed is False
+
+
+def test_telemetry_record_resumed_field_serializes_to_json():
+    import dataclasses
+    import json
+
+    record = TelemetryRecord.build(
+        project="p",
+        workflow="w",
+        item=_make_item(),
+        outcome="success",
+        results=[],
+        duration_seconds=1.0,
+        resumed=True,
+    )
+    d = dataclasses.asdict(record)
+    line = json.dumps(d)
+    parsed = json.loads(line)
+    assert parsed["resumed"] is True
+
+
+def test_telemetry_record_old_jsonl_without_resumed_field_parses_with_default():
+    record = TelemetryRecord.build(
+        project="p",
+        workflow="w",
+        item=_make_item(),
+        outcome="success",
+        results=[],
+        duration_seconds=1.0,
+    )
+    d = dataclasses.asdict(record)
+    d.pop("resumed", None)
+    reconstructed = TelemetryRecord(**{**d, "stages": tuple(d["stages"])})  # type: ignore[arg-type]
+    assert reconstructed.resumed is False
