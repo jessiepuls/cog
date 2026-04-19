@@ -7,7 +7,7 @@ from cog.trackers.github import GitHubIssueTracker
 from tests.fakes import FakeSubprocessRegistry
 from tests.test_trackers.conftest import register_repo
 
-LIST_FIELDS = "number,title,body,labels,createdAt,updatedAt,url"
+LIST_FIELDS = "number,title,body,labels,state,createdAt,updatedAt,url"
 LIST_ARGV = (
     "gh",
     "issue",

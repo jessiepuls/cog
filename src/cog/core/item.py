@@ -17,6 +17,7 @@ class Item:
     body: str
     labels: tuple[str, ...]
     comments: tuple[Comment, ...]
+    state: str  # "open" | "closed"
     created_at: datetime
     updated_at: datetime
     url: str

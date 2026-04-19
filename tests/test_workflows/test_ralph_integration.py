@@ -96,6 +96,7 @@ async def test_end_to_end_with_real_git(git_env: Path) -> None:
 
     tracker_mock = AsyncMock(spec=IssueTracker)
     tracker_mock.list_by_label = AsyncMock(return_value=[item])
+    tracker_mock.get = AsyncMock(return_value=item)
     host_mock = AsyncMock(spec=GitHost)
 
     wf = RalphWorkflow(runner=EchoRunner(), tracker=tracker_mock, host=host_mock)

@@ -28,6 +28,7 @@ from cog.ui.widgets.log_pane import LogPaneWidget
 _PRIORITY_RE = re.compile(r"^p(\d+)$")
 _SLUG_RE = re.compile(r"[^a-z0-9-]+")
 _COLLAPSE_RE = re.compile(r"-+")
+_BLOCKER_RE = re.compile(r"\b(?:blocked by|depends on)\s+#(\d+)", re.IGNORECASE)
 _TEST_PLAN_RE = re.compile(
     r"###\s+Test plan\s*\n(.*?)(?=\n###|\Z)",
     re.DOTALL | re.IGNORECASE,
@@ -107,19 +108,69 @@ class RalphWorkflow(Workflow):
 
     async def select_item(self, ctx: ExecutionContext) -> Item | None:
         items = await self._tracker.list_by_label("agent-ready", assignee="@me")
+        # NOTE: intentionally do NOT filter by is_deferred here — we re-scan
+        # per iteration so items whose blockers have closed become eligible again.
         eligible = [
             item
             for item in items
             if (item.tracker_id, item.item_id) not in self._processed_this_loop
             and not ctx.state_cache.is_processed(item)
-            and not ctx.state_cache.is_deferred(item)
         ]
-        if not eligible:
-            return None
         eligible.sort(key=lambda i: (_priority_tier(i), i.created_at))
-        chosen = eligible[0]
-        self._processed_this_loop.add((chosen.tracker_id, chosen.item_id))
-        return chosen
+
+        for candidate in eligible:
+            full = await self._tracker.get(candidate.item_id)
+            open_blockers = await self._find_open_blockers(full)
+            if open_blockers:
+                ctx.state_cache.mark_deferred(full, "blocker", [str(b) for b in open_blockers])
+                ctx.state_cache.save()
+                await self._write_deferred_telemetry(ctx, full, open_blockers)
+                self._processed_this_loop.add((full.tracker_id, full.item_id))
+                continue
+            if ctx.state_cache.is_deferred(full):
+                ctx.state_cache.clear_deferral(full)
+                ctx.state_cache.save()
+            self._processed_this_loop.add((full.tracker_id, full.item_id))
+            return full
+        return None
+
+    async def _find_open_blockers(self, item: Item) -> list[int]:
+        """Scan body + comments for 'blocked by #N' / 'depends on #N' references.
+        Returns item_ids of referenced blockers that are currently open, sorted."""
+        text_sources = [item.body] + [c.body for c in item.comments]
+        referenced = {
+            int(m.group(1)) for source in text_sources for m in _BLOCKER_RE.finditer(source)
+        }
+        open_blockers: list[int] = []
+        for blocker_id in sorted(referenced):
+            try:
+                blocker = await self._tracker.get(str(blocker_id))
+            except Exception:
+                continue  # ghost reference; don't defer on an item we can't fetch
+            if blocker.state == "open":
+                open_blockers.append(blocker_id)
+        return open_blockers
+
+    async def _write_deferred_telemetry(
+        self,
+        ctx: ExecutionContext,
+        item: Item,
+        open_blockers: list[int],
+    ) -> None:
+        if ctx.telemetry is None:
+            return
+        record = TelemetryRecord.build(
+            project=project_slug(ctx.project_dir),
+            workflow=self.name,
+            item=item,
+            outcome="deferred-by-blocker",
+            results=[],
+            branch=None,
+            pr_url=None,
+            duration_seconds=0.0,
+            error=f"blocked by: {', '.join(f'#{b}' for b in open_blockers)}",
+        )
+        await ctx.telemetry.write(record)
 
     async def pre_stages(self, ctx: ExecutionContext) -> None:
         assert ctx.item is not None, "RalphWorkflow.pre_stages requires ctx.item"

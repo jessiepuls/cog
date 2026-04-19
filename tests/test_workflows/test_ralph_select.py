@@ -73,6 +73,7 @@ async def test_select_item_sorts_by_priority_tier_asc() -> None:
     ]
     wf = _make_workflow()
     wf._tracker.list_by_label = AsyncMock(return_value=items)
+    wf._tracker.get = AsyncMock(side_effect=lambda iid: make_item(item_id=iid))
     ctx = _make_ctx()
     result = await wf.select_item(ctx)
     assert result is not None
@@ -90,6 +91,7 @@ async def test_select_item_within_tier_sorts_by_created_at_asc() -> None:
     ]
     wf = _make_workflow()
     wf._tracker.list_by_label = AsyncMock(return_value=items)
+    wf._tracker.get = AsyncMock(side_effect=lambda iid: make_item(item_id=iid))
     ctx = _make_ctx()
     result = await wf.select_item(ctx)
     assert result is not None
@@ -119,23 +121,12 @@ async def test_select_item_skips_processed_in_state_cache() -> None:
     assert result is None
 
 
-async def test_select_item_skips_deferred_in_state_cache() -> None:
-    t = datetime(2024, 1, 1, tzinfo=UTC)
-    item = make_item(item_id="1", created_at=t)
-    cache = InMemoryStateCache()
-    cache.mark_deferred(item, "blocked", [])
-    wf = _make_workflow()
-    wf._tracker.list_by_label = AsyncMock(return_value=[item])
-    ctx = _make_ctx(cache)
-    result = await wf.select_item(ctx)
-    assert result is None
-
-
 async def test_select_item_adds_chosen_to_local_set() -> None:
     t = datetime(2024, 1, 1, tzinfo=UTC)
     item = make_item(item_id="42", created_at=t)
     wf = _make_workflow()
     wf._tracker.list_by_label = AsyncMock(return_value=[item])
+    wf._tracker.get = AsyncMock(return_value=make_item(item_id="42"))
     ctx = _make_ctx()
     result = await wf.select_item(ctx)
     assert result is not None

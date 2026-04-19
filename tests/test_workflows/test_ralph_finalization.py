@@ -614,6 +614,7 @@ async def test_full_iteration_end_to_end_success(tmp_path: Path) -> None:
 
     tracker = _make_tracker()
     tracker.list_by_label.return_value = [make_item(item_id="42", title="Fix")]
+    tracker.get = AsyncMock(return_value=make_item(item_id="42", title="Fix"))
     pr = _make_pr(url="https://github.com/org/repo/pull/1")
     host = _make_host(pr=None)
     host.create_pr.return_value = pr
@@ -669,6 +670,7 @@ async def test_full_iteration_end_to_end_noop(tmp_path: Path) -> None:
 
     tracker = _make_tracker()
     tracker.list_by_label.return_value = [make_item(item_id="42", title="Fix")]
+    tracker.get = AsyncMock(return_value=make_item(item_id="42", title="Fix"))
     host = _make_host()
 
     wf = RalphWorkflow(runner=EchoRunner(), tracker=tracker, host=host)
