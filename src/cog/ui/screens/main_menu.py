@@ -10,7 +10,7 @@ from textual.widgets import Footer, Header, Label, ListItem, ListView
 
 from cog.core.tracker import IssueTracker
 from cog.core.workflow import Workflow
-from cog.ui import WORKFLOWS
+from cog.workflows import WORKFLOWS
 
 
 class MainMenuScreen(Screen):

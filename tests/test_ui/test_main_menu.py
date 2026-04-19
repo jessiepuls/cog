@@ -124,6 +124,18 @@ async def test_main_menu_q_quits() -> None:
             assert not pilot.app.is_running
 
 
+def test_main_menu_uses_populated_workflow_registry() -> None:
+    # Regression guard: MainMenuScreen imports WORKFLOWS from the real registry
+    # (cog.workflows), not a stale empty one. A silently-wrong import path renders
+    # an empty menu even when concrete workflows are registered.
+    from cog.ui.screens import main_menu
+    from cog.workflows import RalphWorkflow
+    from cog.workflows import WORKFLOWS as registry
+
+    assert main_menu.WORKFLOWS is registry
+    assert RalphWorkflow in main_menu.WORKFLOWS
+
+
 async def test_main_menu_enter_pushes_run_screen() -> None:
     from textual.screen import Screen
 
