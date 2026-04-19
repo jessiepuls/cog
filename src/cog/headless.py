@@ -8,6 +8,7 @@ from cog.core.runner import (
     RunEvent,
     StageEndEvent,
     StageStartEvent,
+    StatusEvent,
     ToolUseEvent,
 )
 from cog.core.workflow import StageExecutor, Workflow
@@ -31,6 +32,8 @@ class StderrEventSink:
         elif isinstance(event, AssistantTextEvent):
             for line in event.text.splitlines():
                 sys.stderr.write(f"  {line}\n")
+        elif isinstance(event, StatusEvent):
+            sys.stderr.write(f"-- {event.message}\n")
         # ResultEvent is internal to runner; StageEndEvent carries the data.
         # Any other event type (future additions) is silently dropped.
         sys.stderr.flush()

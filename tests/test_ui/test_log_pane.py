@@ -145,6 +145,17 @@ async def test_log_pane_stage_separator_still_renders_on_result_event() -> None:
         assert "0.123" in content
 
 
+async def test_log_pane_renders_status_event_as_dim_line() -> None:
+    from cog.core.runner import StatusEvent
+
+    async with _LogApp().run_test(headless=True) as pilot:
+        widget = pilot.app.query_one(LogPaneWidget)
+        await widget.emit(StatusEvent(message="⏳ Waiting for CI on PR #42..."))
+        await pilot.pause()
+        content = _log_text(widget.query_one("#log", RichLog))
+        assert "⏳ Waiting for CI on PR #42..." in content
+
+
 @pytest.mark.parametrize(
     "tool,kwargs,expected_in_output",
     [

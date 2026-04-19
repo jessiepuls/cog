@@ -2,11 +2,24 @@ import asyncio
 import json
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from cog.core.errors import HostError
-from cog.core.host import GitHost, PullRequest
+from cog.core.host import CheckRun, GitHost, PrChecks, PullRequest
 from cog.core.item import Item
+
+_GH_STATE_MAP: dict[str, Literal["pending", "passed", "failed", "skipped"]] = {
+    "SUCCESS": "passed",
+    "FAILURE": "failed",
+    "PENDING": "pending",
+    "QUEUED": "pending",
+    "IN_PROGRESS": "pending",
+    "SKIPPED": "skipped",
+}
+
+
+def _map_gh_state(raw: str) -> Literal["pending", "passed", "failed", "skipped"]:
+    return _GH_STATE_MAP.get(raw.upper(), "pending")
 
 
 class GitHubGitHost(GitHost):
@@ -52,6 +65,27 @@ class GitHubGitHost(GitHost):
     async def get_pr_body(self, number: int) -> str:
         data = await self._gh_json(["pr", "view", str(number), "--json", "body"])
         return data["body"] or ""
+
+    async def get_pr_checks(self, number: int) -> PrChecks:
+        stdout = await self._gh_json(
+            ["pr", "checks", str(number), "--json", "name,state,link,description"]
+        )
+        runs = tuple(
+            CheckRun(
+                name=r["name"],
+                state=_map_gh_state(r["state"]),
+                link=r.get("link", ""),
+                description=r.get("description", ""),
+            )
+            for r in stdout
+        )
+        return PrChecks(runs=runs)
+
+    async def comment_on_pr(self, number: int, body: str) -> None:
+        await self._gh_run(
+            ["pr", "comment", str(number), "--body-file", "-"],
+            stdin=body.encode("utf-8"),
+        )
 
     async def get_open_prs_mentioning_item(self, item: Item) -> list[PullRequest]:
         query = f'"Closes #{item.item_id}" OR "Fixes #{item.item_id}" OR "Resolves #{item.item_id}"'

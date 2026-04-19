@@ -85,3 +85,19 @@ class RebaseUnresolvedError(Exception):
         super().__init__(
             f"Rebase could not be completed by claude. Analysis: {final_message[:200]}"
         )
+
+
+class CiError(Exception):
+    """Base for CI-related failures."""
+
+
+class CiChecksFailedError(CiError):
+    def __init__(self, failing: tuple[str, ...]) -> None:
+        self.failing = failing
+        super().__init__(f"CI checks failed: {', '.join(failing)}")
+
+
+class CiTimeoutError(CiError):
+    def __init__(self, timeout_seconds: float) -> None:
+        self.timeout_seconds = timeout_seconds
+        super().__init__(f"CI did not resolve within {timeout_seconds:.0f}s")

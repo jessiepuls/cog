@@ -6,7 +6,7 @@ from textual.app import ComposeResult
 from textual.widget import Widget
 from textual.widgets import RichLog
 
-from cog.core.runner import AssistantTextEvent, ResultEvent, RunEvent, ToolUseEvent
+from cog.core.runner import AssistantTextEvent, ResultEvent, RunEvent, StatusEvent, ToolUseEvent
 from cog.ui.widgets._shared import tool_preview
 
 
@@ -53,3 +53,5 @@ class LogPaneWidget(Widget):
         elif isinstance(event, ResultEvent):
             cost = event.result.total_cost_usd
             self._append_line(f"[dim]─── stage complete: ${cost:.3f} ───[/dim]")
+        elif isinstance(event, StatusEvent):
+            self._append_line(f"[dim]{event.message}[/dim]")

@@ -43,7 +43,14 @@ class StageEndEvent:
     exit_status: int
 
 
-RunEvent = AssistantTextEvent | ToolUseEvent | ResultEvent | StageStartEvent | StageEndEvent
+@dataclass(frozen=True)
+class StatusEvent:
+    message: str
+
+
+RunEvent = (
+    AssistantTextEvent | ToolUseEvent | ResultEvent | StageStartEvent | StageEndEvent | StatusEvent
+)
 
 
 class AgentRunner(ABC):

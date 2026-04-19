@@ -105,10 +105,13 @@ async def test_end_to_end_with_real_git(git_env: Path) -> None:
         created_at=datetime(2024, 1, 1, tzinfo=UTC),
     )
 
+    from cog.core.host import PrChecks
+
     tracker_mock = AsyncMock(spec=IssueTracker)
     tracker_mock.list_by_label = AsyncMock(return_value=[item])
     tracker_mock.get = AsyncMock(return_value=item)
     host_mock = AsyncMock(spec=GitHost)
+    host_mock.get_pr_checks.return_value = PrChecks(runs=())
 
     wf = RalphWorkflow(runner=EchoRunner(), tracker=tracker_mock, host=host_mock)
 
@@ -169,12 +172,15 @@ def _make_pr(number: int = 1, url: str = "https://github.com/org/repo/pull/1") -
 
 async def test_finalize_success_pr_body_with_structured_final_message(tmp_path: Path) -> None:
     """ScriptedFinalMessageRunner emitting structured output → all three sections in PR body."""
+    from cog.core.host import PrChecks as _PrChecks
+
     final_message = (_FIXTURE_DIR / "final_message_structured.md").read_text()
 
     tracker = AsyncMock(spec=IssueTracker)
     host = AsyncMock(spec=GitHost)
     host.push_branch.return_value = None
     host.get_pr_for_branch.return_value = None
+    host.get_pr_checks.return_value = _PrChecks(runs=())
     pr = _make_pr()
     host.create_pr.return_value = pr
 
@@ -214,12 +220,15 @@ async def test_finalize_success_pr_body_with_structured_final_message(tmp_path: 
 
 async def test_finalize_success_pr_body_with_unstructured_final_message(tmp_path: Path) -> None:
     """Terse final message → Summary = full message, no Key changes, test-plan fallback."""
+    from cog.core.host import PrChecks as _PrChecks
+
     final_message = (_FIXTURE_DIR / "final_message_terse.md").read_text().strip()
 
     tracker = AsyncMock(spec=IssueTracker)
     host = AsyncMock(spec=GitHost)
     host.push_branch.return_value = None
     host.get_pr_for_branch.return_value = None
+    host.get_pr_checks.return_value = _PrChecks(runs=())
     host.create_pr.return_value = _make_pr()
 
     wf = RalphWorkflow(
