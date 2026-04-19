@@ -52,6 +52,7 @@ class TelemetryRecord:
     stages: tuple[StageTelemetry, ...]
     total_cost_usd: float
     error: str | None
+    cause_class: str | None = None
 
     @classmethod
     def build(
@@ -66,6 +67,7 @@ class TelemetryRecord:
         pr_url: str | None = None,
         duration_seconds: float,
         error: str | None = None,
+        cause_class: str | None = None,
     ) -> "TelemetryRecord":
         return cls(
             ts=datetime.now(UTC).isoformat(),
@@ -80,6 +82,7 @@ class TelemetryRecord:
             stages=tuple(StageTelemetry.from_stage_result(r) for r in results),
             total_cost_usd=sum(r.cost_usd for r in results),
             error=error,
+            cause_class=cause_class,
         )
 
 

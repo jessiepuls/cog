@@ -1,5 +1,7 @@
 """Tests for TelemetryRecord and StageTelemetry construction."""
 
+import dataclasses
+import json
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -164,3 +166,80 @@ def test_outcome_literal_accepted():
             duration_seconds=1.0,
         )
         assert record.outcome == outcome
+
+
+def test_telemetry_record_cause_class_default_is_none():
+    record = TelemetryRecord.build(
+        project="p",
+        workflow="w",
+        item=_make_item(),
+        outcome="success",
+        results=[],
+        duration_seconds=1.0,
+    )
+    assert record.cause_class is None
+
+
+def test_telemetry_record_cause_class_populated_when_provided():
+    record = TelemetryRecord.build(
+        project="p",
+        workflow="w",
+        item=_make_item(),
+        outcome="error",
+        results=[],
+        duration_seconds=1.0,
+        cause_class="RunnerStalledError",
+    )
+    assert record.cause_class == "RunnerStalledError"
+
+
+def test_telemetry_record_cause_class_none_for_generic_exception():
+    record = TelemetryRecord.build(
+        project="p",
+        workflow="w",
+        item=_make_item(),
+        outcome="error",
+        results=[],
+        duration_seconds=1.0,
+        error="something went wrong",
+        cause_class=None,
+    )
+    assert record.cause_class is None
+
+
+def test_telemetry_record_json_includes_cause_class():
+    record = TelemetryRecord.build(
+        project="p",
+        workflow="w",
+        item=_make_item(),
+        outcome="error",
+        results=[],
+        duration_seconds=1.0,
+        error="some error",
+        cause_class="RunnerTimeoutError",
+    )
+    d = dataclasses.asdict(record)
+    line = json.dumps(d)
+    assert "cause_class" in line
+    assert "RunnerTimeoutError" in line
+
+
+def test_telemetry_record_backward_compat_missing_cause_class():
+    # Old JSONL lines without cause_class should parse correctly
+    # when cause_class defaults to None
+    record = TelemetryRecord.build(
+        project="p",
+        workflow="w",
+        item=_make_item(),
+        outcome="error",
+        results=[],
+        duration_seconds=1.0,
+        error="some error",
+    )
+    assert record.cause_class is None
+    d = dataclasses.asdict(record)
+    # Simulate old JSONL that doesn't have cause_class
+    d.pop("cause_class", None)
+    # Re-constructing from dict without cause_class uses the default
+    reconstructed = TelemetryRecord(**{**d, "stages": tuple(d["stages"])})  # type: ignore[arg-type]
+    assert reconstructed.cause_class is None

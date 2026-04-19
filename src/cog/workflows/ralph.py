@@ -298,7 +298,7 @@ class RalphWorkflow(Workflow):
             )
         # KEEP agent-ready label — user fixes infra, ralph retries next run.
         # Don't mark processed — item stays eligible.
-        await self._write_telemetry(ctx, results, "error", error=str(error))
+        await self._write_telemetry(ctx, results, "error", error=error)
         await self.write_report(ctx, results, "error", error=error)
 
     async def write_report(
@@ -413,7 +413,7 @@ class RalphWorkflow(Workflow):
             pass
         # Don't mark processed — local commits exist; next run either reuses the
         # branch (v1.1 orphan-resume) or fails cleanly on create_branch (v1).
-        await self._write_telemetry(ctx, results, "push-failed", error=str(error))
+        await self._write_telemetry(ctx, results, "push-failed", error=error)
         await self.write_report(ctx, results, "error", error=error)
 
     async def _write_telemetry(
@@ -423,8 +423,14 @@ class RalphWorkflow(Workflow):
         outcome: str,
         *,
         pr_url: str | None = None,
-        error: str | None = None,
+        error: Exception | None = None,
     ) -> None:
+        error_str: str | None = None
+        cause_class: str | None = None
+        if error is not None:
+            error_str = str(error)
+            if isinstance(error, StageError) and error.cause is not None:
+                cause_class = type(error.cause).__name__
         if ctx.telemetry is None:
             return
         record = TelemetryRecord.build(
@@ -436,6 +442,7 @@ class RalphWorkflow(Workflow):
             branch=ctx.work_branch,
             pr_url=pr_url,
             duration_seconds=sum(r.duration_seconds for r in results),
-            error=error,
+            error=error_str,
+            cause_class=cause_class,
         )
         await ctx.telemetry.write(record)
