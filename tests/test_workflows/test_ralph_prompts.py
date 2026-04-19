@@ -139,3 +139,76 @@ def test_build_prompt_keeps_test_plan_instruction():
 def test_build_prompt_final_message_format_mentions_wrapper_extraction():
     content = _load_prompt("build")
     assert "wrapper extracts" in content
+
+
+def _key_changes_section(content: str) -> str:
+    match = re.search(
+        r"### Key changes\n(.*?)(?=\n### Test plan\b)", content, re.DOTALL
+    )
+    assert match, "### Key changes section not found in build.md"
+    return match.group(1)
+
+
+def _test_plan_section(content: str) -> str:
+    match = re.search(
+        r"### Test plan\n(.*?)(?=\n## |\Z)", content, re.DOTALL
+    )
+    assert match, "### Test plan section not found in build.md"
+    return match.group(1)
+
+
+def test_build_prompt_key_changes_has_bullet_cap_guidance():
+    content = _load_prompt("build")
+    assert "3-7 bullets" in _key_changes_section(content)
+
+
+def test_build_prompt_key_changes_mentions_conceptual_not_file_by_file():
+    content = _load_prompt("build")
+    key_changes = _key_changes_section(content)
+    assert "conceptual" in key_changes
+    assert "files you touched" not in content
+
+
+def test_build_prompt_key_changes_example_has_three_to_seven_bullets():
+    content = _load_prompt("build")
+    key_changes = _key_changes_section(content)
+    example_match = re.search(r"```\n### Key changes\n(.*?)```", key_changes, re.DOTALL)
+    assert example_match, "No example block found in Key changes section"
+    bullets = re.findall(r"^- ", example_match.group(1), re.MULTILINE)
+    assert 3 <= len(bullets) <= 7, f"Example has {len(bullets)} bullets, expected 3-7"
+
+
+def test_build_prompt_test_plan_has_perspective_framing():
+    content = _load_prompt("build")
+    assert "from the perspective" in _test_plan_section(content)
+
+
+def test_build_prompt_test_plan_lists_change_type_categories():
+    content = _load_prompt("build")
+    test_plan = _test_plan_section(content)
+    for category in (
+        "UI / app code",
+        "CLI / tooling",
+        "Data migration / script",
+        "API / library",
+        "Config / infrastructure",
+    ):
+        assert category in test_plan, f"Missing category: {category}"
+
+
+def test_build_prompt_test_plan_excludes_ci_items_block():
+    content = _load_prompt("build")
+    assert "Do not include tool-execution items that CI runs automatically" in _test_plan_section(content)
+
+
+def test_build_prompt_test_plan_ci_exclusion_is_multi_ecosystem():
+    content = _load_prompt("build")
+    test_plan = _test_plan_section(content)
+    for tool in ("pytest", "jest", "tsc", "eslint"):
+        assert tool in test_plan, f"Missing multi-ecosystem CI tool example: {tool}"
+
+
+def test_build_prompt_test_plan_defers_to_claude_md():
+    content = _load_prompt("build")
+    test_plan = _test_plan_section(content)
+    assert "CLAUDE.md" in test_plan
