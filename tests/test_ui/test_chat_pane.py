@@ -3,11 +3,13 @@
 import asyncio
 from pathlib import Path
 
+import pytest
 from textual.app import App, ComposeResult
 from textual.widgets import RichLog, Static, TextArea
 
 from cog.core.runner import AssistantTextEvent, ResultEvent, RunResult
 from cog.ui.widgets.chat_pane import ChatPaneWidget
+from tests.fakes import make_tool_event
 
 
 def _log_text(log: RichLog) -> str:
@@ -143,3 +145,170 @@ async def test_chat_pane_thinking_indicator_during_emit() -> None:
         await pilot.pause()
         # _hide_thinking_indicator called → still hidden
         assert thinking.display is False
+
+
+# Tool preview tests via emit path
+
+
+@pytest.mark.parametrize(
+    "tool,kwargs,expected_preview",
+    [
+        ("Bash", {"command": "ls -la"}, "ls -la"),
+        ("Read", {"file_path": "/src/main.py"}, "/src/main.py"),
+        ("Write", {"file_path": "/out/result.txt"}, "/out/result.txt"),
+        ("Edit", {"file_path": "/src/foo.py", "old_string": "x", "new_string": "y"}, "/src/foo.py"),
+        ("Glob", {"pattern": "**/*.py"}, "**/*.py"),
+        ("Grep", {"pattern": "def foo"}, "def foo"),
+        ("Agent", {"description": "explore widgets", "prompt": "search"}, "explore widgets"),
+        ("Agent", {"prompt": "search for things"}, "search for things"),
+        ("Task", {"description": "run tests", "prompt": "execute"}, "run tests"),
+        ("ToolSearch", {"query": "select:Read"}, "select:Read"),
+        ("Unknown", {"my_param": "some value"}, "some value"),
+        ("Unknown", {"n": 42}, ""),
+    ],
+)
+async def test_tool_preview_in_chat_pane(tool: str, kwargs: dict, expected_preview: str) -> None:
+    async with _ChatApp().run_test(headless=True) as pilot:
+        widget = pilot.app.query_one(ChatPaneWidget)
+        await widget.emit(make_tool_event(tool, **kwargs))
+        await pilot.pause()
+        content = _log_text(widget.query_one("#scrollback", RichLog))
+        assert tool in content
+        if expected_preview:
+            assert expected_preview in content
+
+
+async def test_tool_preview_todowrite_shows_item_count() -> None:
+    async with _ChatApp().run_test(headless=True) as pilot:
+        widget = pilot.app.query_one(ChatPaneWidget)
+        await widget.emit(make_tool_event("TodoWrite", todos=[{"id": 1}, {"id": 2}]))
+        await pilot.pause()
+        content = _log_text(widget.query_one("#scrollback", RichLog))
+        assert "TodoWrite" in content
+        assert "(2 items)" in content
+
+
+async def test_tool_preview_truncates_at_100_chars_with_ellipsis() -> None:
+    long_cmd = "x" * 101
+    async with _ChatApp().run_test(headless=True) as pilot:
+        widget = pilot.app.query_one(ChatPaneWidget)
+        await widget.emit(make_tool_event("Bash", command=long_cmd))
+        await pilot.pause()
+        content = _log_text(widget.query_one("#scrollback", RichLog))
+        assert "…" in content
+        assert long_cmd not in content
+
+
+async def test_tool_preview_at_exactly_100_chars_is_not_truncated() -> None:
+    exact_cmd = "x" * 100
+    async with _ChatApp().run_test(headless=True) as pilot:
+        widget = pilot.app.query_one(ChatPaneWidget)
+        await widget.emit(make_tool_event("Bash", command=exact_cmd))
+        await pilot.pause()
+        content = _log_text(widget.query_one("#scrollback", RichLog))
+        assert exact_cmd in content
+
+
+async def test_chat_pane_claude_message_renders_via_markdown() -> None:
+    async with _ChatApp().run_test(headless=True) as pilot:
+        widget = pilot.app.query_one(ChatPaneWidget)
+        await widget.emit(AssistantTextEvent(text="**bold text**"))
+        await pilot.pause()
+        content = _log_text(widget.query_one("#scrollback", RichLog))
+        # Markdown strips the asterisks — text appears but markers do not
+        assert "bold text" in content
+        assert "**bold text**" not in content
+
+
+async def test_chat_pane_claude_message_renders_inline_code() -> None:
+    async with _ChatApp().run_test(headless=True) as pilot:
+        widget = pilot.app.query_one(ChatPaneWidget)
+        await widget.emit(AssistantTextEvent(text="Use `foo()` here"))
+        await pilot.pause()
+        content = _log_text(widget.query_one("#scrollback", RichLog))
+        assert "foo()" in content
+
+
+async def test_chat_pane_claude_message_renders_code_block_with_distinct_style() -> None:
+    async with _ChatApp().run_test(headless=True) as pilot:
+        widget = pilot.app.query_one(ChatPaneWidget)
+        await widget.emit(AssistantTextEvent(text="```\nprint('hello')\n```"))
+        await pilot.pause()
+        content = _log_text(widget.query_one("#scrollback", RichLog))
+        assert "print" in content
+        assert "hello" in content
+
+
+async def test_chat_pane_user_message_renders_as_plain_text_not_markdown() -> None:
+    async with _ChatApp().run_test(headless=True) as pilot:
+        widget = pilot.app.query_one(ChatPaneWidget)
+        area = widget.query_one("#input-area", TextArea)
+        area.load_text("**hello**")
+        await pilot.pause()
+        widget._submit()
+        await pilot.pause()
+        content = _log_text(widget.query_one("#scrollback", RichLog))
+        # Plain Text — asterisks preserved as-is
+        assert "**hello**" in content
+
+
+async def test_chat_pane_tool_call_renders_with_dim_style_and_preview() -> None:
+    async with _ChatApp().run_test(headless=True) as pilot:
+        widget = pilot.app.query_one(ChatPaneWidget)
+        await widget.emit(make_tool_event("Bash", command="echo hi"))
+        await pilot.pause()
+        content = _log_text(widget.query_one("#scrollback", RichLog))
+        assert "🔧" in content
+        assert "Bash" in content
+        assert "echo hi" in content
+
+
+async def test_chat_pane_todowrite_renders_count_placeholder_not_full_todos() -> None:
+    async with _ChatApp().run_test(headless=True) as pilot:
+        widget = pilot.app.query_one(ChatPaneWidget)
+        todos = [{"id": i, "content": f"item {i}"} for i in range(5)]
+        await widget.emit(make_tool_event("TodoWrite", todos=todos))
+        await pilot.pause()
+        content = _log_text(widget.query_one("#scrollback", RichLog))
+        assert "TodoWrite" in content
+        assert "(5 items)" in content
+        # Full todo content should NOT be shown
+        assert "item 0" not in content
+
+
+async def test_chat_pane_turn_separator_blank_line_before_each_speaker_message() -> None:
+    async with _ChatApp().run_test(headless=True) as pilot:
+        widget = pilot.app.query_one(ChatPaneWidget)
+        log = widget.query_one("#scrollback", RichLog)
+
+        await widget.emit(AssistantTextEvent(text="First message"))
+        await pilot.pause()
+        await widget.emit(AssistantTextEvent(text="Second message"))
+        await pilot.pause()
+        lines_after_second = list(log.lines)
+
+        # Each message adds a blank line + content, so two messages add more lines
+        # than one message. Blank lines appear in the strip list as empty-text strips.
+        blank_count = sum(1 for s in lines_after_second if s.text == "")
+        assert blank_count >= 2
+
+
+async def test_chat_pane_tool_calls_do_not_get_blank_line_separators() -> None:
+    async with _ChatApp().run_test(headless=True) as pilot:
+        widget = pilot.app.query_one(ChatPaneWidget)
+        log = widget.query_one("#scrollback", RichLog)
+
+        await widget.emit(make_tool_event("Bash", command="ls"))
+        await widget.emit(make_tool_event("Read", file_path="/a.py"))
+        await pilot.pause()
+
+        # Tool lines go through _append_tool_line which writes no blank line
+        blank_count = sum(1 for s in log.lines if s.text == "")
+        assert blank_count == 0
+
+
+async def test_chat_pane_richlog_has_wrap_enabled() -> None:
+    async with _ChatApp().run_test(headless=True) as pilot:
+        widget = pilot.app.query_one(ChatPaneWidget)
+        log = widget.query_one("#scrollback", RichLog)
+        assert log.wrap is True
