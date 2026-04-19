@@ -1,6 +1,6 @@
 from collections.abc import AsyncIterator, Sequence
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -204,6 +204,31 @@ class ExitNonZeroRunner(AgentRunner):
                 duration_seconds=0.0,
             )
         )
+
+
+class FakeItemPicker:
+    """AsyncMock-based ItemPicker Protocol satisfier."""
+
+    def __init__(self, return_value: Item | None = None) -> None:
+        self._return_value = return_value
+        self.called_with: list[Item] = []
+
+    async def pick(self, items: Sequence[Item]) -> Item | None:
+        self.called_with = list(items)
+        return self._return_value
+
+
+def make_needs_refinement_items(ids: list[int]) -> list[Item]:
+    """Factory with spaced created_at values for predictable sort order."""
+    return [
+        make_item(
+            item_id=str(i),
+            title=f"Needs refinement item {i}",
+            labels=("needs-refinement",),
+            created_at=_EPOCH + timedelta(hours=idx),
+        )
+        for idx, i in enumerate(ids)
+    ]
 
 
 class FakeSubprocessRegistry:

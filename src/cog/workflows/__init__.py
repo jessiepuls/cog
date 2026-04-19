@@ -1,7 +1,5 @@
 from cog.core.workflow import Workflow
 from cog.workflows.ralph import RalphWorkflow
+from cog.workflows.refine import RefineWorkflow
 
-# Concrete workflows append themselves here when they land.
-# DummyWorkflow is intentionally excluded — it's a test harness, not a real workflow.
-WORKFLOWS: list[type[Workflow]] = [RalphWorkflow]
-# RefineWorkflow appended in #18/#19
+WORKFLOWS: list[type[Workflow]] = [RalphWorkflow, RefineWorkflow]

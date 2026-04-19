@@ -72,4 +72,6 @@ async def build_and_run(
 
     from cog.ui.app import run_textual
 
-    return await run_textual(workflow, ctx, loop=loop, max_iterations=max_iterations)
+    return await run_textual(
+        workflow, ctx, loop=loop, max_iterations=max_iterations, tracker=tracker
+    )

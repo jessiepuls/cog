@@ -6,6 +6,7 @@ from textual.app import App
 from textual.screen import Screen
 
 from cog.core.context import ExecutionContext
+from cog.core.tracker import IssueTracker
 from cog.core.workflow import Workflow
 from cog.ui.screens.run import RunScreen
 
@@ -27,9 +28,17 @@ async def run_textual(
     *,
     loop: bool,
     max_iterations: int | None = None,
+    tracker: IssueTracker | None = None,
 ) -> int:
     run_screen = RunScreen(workflow, ctx, loop=loop, max_iterations=max_iterations)
     app = CogApp(run_screen)
+    if type(workflow).needs_item_picker:
+        assert tracker is not None, (
+            f"{type(workflow).__name__}.needs_item_picker=True requires a tracker"
+        )
+        from cog.ui.picker import TextualItemPicker
+
+        ctx.item_picker = TextualItemPicker(app, tracker)
     await app.run_async()
     return 0 if run_screen._state in ("completed", "cancelled") else 1
 

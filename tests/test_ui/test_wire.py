@@ -3,6 +3,8 @@
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
+
 from cog.core.preflight import PreflightResult
 from tests.fakes import NullContentWidget
 
@@ -11,6 +13,7 @@ class _FakeWorkflow:
     name = "fake"
     queue_label = "fake-label"
     supports_headless = True
+    needs_item_picker = False
     preflight_checks: list = []
     content_widget_cls = NullContentWidget
 
@@ -81,7 +84,7 @@ async def test_build_and_run_preselects_item_when_item_id_given(tmp_path: Path) 
 
     captured_ctx = {}
 
-    async def _fake_run_textual(workflow, ctx, *, loop, max_iterations=None):
+    async def _fake_run_textual(workflow, ctx, *, loop, max_iterations=None, tracker=None):
         captured_ctx["ctx"] = ctx
         return 0
 
@@ -180,6 +183,109 @@ async def test_build_and_run_wires_full_stack(tmp_path: Path) -> None:
     run_textual_mock.assert_awaited_once()
     _, call_ctx = run_textual_mock.call_args[0]
     assert call_ctx.state_cache is cache_mock
+
+
+class _NeedsPickerWorkflow(_FakeWorkflow):
+    needs_item_picker = True
+    supports_headless = False
+
+
+async def test_build_and_run_forwards_tracker_to_run_textual(tmp_path: Path) -> None:
+    from cog.ui.wire import build_and_run
+
+    run_textual_mock = AsyncMock(return_value=0)
+    cache_mock = MagicMock()
+    cache_mock.was_corrupt.return_value = False
+    cache_mock.is_empty.return_value = False
+    fake_tracker = MagicMock()
+
+    with (
+        patch("cog.ui.wire.run_checks", new=AsyncMock(return_value=[])),
+        patch("cog.ui.wire.print_results"),
+        patch("cog.ui.wire.DockerSandbox", return_value=MagicMock()),
+        patch("cog.ui.wire.ClaudeCliRunner", return_value=MagicMock()),
+        patch("cog.ui.wire.GitHubIssueTracker", return_value=fake_tracker),
+        patch("cog.ui.wire.JsonFileStateCache", return_value=cache_mock),
+        patch("cog.ui.wire.TelemetryWriter"),
+        patch("cog.ui.wire.project_state_dir", return_value=tmp_path / ".cog"),
+        patch("cog.ui.app.run_textual", run_textual_mock),
+    ):
+        await build_and_run(
+            _FakeWorkflow,  # type: ignore[arg-type]
+            tmp_path,
+            item_id=None,
+            loop=False,
+            headless=False,
+        )
+
+    _, kwargs = run_textual_mock.call_args
+    assert kwargs.get("tracker") is fake_tracker
+
+
+async def test_run_textual_injects_item_picker_when_workflow_needs_it(tmp_path: Path) -> None:
+    from cog.core.context import ExecutionContext
+    from cog.ui.app import run_textual
+    from cog.ui.picker import TextualItemPicker
+    from tests.fakes import InMemoryStateCache
+
+    ctx = ExecutionContext(
+        project_dir=tmp_path,
+        tmp_dir=tmp_path / "tmp",
+        state_cache=InMemoryStateCache(),
+        headless=False,
+    )
+
+    class _FakeNeedsPickerWorkflow(_FakeWorkflow):
+        needs_item_picker = True
+
+    wf = _FakeNeedsPickerWorkflow()
+    tracker = MagicMock()
+
+    with patch("textual.app.App.run_async", new=AsyncMock(return_value=None)):
+        await run_textual(wf, ctx, loop=False, tracker=tracker)
+
+    assert isinstance(ctx.item_picker, TextualItemPicker)
+
+
+async def test_run_textual_does_not_inject_picker_when_not_needed(tmp_path: Path) -> None:
+    from cog.core.context import ExecutionContext
+    from cog.ui.app import run_textual
+    from tests.fakes import InMemoryStateCache
+
+    ctx = ExecutionContext(
+        project_dir=tmp_path,
+        tmp_dir=tmp_path / "tmp",
+        state_cache=InMemoryStateCache(),
+        headless=False,
+    )
+
+    wf = _FakeWorkflow()
+
+    with patch("textual.app.App.run_async", new=AsyncMock(return_value=None)):
+        await run_textual(wf, ctx, loop=False, tracker=None)
+
+    assert ctx.item_picker is None
+
+
+async def test_run_textual_asserts_tracker_when_workflow_needs_picker(tmp_path: Path) -> None:
+    from cog.core.context import ExecutionContext
+    from cog.ui.app import run_textual
+    from tests.fakes import InMemoryStateCache
+
+    ctx = ExecutionContext(
+        project_dir=tmp_path,
+        tmp_dir=tmp_path / "tmp",
+        state_cache=InMemoryStateCache(),
+        headless=False,
+    )
+
+    class _FakeNeedsPickerWorkflow(_FakeWorkflow):
+        needs_item_picker = True
+
+    wf = _FakeNeedsPickerWorkflow()
+
+    with pytest.raises(AssertionError, match="requires a tracker"):
+        await run_textual(wf, ctx, loop=False, tracker=None)
 
 
 def _patched_wire_context(tmp_path: Path):
