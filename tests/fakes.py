@@ -9,7 +9,7 @@ from textual.widget import Widget
 
 from cog.core.item import Comment, Item
 from cog.core.outcomes import StageResult
-from cog.core.runner import AgentRunner, ResultEvent, RunEvent, RunResult
+from cog.core.runner import AgentRunner, ResultEvent, RunEvent, RunResult, ToolUseEvent
 from cog.core.stage import Stage
 
 _EPOCH = datetime(2024, 1, 1, tzinfo=UTC)
@@ -216,6 +216,10 @@ class FakeItemPicker:
     async def pick(self, items: Sequence[Item]) -> Item | None:
         self.called_with = list(items)
         return self._return_value
+
+
+def make_tool_event(tool: str, **input_kwargs: object) -> ToolUseEvent:
+    return ToolUseEvent(tool=tool, input=input_kwargs)
 
 
 def make_needs_refinement_items(ids: list[int]) -> list[Item]:

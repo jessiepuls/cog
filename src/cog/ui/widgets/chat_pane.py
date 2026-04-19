@@ -2,12 +2,16 @@
 
 import asyncio
 
+from rich.console import Group
+from rich.markdown import Markdown
+from rich.text import Text
 from textual.app import ComposeResult
 from textual.events import Key
 from textual.widget import Widget
 from textual.widgets import RichLog, Static, TextArea
 
 from cog.core.runner import AssistantTextEvent, ResultEvent, RunEvent, ToolUseEvent
+from cog.ui.widgets._shared import tool_preview
 
 
 class ChatPaneWidget(Widget):
@@ -37,7 +41,7 @@ class ChatPaneWidget(Widget):
         self._input_future: asyncio.Future[str | None] | None = None
 
     def compose(self) -> ComposeResult:
-        yield RichLog(id="scrollback", highlight=True, markup=True)
+        yield RichLog(id="scrollback", highlight=True, markup=True, wrap=True)
         yield Static("⏳ Thinking…", id="thinking")
         yield TextArea(id="input-area")
 
@@ -50,9 +54,15 @@ class ChatPaneWidget(Widget):
         self.query_one("#thinking", Static).display = False
         self._ensure_future()
 
-    def _append_assistant_message(self, text: str) -> None:
+    def _append_message(self, renderable: object) -> None:
         log = self.query_one("#scrollback", RichLog)
-        log.write(f"[bold blue]Claude:[/bold blue] {text}")
+        log.write("")
+        log.write(renderable)
+        log.scroll_end(animate=False)
+
+    def _append_tool_line(self, markup: str) -> None:
+        log = self.query_one("#scrollback", RichLog)
+        log.write(markup)
         log.scroll_end(animate=False)
 
     def _show_thinking_indicator(self) -> None:
@@ -75,9 +85,12 @@ class ChatPaneWidget(Widget):
         text = area.text.strip()
         area.clear()
         if text:
-            log = self.query_one("#scrollback", RichLog)
-            log.write(f"[bold green]You:[/bold green] {text}")
-            log.scroll_end(animate=False)
+            self._append_message(
+                Group(
+                    Text.from_markup("[bold green]You:[/bold green]"),
+                    Text(text),
+                )
+            )
         future = self._ensure_future()
         if not future.done():
             future.set_result(text)
@@ -89,12 +102,16 @@ class ChatPaneWidget(Widget):
 
     async def emit(self, event: RunEvent) -> None:
         if isinstance(event, AssistantTextEvent):
-            self._append_assistant_message(event.text)
+            self._append_message(
+                Group(
+                    Text.from_markup("[bold blue]Claude:[/bold blue]"),
+                    Markdown(event.text),
+                )
+            )
         elif isinstance(event, ToolUseEvent):
-            preview = event.input.get("command") or event.input.get("file_path") or ""
-            log = self.query_one("#scrollback", RichLog)
-            log.write(f"[dim]🔧 {event.tool}: {preview}[/dim]")
-            log.scroll_end(animate=False)
+            preview = tool_preview(event)
+            suffix = f": {preview}" if preview else ""
+            self._append_tool_line(f"[dim]🔧 {event.tool}{suffix}[/dim]")
         elif isinstance(event, ResultEvent):
             self._hide_thinking_indicator()
 
