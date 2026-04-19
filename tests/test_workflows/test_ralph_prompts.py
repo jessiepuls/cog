@@ -1,5 +1,6 @@
 """Tests for RalphWorkflow prompt loading and assembly."""
 
+import re
 from datetime import UTC, datetime
 
 import pytest
@@ -8,6 +9,8 @@ from cog.core.context import ExecutionContext
 from cog.core.item import Comment
 from cog.workflows.ralph import _build_prompt, _load_prompt
 from tests.fakes import InMemoryStateCache, make_item
+
+_UNBOUNDED_DIFF_RE = re.compile(r"git diff\s+(?:main|master)\.\.HEAD(?!\s+--?)")
 
 
 def _make_ctx(tmp_path, item=None, work_branch=None):
@@ -87,3 +90,32 @@ def test_build_prompt_raises_when_item_unset(tmp_path):
     ctx = _make_ctx(tmp_path, item=None)
     with pytest.raises(AssertionError):
         _build_prompt("build", ctx)
+
+
+def test_no_unbounded_git_diff_in_prompts():
+    for stage in ("build", "review", "document"):
+        content = _load_prompt(stage)
+        assert _UNBOUNDED_DIFF_RE.search(content) is None, (
+            f"{stage}.md contains unbounded git diff — see #48/#49"
+        )
+
+
+def test_bounded_tool_calls_section_present():
+    for stage in ("build", "review", "document"):
+        content = _load_prompt(stage)
+        assert "## Bounded tool calls (important)" in content, (
+            f"{stage}.md is missing '## Bounded tool calls (important)' section"
+        )
+
+
+def test_tracker_agnostic_language():
+    for stage in ("build", "review", "document"):
+        content = _load_prompt(stage)
+        assert "GitHub issue" not in content, (
+            f"{stage}.md uses 'GitHub issue' — prefer 'tracked item'"
+        )
+
+
+def test_build_prompt_uses_tracked_item_language():
+    content = _load_prompt("build")
+    assert "tracked item" in content
