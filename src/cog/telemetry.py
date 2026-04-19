@@ -1,6 +1,5 @@
 import asyncio
 import fcntl
-import importlib.metadata
 import json
 import os
 import sys
@@ -9,6 +8,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
 
+from cog import __version__ as cog_version
 from cog.core.item import Item
 from cog.core.outcomes import StageResult
 
@@ -71,7 +71,7 @@ class TelemetryRecord:
     ) -> "TelemetryRecord":
         return cls(
             ts=datetime.now(UTC).isoformat(),
-            cog_version=importlib.metadata.version("cog"),
+            cog_version=cog_version,
             project=project,
             workflow=workflow,
             item=int(item.item_id),

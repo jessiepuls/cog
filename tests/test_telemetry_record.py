@@ -82,6 +82,46 @@ def test_build_populates_every_field():
     assert record.ts != ""
 
 
+def test_cog_version_reads_from_static_package_attribute():
+    # Regression guard: cog_version must come from cog.__version__ (a static
+    # module attribute), not importlib.metadata.version(). The metadata path
+    # raises PackageNotFoundError when cog's dist-info is missing or stale
+    # (e.g., partially-built .venv), killing iterations mid-run.
+    from cog import __version__ as expected
+
+    record = TelemetryRecord.build(
+        project="p",
+        workflow="w",
+        item=_make_item(),
+        outcome="success",
+        results=[],
+        duration_seconds=1.0,
+    )
+    assert record.cog_version == expected
+
+
+def test_cog_version_works_when_package_metadata_missing(monkeypatch):
+    # Regression guard for PackageNotFoundError: simulate an environment where
+    # importlib.metadata.version("cog") raises. The build() path must not
+    # touch metadata and therefore must still succeed.
+    import importlib.metadata
+
+    def _raise(_name: str) -> str:
+        raise importlib.metadata.PackageNotFoundError("cog")
+
+    monkeypatch.setattr(importlib.metadata, "version", _raise)
+
+    record = TelemetryRecord.build(
+        project="p",
+        workflow="w",
+        item=_make_item(),
+        outcome="success",
+        results=[],
+        duration_seconds=1.0,
+    )
+    assert record.cog_version != ""
+
+
 def test_total_cost_sums_stages():
     results = [
         _make_stage_result("s1", cost_usd=0.01),
