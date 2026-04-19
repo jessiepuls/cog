@@ -76,7 +76,7 @@ def refine(
             RefineWorkflow,
             project_dir or Path.cwd(),
             item_id=item,
-            loop=False,
+            loop=item is None,
             headless=False,
         )
     )

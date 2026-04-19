@@ -32,6 +32,7 @@ async def run_textual(
 ) -> int:
     run_screen = RunScreen(workflow, ctx, loop=loop, max_iterations=max_iterations)
     app = CogApp(run_screen)
+    ctx.app = app
     if type(workflow).needs_item_picker:
         assert tracker is not None, (
             f"{type(workflow).__name__}.needs_item_picker=True requires a tracker"

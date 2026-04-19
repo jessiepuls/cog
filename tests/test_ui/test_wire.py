@@ -365,3 +365,24 @@ async def test_build_and_run_forwards_max_iterations_to_run_textual(tmp_path: Pa
     _, kwargs = run_textual_mock.call_args
     assert kwargs.get("max_iterations") == 5
     assert kwargs.get("loop") is True
+
+
+async def test_build_run_screen_sets_ctx_app_for_textual_workflows(tmp_path: Path) -> None:
+    """Regression: RefineWorkflow.post_stages requires ctx.app to be set."""
+    from cog.core.context import ExecutionContext
+    from cog.ui.app import run_textual
+    from tests.fakes import InMemoryStateCache
+
+    ctx = ExecutionContext(
+        project_dir=tmp_path,
+        tmp_dir=tmp_path / "tmp",
+        state_cache=InMemoryStateCache(),
+        headless=False,
+    )
+
+    wf = _FakeWorkflow()
+
+    with patch("textual.app.App.run_async", new=AsyncMock(return_value=None)):
+        await run_textual(wf, ctx, loop=False, tracker=None)
+
+    assert ctx.app is not None
