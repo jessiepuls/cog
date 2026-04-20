@@ -83,7 +83,7 @@ class ClaudeCliRunner(AgentRunner):
         self._timeout_seconds = _parse_float_env("COG_RUNNER_TIMEOUT_SECONDS", 1800.0)
         # Idle timeout: no outstanding tool calls AND no new stream events.
         self._inactivity_timeout_seconds = _parse_float_env(
-            "COG_RUNNER_INACTIVITY_TIMEOUT_SECONDS", 120.0
+            "COG_RUNNER_INACTIVITY_TIMEOUT_SECONDS", 300.0
         )
         # Tool-call timeout: a tool is in progress (tool_use without matching tool_result).
         self._tool_call_timeout_seconds = _parse_float_env(

@@ -239,10 +239,10 @@ async def test_inactivity_proc_waited_before_raise():
 # ---------------------------------------------------------------------------
 
 
-async def test_inactivity_default_is_120_seconds(monkeypatch):
+async def test_inactivity_default_is_300_seconds(monkeypatch):
     monkeypatch.delenv("COG_RUNNER_INACTIVITY_TIMEOUT_SECONDS", raising=False)
     runner = ClaudeCliRunner(NullSandbox())
-    assert runner._inactivity_timeout_seconds == 120.0
+    assert runner._inactivity_timeout_seconds == 300.0
 
 
 async def test_inactivity_env_var_override(monkeypatch):
@@ -254,7 +254,7 @@ async def test_inactivity_env_var_override(monkeypatch):
 async def test_inactivity_env_var_invalid_falls_back_to_default(monkeypatch, capsys):
     monkeypatch.setenv("COG_RUNNER_INACTIVITY_TIMEOUT_SECONDS", "not-a-number")
     runner = ClaudeCliRunner(NullSandbox())
-    assert runner._inactivity_timeout_seconds == 120.0
+    assert runner._inactivity_timeout_seconds == 300.0
     captured = capsys.readouterr()
     assert "WARNING" in captured.err
 
