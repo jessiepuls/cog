@@ -220,6 +220,103 @@ async def test_dashboard_view_cost_totals_empty_when_no_runs(
         assert "$0.00" in rendered
 
 
+async def test_dashboard_view_refresh_all_includes_recent_runs(
+    tmp_path: Path, xdg_state: Path
+) -> None:
+    # Regression: recent runs used to only refresh on app start. refresh_all
+    # now covers it so the strip updates when the user switches back to the
+    # dashboard tab after a workflow completes elsewhere.
+    from cog.state_paths import project_state_dir
+    from cog.ui.widgets.recent_runs import RecentRunsWidget
+
+    runs = project_state_dir(tmp_path) / "runs.jsonl"
+    runs.parent.mkdir(parents=True, exist_ok=True)
+    runs.write_text("")  # start empty
+
+    tracker = _tracker_with_counts()
+    async with _DashApp(tmp_path, tracker).run_test(headless=True) as pilot:
+        await pilot.pause()
+        rows = pilot.app.query_one("#recent-rows", Static)
+        assert rows.display is False  # empty state
+
+        # Append a run after mount (as if a workflow just finished) and
+        # confirm refresh_all picks it up.
+        import json
+
+        runs.write_text(
+            json.dumps(
+                {
+                    "ts": datetime.now(UTC).isoformat(),
+                    "workflow": "ralph",
+                    "item": 99,
+                    "outcome": "success",
+                    "total_cost_usd": 0.10,
+                    "duration_seconds": 60,
+                }
+            )
+            + "\n"
+        )
+        view = pilot.app.query_one(DashboardView)
+        await view.refresh_all()
+        await pilot.pause()
+
+        # Now recent-rows should be visible with the run we just wrote.
+        rows = pilot.app.query_one("#recent-rows", Static)
+        widget = pilot.app.query_one(RecentRunsWidget)  # noqa: F841 — ensure mounted
+        assert rows.display is True
+        assert "#99" in str(rows.renderable)
+
+
+async def test_dashboard_view_cost_totals_include_per_workflow_breakdown(
+    tmp_path: Path, xdg_state: Path
+) -> None:
+    runs = project_state_dir(tmp_path) / "runs.jsonl"
+    runs.parent.mkdir(parents=True, exist_ok=True)
+    now = datetime.now(UTC)
+    records = [
+        {
+            "ts": now.isoformat(),
+            "workflow": "ralph",
+            "item": 1,
+            "outcome": "success",
+            "total_cost_usd": 3.00,
+            "duration_seconds": 60,
+        },
+        {
+            "ts": now.isoformat(),
+            "workflow": "refine",
+            "item": 2,
+            "outcome": "success",
+            "total_cost_usd": 1.00,
+            "duration_seconds": 60,
+        },
+        {
+            "ts": now.isoformat(),
+            "workflow": "chat",
+            "item": None,
+            "outcome": "success",
+            "total_cost_usd": 0.21,
+            "duration_seconds": 10,
+        },
+    ]
+    with runs.open("w") as f:
+        for rec in records:
+            f.write(json.dumps(rec) + "\n")
+
+    tracker = _tracker_with_counts()
+    async with _DashApp(tmp_path, tracker).run_test(headless=True) as pilot:
+        await pilot.pause()
+        cost = pilot.app.query_one("#dashboard-cost", Static)
+        rendered = str(cost.renderable)
+        assert "by workflow" in rendered
+        assert "ralph" in rendered
+        assert "refine" in rendered
+        assert "chat" in rendered
+        # Ralph is largest; should appear first in the breakdown
+        assert rendered.index("ralph") < rendered.index("refine")
+        assert rendered.index("refine") < rendered.index("chat")
+
+
 async def test_dashboard_view_refresh_all_is_idempotent(tmp_path: Path, xdg_state: Path) -> None:
     tracker = _tracker_with_counts(**{"agent-ready": 5})
     async with _DashApp(tmp_path, tracker).run_test(headless=True) as pilot:

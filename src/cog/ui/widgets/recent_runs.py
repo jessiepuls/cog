@@ -157,13 +157,21 @@ class RecentRunsWidget(Widget):
         outcome_bar.display = True
 
         now = datetime.now(UTC)
-        rows = _render_rows(records[-_RECENT_ROWS:][::-1], now=now)
-        rows_label.update(rows)
+        # Filter chat from the recent-runs row list + outcome bar —
+        # conversation turns would otherwise dominate both. Chat still
+        # counts in the sparkline (cost trend) and the dashboard's cost
+        # totals / breakdown.
+        non_chat = [r for r in records if r.get("workflow") != "chat"]
+        if non_chat:
+            rows = _render_rows(non_chat[-_RECENT_ROWS:][::-1], now=now)
+            rows_label.update(rows)
+            outcome_bar.update(_render_outcome_bar(non_chat))
+        else:
+            rows_label.update("[dim]no workflow runs yet[/dim]")
+            outcome_bar.update("")
 
         costs = [float(r.get("total_cost_usd", 0.0) or 0.0) for r in records]
         sparkline.data = costs
-
-        outcome_bar.update(_render_outcome_bar(records))
 
 
 def _render_rows(records: list[dict], *, now: datetime) -> Text:

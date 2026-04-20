@@ -76,12 +76,27 @@ class DashboardView(Widget):
     async def on_mount(self) -> None:
         await self.refresh_all()
 
+    async def on_show(self) -> None:
+        # Textual fires Show when display toggles from False → True — i.e.
+        # when the user switches back to the dashboard tab. Refresh so the
+        # queue counts, cost totals, and recent runs reflect the latest
+        # state (workflow runs that happened while the dashboard was hidden).
+        await self.refresh_all()
+
     async def refresh_all(self) -> None:
         await asyncio.gather(
             self._refresh_project_status(),
             self._refresh_queue_counts(),
             self._refresh_cost_totals(),
+            self._refresh_recent_runs(),
         )
+
+    async def _refresh_recent_runs(self) -> None:
+        try:
+            widget = self.query_one(RecentRunsWidget)
+        except Exception:  # noqa: BLE001 — may not be mounted yet
+            return
+        await widget.refresh_runs()
 
     async def _refresh_project_status(self) -> None:
         try:
@@ -124,22 +139,30 @@ class DashboardView(Widget):
         return len(items)
 
     async def _refresh_cost_totals(self) -> None:
-        today, week, all_time = self._compute_cost_totals()
+        today, week, all_time, by_workflow = self._compute_cost_totals()
         widget = self.query_one("#dashboard-cost", Static)
-        widget.update(
+        totals_line = (
             f"cost: [bold]${today:.2f}[/bold] today  ·  "
             f"[bold]${week:.2f}[/bold] last 7d  ·  "
             f"[bold]${all_time:.2f}[/bold] all time"
         )
+        if by_workflow:
+            breakdown = "  ·  ".join(
+                f"{name} [bold]${cost:.2f}[/bold]"
+                for name, cost in sorted(by_workflow.items(), key=lambda x: x[1], reverse=True)
+            )
+            widget.update(f"{totals_line}\n[dim]by workflow:[/dim]  {breakdown}")
+        else:
+            widget.update(totals_line)
 
-    def _compute_cost_totals(self) -> tuple[float, float, float]:
+    def _compute_cost_totals(self) -> tuple[float, float, float, dict[str, float]]:
         path = project_state_dir(self._project_dir) / "runs.jsonl"
         if not path.exists():
-            return 0.0, 0.0, 0.0
+            return 0.0, 0.0, 0.0, {}
         try:
             text = path.read_text(encoding="utf-8")
         except OSError:
-            return 0.0, 0.0, 0.0
+            return 0.0, 0.0, 0.0, {}
 
         now = datetime.now(UTC)
         today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
@@ -148,6 +171,7 @@ class DashboardView(Widget):
         today_total = 0.0
         week_total = 0.0
         all_total = 0.0
+        by_workflow: dict[str, float] = {}
 
         for line in text.splitlines():
             line = line.strip()
@@ -160,7 +184,10 @@ class DashboardView(Widget):
             if not isinstance(rec, dict):
                 continue
             cost = float(rec.get("total_cost_usd", 0.0) or 0.0)
+            workflow = rec.get("workflow", "?")
             all_total += cost
+            if isinstance(workflow, str):
+                by_workflow[workflow] = by_workflow.get(workflow, 0.0) + cost
             ts_raw = rec.get("ts", "")
             try:
                 ts = datetime.fromisoformat(ts_raw)
@@ -173,4 +200,4 @@ class DashboardView(Widget):
             if ts >= today_start:
                 today_total += cost
 
-        return today_total, week_total, all_total
+        return today_total, week_total, all_total, by_workflow

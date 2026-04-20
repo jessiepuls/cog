@@ -37,7 +37,7 @@ def _record(
     *,
     ts: datetime | None = None,
     workflow: str = "ralph",
-    item: int = 1,
+    item: int | None = 1,
     outcome: str = "success",
     cost: float = 0.5,
     duration: float = 120.0,
@@ -162,6 +162,51 @@ async def test_recent_runs_widget_empty_state_when_no_records(
         assert "no runs yet" in str(empty.renderable)
         rows = pilot.app.query_one("#recent-rows", Static)
         assert rows.display is False
+
+
+async def test_recent_runs_widget_filters_chat_from_row_list(
+    tmp_path: Path, xdg_state: Path
+) -> None:
+    # Chat turns would otherwise dominate the 5-row window. Verify they're
+    # filtered from rows + outcome bar but still counted in the sparkline.
+    _write_runs(
+        _runs_path(tmp_path),
+        [
+            _record(workflow="ralph", item=1, outcome="success", cost=0.20),
+            _record(workflow="chat", item=None, outcome="success", cost=0.05),
+            _record(workflow="chat", item=None, outcome="success", cost=0.05),
+            _record(workflow="chat", item=None, outcome="success", cost=0.05),
+            _record(workflow="refine", item=2, outcome="success", cost=0.10),
+        ],
+    )
+    async with _RecentApp(tmp_path).run_test(headless=True) as pilot:
+        await pilot.pause()
+        rows = pilot.app.query_one("#recent-rows", Static)
+        rendered = str(rows.renderable)
+        # ralph + refine shown, chat not
+        assert "ralph" in rendered
+        assert "refine" in rendered
+        assert "chat" not in rendered
+
+        # Sparkline still has all 5 costs
+        sparkline = pilot.app.query_one("#recent-cost-sparkline", Sparkline)
+        assert len(list(sparkline.data)) == 5
+
+
+async def test_recent_runs_widget_shows_empty_state_when_only_chat(
+    tmp_path: Path, xdg_state: Path
+) -> None:
+    _write_runs(
+        _runs_path(tmp_path),
+        [
+            _record(workflow="chat", item=None, outcome="success", cost=0.03),
+            _record(workflow="chat", item=None, outcome="success", cost=0.04),
+        ],
+    )
+    async with _RecentApp(tmp_path).run_test(headless=True) as pilot:
+        await pilot.pause()
+        rows = pilot.app.query_one("#recent-rows", Static)
+        assert "no workflow runs" in str(rows.renderable)
 
 
 async def test_recent_runs_widget_humanizes_timestamps(tmp_path: Path, xdg_state: Path) -> None:
