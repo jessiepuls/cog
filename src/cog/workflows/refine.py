@@ -172,7 +172,7 @@ class RefineWorkflow(Workflow):
             )
             await self._tracker.add_label(ctx.item, "partially-refined")
 
-        model = os.environ.get("COG_REFINE_INTERVIEW_MODEL", "claude-sonnet-4-6")
+        model = os.environ.get("COG_REFINE_INTERVIEW_MODEL", "claude-opus-4-7")
         interview_stage = self._interview_telemetry_stage(transcript, model)
         record = TelemetryRecord.build(
             project=project_slug(ctx.project_dir),
@@ -202,7 +202,7 @@ class RefineWorkflow(Workflow):
         )
 
         if ctx.telemetry is not None and transcript:
-            model = os.environ.get("COG_REFINE_INTERVIEW_MODEL", "claude-sonnet-4-6")
+            model = os.environ.get("COG_REFINE_INTERVIEW_MODEL", "claude-opus-4-7")
             interview_stage = self._interview_telemetry_stage(transcript, model)
             record = TelemetryRecord.build(
                 project=project_slug(ctx.project_dir),
@@ -234,7 +234,7 @@ class RefineWorkflow(Workflow):
         transcript = self._transcripts.get(ctx.item.item_id, [])
         if not transcript:
             return
-        model = os.environ.get("COG_REFINE_INTERVIEW_MODEL", "claude-sonnet-4-6")
+        model = os.environ.get("COG_REFINE_INTERVIEW_MODEL", "claude-opus-4-7")
         interview_stage = self._interview_telemetry_stage(transcript, model)
         record = TelemetryRecord.build(
             project=project_slug(ctx.project_dir),
@@ -301,7 +301,7 @@ class RefineWorkflow(Workflow):
         lines.append("## Stages\n")
         lines.append("| Stage | Model | Duration (s) | Cost ($) | Exit |")
         lines.append("|-------|-------|--------------|----------|------|")
-        model = os.environ.get("COG_REFINE_INTERVIEW_MODEL", "claude-sonnet-4-6")
+        model = os.environ.get("COG_REFINE_INTERVIEW_MODEL", "claude-opus-4-7")
         if transcript:
             dur = sum(t.duration_seconds for t in transcript)
             cost = sum(t.cost_usd for t in transcript)
@@ -394,7 +394,7 @@ class RefineWorkflow(Workflow):
         assert ctx.item is not None
         transcript: list[InterviewTurn] = []
         preamble = self._build_preamble(ctx.item)
-        model = os.environ.get("COG_REFINE_INTERVIEW_MODEL", "claude-sonnet-4-6")
+        model = os.environ.get("COG_REFINE_INTERVIEW_MODEL", "claude-opus-4-7")
         while True:
             prompt = self._build_turn_prompt(preamble, transcript)
             start = time.monotonic()
