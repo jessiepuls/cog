@@ -41,9 +41,11 @@ def _make_ctx(
     provider: ScriptedInputProvider | None = None,
     tmp_path: Path,
 ) -> ExecutionContext:
+    tmp_dir = tmp_path / "tmp"
+    tmp_dir.mkdir(exist_ok=True)
     return ExecutionContext(
         project_dir=tmp_path,
-        tmp_dir=tmp_path / "tmp",
+        tmp_dir=tmp_dir,
         state_cache=InMemoryStateCache(),
         headless=False,
         item=item,

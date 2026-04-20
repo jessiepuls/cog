@@ -58,9 +58,11 @@ async def test_refine_interview_end_to_end_with_scripted_runner(tmp_path):
     sink = RecordingEventSink()
     provider = ScriptedInputProvider(["my answer"])
 
+    tmp_dir = tmp_path / "tmp"
+    tmp_dir.mkdir()
     ctx = ExecutionContext(
         project_dir=tmp_path,
-        tmp_dir=tmp_path / "tmp",
+        tmp_dir=tmp_dir,
         state_cache=InMemoryStateCache(),
         headless=False,
         item=items[0],

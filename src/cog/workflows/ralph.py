@@ -141,12 +141,6 @@ def _build_prompt(stage_name: str, ctx: ExecutionContext) -> str:
     parts.append(f"Issue #{item.item_id}: {item.title}")
     if ctx.work_branch:
         parts.append(f"Branch: {ctx.work_branch}")
-    parts.append(f"\n### Issue body\n\n{item.body}\n")
-    if item.comments:
-        comments_formatted = "\n\n".join(
-            f"**{c.author}** ({c.created_at.isoformat()}):\n{c.body}" for c in item.comments
-        )
-        parts.append(f"\n### Comments\n\n{comments_formatted}\n")
     return "\n".join(parts)
 
 

@@ -20,6 +20,17 @@ Focus on user-facing changes that aren't self-evident from the code:
 4. **Upgrade notes** — anything a user upgrading from a previous version
    needs to do.
 
+## Item context
+
+To see the item's current body and comments:
+
+    gh issue view <item_id> --json body,comments --jq '.body,.comments'
+
+where `<item_id>` is the number shown in the runtime context at the end
+of this prompt. Fetch when you need it — not every decision requires the
+full body. Claude Code persists any tool output >30KB to a session-scoped
+file; pipe through `head -c 30000` or use `--jq` to stay bounded.
+
 ## Steps
 
 1. Run `git diff --stat $(git merge-base HEAD main 2>/dev/null || git merge-base HEAD master)..HEAD`
@@ -30,7 +41,7 @@ Focus on user-facing changes that aren't self-evident from the code:
 3. Run `git log --oneline $(git merge-base HEAD main 2>/dev/null || git merge-base HEAD master)..HEAD`
    for bounded commit subjects to inform the narrative (NOT `-p`, which
    includes full patches).
-4. Read the item body (provided in the runtime context below) for context
+4. Fetch the item body if needed (see **Item context** above) for context
    on the intent of the change.
 5. Update relevant documentation files (README, CHANGELOG, docstrings,
    inline comments that explain WHY — not what).

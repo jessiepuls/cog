@@ -75,13 +75,6 @@ def test_build_prompt_includes_issue_number_and_title(tmp_path):
     assert "Issue #42: Test issue" in prompt
 
 
-def test_build_prompt_includes_body(tmp_path):
-    item = make_item(body="The body content here.")
-    ctx = _make_ctx(tmp_path, item=item)
-    prompt = _build_prompt("build", ctx)
-    assert "The body content here." in prompt
-
-
 def test_build_prompt_includes_branch_when_set(tmp_path):
     item = make_item()
     ctx = _make_ctx(tmp_path, item=item, work_branch="ralph/42-my-feature")
@@ -96,7 +89,53 @@ def test_build_prompt_omits_branch_when_none(tmp_path):
     assert "Branch:" not in prompt
 
 
-def test_build_prompt_includes_comments_section_when_present(tmp_path):
+def test_build_prompt_raises_when_item_unset(tmp_path):
+    ctx = _make_ctx(tmp_path, item=None)
+    with pytest.raises(AssertionError):
+        _build_prompt("build", ctx)
+
+
+# ---------------------------------------------------------------------------
+# On-demand fetching — prompt static content
+# ---------------------------------------------------------------------------
+
+
+def test_build_prompt_tells_claude_to_fetch_body_via_gh_issue_view():
+    content = _load_prompt("build")
+    assert "gh issue view" in content
+
+
+def test_review_prompt_tells_claude_to_fetch_body_via_gh_issue_view():
+    content = _load_prompt("review")
+    assert "gh issue view" in content
+
+
+def test_document_prompt_tells_claude_to_fetch_body_via_gh_issue_view():
+    content = _load_prompt("document")
+    assert "gh issue view" in content
+
+
+def test_ralph_prompts_include_bounded_output_guidance_for_gh_fetch():
+    for stage in ("build", "review", "document"):
+        content = _load_prompt(stage)
+        assert "head -c 30000" in content or "--jq" in content, (
+            f"{stage}.md is missing bounded-output guidance for gh fetch"
+        )
+
+
+# ---------------------------------------------------------------------------
+# On-demand fetching — runtime assembly regression guards
+# ---------------------------------------------------------------------------
+
+
+def test_build_prompt_runtime_assembly_does_not_include_full_item_body(tmp_path):
+    item = make_item(body="The body content should not appear here.")
+    ctx = _make_ctx(tmp_path, item=item)
+    prompt = _build_prompt("build", ctx)
+    assert "The body content should not appear here." not in prompt
+
+
+def test_build_prompt_runtime_assembly_does_not_include_comments_section(tmp_path):
     comment = Comment(
         author="alice",
         body="Great idea!",
@@ -105,22 +144,22 @@ def test_build_prompt_includes_comments_section_when_present(tmp_path):
     item = make_item(comments=(comment,))
     ctx = _make_ctx(tmp_path, item=item)
     prompt = _build_prompt("build", ctx)
-    assert "### Comments" in prompt
-    assert "alice" in prompt
-    assert "Great idea!" in prompt
-
-
-def test_build_prompt_omits_comments_section_when_empty(tmp_path):
-    item = make_item(comments=())
-    ctx = _make_ctx(tmp_path, item=item)
-    prompt = _build_prompt("build", ctx)
+    assert "Great idea!" not in prompt
     assert "### Comments" not in prompt
 
 
-def test_build_prompt_raises_when_item_unset(tmp_path):
-    ctx = _make_ctx(tmp_path, item=None)
-    with pytest.raises(AssertionError):
-        _build_prompt("build", ctx)
+def test_build_prompt_runtime_assembly_still_includes_item_number_and_title(tmp_path):
+    item = make_item(item_id="99", title="My feature")
+    ctx = _make_ctx(tmp_path, item=item)
+    prompt = _build_prompt("build", ctx)
+    assert "Issue #99: My feature" in prompt
+
+
+def test_build_prompt_runtime_assembly_still_includes_branch_name_when_set(tmp_path):
+    item = make_item(item_id="7")
+    ctx = _make_ctx(tmp_path, item=item, work_branch="ralph/7-my-branch")
+    prompt = _build_prompt("build", ctx)
+    assert "Branch: ralph/7-my-branch" in prompt
 
 
 def test_no_unbounded_git_diff_in_prompts():
