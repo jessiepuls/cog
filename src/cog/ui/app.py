@@ -40,6 +40,11 @@ async def run_textual(
         from cog.ui.picker import TextualItemPicker
 
         ctx.item_picker = TextualItemPicker(app, tracker, project_dir=ctx.project_dir)
+    # The refine workflow calls ctx.review_provider during post_stages.
+    # In the CLI path, use the modal ReviewScreen.
+    from cog.ui.screens.review import ModalReviewProvider
+
+    ctx.review_provider = ModalReviewProvider(app)
     await app.run_async()
     return 0 if run_screen._state in ("completed", "cancelled") else 1
 

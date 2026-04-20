@@ -12,6 +12,7 @@ from textual.widgets import ListView, Static
 from cog.core.tracker import IssueTracker
 from cog.ui.screens.shell import CogShellScreen, _StubView
 from cog.ui.views.dashboard import DashboardView
+from cog.ui.views.refine import RefineView
 
 
 def _fake_tracker() -> IssueTracker:
@@ -32,9 +33,9 @@ class _ShellApp(App):
 async def test_shell_mounts_all_views_on_startup(tmp_path: Path) -> None:
     async with _ShellApp(tmp_path).run_test(headless=True) as pilot:
         await pilot.pause()
-        # Dashboard is the real view; refine/ralph are stubs.
+        # Dashboard + refine are real views; ralph is still a stub.
         pilot.app.query_one("#view-dashboard", DashboardView)
-        pilot.app.query_one("#view-refine", _StubView)
+        pilot.app.query_one("#view-refine", RefineView)
         pilot.app.query_one("#view-ralph", _StubView)
 
 
@@ -82,17 +83,17 @@ async def test_shell_sidebar_click_switches_view(tmp_path: Path) -> None:
 async def test_shell_preserves_widget_state_across_view_switches(tmp_path: Path) -> None:
     async with _ShellApp(tmp_path).run_test(headless=True) as pilot:
         await pilot.pause()
-        refine_view = pilot.app.query_one("#view-refine", _StubView)
-        refine_view._marker = "preserved"  # type: ignore[attr-defined]
+        ralph_view = pilot.app.query_one("#view-ralph", _StubView)
+        ralph_view._marker = "preserved"  # type: ignore[attr-defined]
 
-        await pilot.press("ctrl+3")
-        await pilot.pause()
         await pilot.press("ctrl+2")
         await pilot.pause()
+        await pilot.press("ctrl+3")
+        await pilot.pause()
 
-        same_refine = pilot.app.query_one("#view-refine", _StubView)
-        assert same_refine is refine_view
-        assert getattr(same_refine, "_marker", None) == "preserved"
+        same_ralph = pilot.app.query_one("#view-ralph", _StubView)
+        assert same_ralph is ralph_view
+        assert getattr(same_ralph, "_marker", None) == "preserved"
 
 
 async def test_shell_keybinds_show_in_footer(tmp_path: Path) -> None:

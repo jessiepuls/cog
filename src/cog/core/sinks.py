@@ -1,10 +1,12 @@
 from collections.abc import Sequence
+from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
 from cog.core.runner import RunEvent
 
 if TYPE_CHECKING:
     from cog.core.item import Item
+    from cog.workflows.refine import ReviewOutcome
 
 
 class RunEventSink(Protocol):
@@ -27,3 +29,22 @@ class ItemPicker(Protocol):
     async def pick(self, items: Sequence["Item"]) -> "Item | None":
         """Block until user picks one (returns Item) or cancels (returns None)."""
         ...
+
+
+class ReviewProvider(Protocol):
+    """Solicits a review decision (accept / edit / abandon) from the user.
+
+    Workflows call this to hand off the original vs. proposed state for
+    user review — decoupled from how the UI actually presents it. Modal
+    `ReviewScreen` push and inline view swap both implement this.
+    """
+
+    async def review(
+        self,
+        *,
+        original_title: str,
+        original_body: str,
+        proposed_title: str,
+        proposed_body: str,
+        tmp_dir: Path,
+    ) -> "ReviewOutcome": ...

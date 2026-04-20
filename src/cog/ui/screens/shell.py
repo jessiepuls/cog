@@ -25,6 +25,7 @@ from textual.widgets import Footer, Header, Label, ListItem, ListView, Static
 
 from cog.core.tracker import IssueTracker
 from cog.ui.views.dashboard import DashboardView
+from cog.ui.views.refine import RefineView
 
 
 @dataclass(frozen=True)
@@ -141,7 +142,9 @@ class CogShellScreen(Screen):
             yield Sidebar(_VIEWS)
             with Container(id="content-area"):
                 yield DashboardView(self._project_dir, self._tracker)
-                for v in _VIEWS[1:]:
+                yield RefineView(self._project_dir, self._tracker)
+                # Ralph remains a stub until #125.
+                for v in _VIEWS[2:]:
                     yield _StubView(v)
         yield Footer()
 

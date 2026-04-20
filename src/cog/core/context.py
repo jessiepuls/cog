@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from cog.core.item import Item
-from cog.core.sinks import ItemPicker, RunEventSink, UserInputProvider
+from cog.core.sinks import ItemPicker, ReviewProvider, RunEventSink, UserInputProvider
 from cog.core.state import StateCache
 
 if TYPE_CHECKING:
@@ -25,5 +25,6 @@ class ExecutionContext:
     event_sink: RunEventSink | None = None
     input_provider: UserInputProvider | None = None
     item_picker: ItemPicker | None = None
+    review_provider: ReviewProvider | None = None
     telemetry: TelemetryWriter | None = None
     app: App | None = field(default=None, repr=False)

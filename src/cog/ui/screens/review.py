@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from textual.app import ComposeResult
+from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Container, ScrollableContainer
 from textual.screen import ModalScreen
@@ -132,3 +132,33 @@ class ReviewScreen(ModalScreen[ReviewOutcome]):
         if edited is not None:
             self._proposed_body = edited
             self.query_one("#proposed-body", Static).update(edited)
+
+
+class ModalReviewProvider:
+    """ReviewProvider implementation that pushes ReviewScreen modally.
+
+    Used by the CLI path (`cog refine --item N` → RunScreen → modal
+    ReviewScreen). The shell (#121) uses an inline provider instead.
+    """
+
+    def __init__(self, app: App) -> None:
+        self._app = app
+
+    async def review(
+        self,
+        *,
+        original_title: str,
+        original_body: str,
+        proposed_title: str,
+        proposed_body: str,
+        tmp_dir: Path,
+    ) -> ReviewOutcome:
+        return await self._app.push_screen_wait(
+            ReviewScreen(
+                original_title=original_title,
+                original_body=original_body,
+                proposed_title=proposed_title,
+                proposed_body=proposed_body,
+                tmp_dir=tmp_dir,
+            )
+        )

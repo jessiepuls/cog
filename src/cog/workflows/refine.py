@@ -140,23 +140,24 @@ class RefineWorkflow(Workflow):
 
     async def post_stages(self, ctx: ExecutionContext, results: list[StageResult]) -> None:
         assert ctx.item is not None
-        assert ctx.app is not None, "refine post_stages requires ctx.app (Textual mode only)"
-
-        from cog.ui.screens.review import ReviewScreen
+        assert ctx.review_provider is not None, (
+            "refine post_stages requires ctx.review_provider "
+            "(Textual mode only — either the shell-view inline provider "
+            "or the CLI modal-screen provider sets this)"
+        )
 
         rewrite_result = next(r for r in results if r.stage.name == "rewrite")
         sections = _extract_title_body(rewrite_result.final_message)
         proposed_title = (sections.get("title") or ctx.item.title).strip() or ctx.item.title
         proposed_body = (sections.get("body") or rewrite_result.final_message).strip()
 
-        screen = ReviewScreen(
+        outcome: ReviewOutcome = await ctx.review_provider.review(
             original_title=ctx.item.title,
             original_body=ctx.item.body,
             proposed_title=proposed_title,
             proposed_body=proposed_body,
             tmp_dir=ctx.tmp_dir,
         )
-        outcome: ReviewOutcome = await ctx.app.push_screen_wait(screen)
         self._review_outcomes[ctx.item.item_id] = outcome
 
     async def classify_outcome(self, ctx: ExecutionContext, results: list[StageResult]) -> Outcome:
