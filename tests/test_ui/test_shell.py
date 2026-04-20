@@ -10,8 +10,9 @@ from textual.widget import Widget
 from textual.widgets import ListView, Static
 
 from cog.core.tracker import IssueTracker
-from cog.ui.screens.shell import CogShellScreen, _StubView
+from cog.ui.screens.shell import CogShellScreen
 from cog.ui.views.dashboard import DashboardView
+from cog.ui.views.ralph import RalphView
 from cog.ui.views.refine import RefineView
 
 
@@ -33,10 +34,9 @@ class _ShellApp(App):
 async def test_shell_mounts_all_views_on_startup(tmp_path: Path) -> None:
     async with _ShellApp(tmp_path).run_test(headless=True) as pilot:
         await pilot.pause()
-        # Dashboard + refine are real views; ralph is still a stub.
         pilot.app.query_one("#view-dashboard", DashboardView)
         pilot.app.query_one("#view-refine", RefineView)
-        pilot.app.query_one("#view-ralph", _StubView)
+        pilot.app.query_one("#view-ralph", RalphView)
 
 
 async def test_shell_displays_only_active_view(tmp_path: Path) -> None:
@@ -83,7 +83,7 @@ async def test_shell_sidebar_click_switches_view(tmp_path: Path) -> None:
 async def test_shell_preserves_widget_state_across_view_switches(tmp_path: Path) -> None:
     async with _ShellApp(tmp_path).run_test(headless=True) as pilot:
         await pilot.pause()
-        ralph_view = pilot.app.query_one("#view-ralph", _StubView)
+        ralph_view = pilot.app.query_one("#view-ralph", RalphView)
         ralph_view._marker = "preserved"  # type: ignore[attr-defined]
 
         await pilot.press("ctrl+2")
@@ -91,7 +91,7 @@ async def test_shell_preserves_widget_state_across_view_switches(tmp_path: Path)
         await pilot.press("ctrl+3")
         await pilot.pause()
 
-        same_ralph = pilot.app.query_one("#view-ralph", _StubView)
+        same_ralph = pilot.app.query_one("#view-ralph", RalphView)
         assert same_ralph is ralph_view
         assert getattr(same_ralph, "_marker", None) == "preserved"
 

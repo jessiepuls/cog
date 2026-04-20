@@ -1,7 +1,14 @@
-"""RunScreen — multi-iteration lifecycle (#16)."""
+"""RunScreen — multi-iteration lifecycle (#16).
+
+Used by the CLI path (`cog ralph --item N` / `cog refine --item N` without
+`--headless`). The shell path (`cog` → refine/ralph view) hosts workflows
+inline in view widgets instead; those views reuse the stage-breakdown
+helpers exported from this module (`StageSummary`, `StageCountingSink`).
+"""
 
 import asyncio
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Literal
 
@@ -18,7 +25,7 @@ from cog.loop import LoopState, fresh_iteration_context
 
 
 @dataclass
-class _StageSummary:
+class StageSummary:
     name: str
     model: str = ""
     cost_usd: float = 0.0
@@ -27,23 +34,32 @@ class _StageSummary:
     status: Literal["running", "completed", "failed"] = "running"
 
 
-class _CountingSink:
-    """Wraps the content widget sink, forwarding events, accumulating cost, and
-    building per-stage breakdown data for the completion / failure panels."""
+class StageCountingSink:
+    """Forwards events to an inner sink, accumulates cost via a callback, and
+    builds a per-stage breakdown usable for completion / failure panels.
 
-    def __init__(self, inner: object, screen: "RunScreen") -> None:
+    Used by both RunScreen (CLI path) and the shell's ralph/refine views
+    (which embed their own event sinks + footers). Callback decoupling lets
+    each host update its own cost counter / footer without the sink knowing
+    about its host type.
+    """
+
+    def __init__(
+        self,
+        inner: object,
+        *,
+        on_cost: Callable[[float], None],
+    ) -> None:
         self._inner = inner
-        self._screen = screen
-        self._stages: list[_StageSummary] = []
+        self._on_cost = on_cost
+        self._stages: list[StageSummary] = []
         self._stage_starts: dict[str, float] = {}
 
     @property
-    def stages(self) -> list[_StageSummary]:
+    def stages(self) -> list[StageSummary]:
         return self._stages
 
     def mark_running_stages_failed(self) -> None:
-        """Called when the iteration ended in failure; any running stage is the
-        failing one."""
         now = time.monotonic()
         for s in self._stages:
             if s.status == "running":
@@ -56,11 +72,10 @@ class _CountingSink:
         if hasattr(self._inner, "emit"):
             await self._inner.emit(event)
         if isinstance(event, StageStartEvent):
-            self._stages.append(_StageSummary(name=event.stage_name, model=event.model))
+            self._stages.append(StageSummary(name=event.stage_name, model=event.model))
             self._stage_starts[event.stage_name] = time.monotonic()
         elif isinstance(event, StageEndEvent):
-            self._screen._cumulative_cost += event.cost_usd
-            self._screen._refresh_footer()
+            self._on_cost(event.cost_usd)
             running = next(
                 (s for s in self._stages if s.name == event.stage_name and s.status == "running"),
                 None,
@@ -81,13 +96,44 @@ class _CountingSink:
                 existing.turns += 1
             else:
                 self._stages.append(
-                    _StageSummary(
+                    StageSummary(
                         name=event.stage_name,
                         cost_usd=event.cost_usd,
                         turns=1,
                         status="completed",
                     )
                 )
+
+
+def format_stage_duration(seconds: float) -> str:
+    secs = int(seconds)
+    if secs < 60:
+        return f"{secs}s"
+    return f"{secs // 60}m{secs % 60:02d}s"
+
+
+def format_stage_line(stage: StageSummary) -> str:
+    parts = []
+    if stage.status == "failed":
+        parts.append("[red]✗[/red]")
+    parts.append(stage.name)
+    parts.append(f"${stage.cost_usd:.3f}")
+    details: list[str] = []
+    if stage.model:
+        details.append(stage.model)
+    if stage.duration_s:
+        details.append(format_stage_duration(stage.duration_s))
+    if stage.turns > 1:
+        details.append(f"{stage.turns} turns")
+    if details:
+        parts.append(f"({', '.join(details)})")
+    return " ".join(parts)
+
+
+def stage_breakdown_line(stages: list[StageSummary]) -> str:
+    if not stages:
+        return ""
+    return "  " + " · ".join(format_stage_line(s) for s in stages)
 
 
 class RunScreen(Screen):
@@ -117,7 +163,7 @@ class RunScreen(Screen):
         self._content: Widget | None = None
         self._footer_widget: Static | None = None
         self._worker: Worker[None] | None = None
-        self._sink: _CountingSink | None = None
+        self._sink: StageCountingSink | None = None
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -133,7 +179,7 @@ class RunScreen(Screen):
 
     def on_mount(self) -> None:
         self._started_at = time.monotonic()
-        self._sink = _CountingSink(self._content, self)
+        self._sink = StageCountingSink(self._content, on_cost=self._add_cost)
         self._base_ctx.event_sink = self._sink
         if hasattr(self._content, "prompt"):
             self._base_ctx.input_provider = self._content
@@ -158,6 +204,10 @@ class RunScreen(Screen):
         else:
             counter = f"state={self._state}"
         return f"{counter}  cost=${self._cumulative_cost:.3f}  elapsed={self._elapsed()}"
+
+    def _add_cost(self, cost: float) -> None:
+        self._cumulative_cost += cost
+        self._refresh_footer()
 
     def _refresh_footer(self) -> None:
         if self._footer_widget is not None:
@@ -221,33 +271,10 @@ class RunScreen(Screen):
         else:
             self.mount(Static(markup, id="result-panel"))
 
-    def _format_duration(self, seconds: float) -> str:
-        secs = int(seconds)
-        if secs < 60:
-            return f"{secs}s"
-        return f"{secs // 60}m{secs % 60:02d}s"
-
-    def _format_stage_line(self, stage: _StageSummary) -> str:
-        parts = []
-        if stage.status == "failed":
-            parts.append("[red]✗[/red]")
-        parts.append(stage.name)
-        parts.append(f"${stage.cost_usd:.3f}")
-        details: list[str] = []
-        if stage.model:
-            details.append(stage.model)
-        if stage.duration_s:
-            details.append(self._format_duration(stage.duration_s))
-        if stage.turns > 1:
-            details.append(f"{stage.turns} turns")
-        if details:
-            parts.append(f"({', '.join(details)})")
-        return " ".join(parts)
-
     def _stage_breakdown_line(self) -> str:
-        if self._sink is None or not self._sink.stages:
+        if self._sink is None:
             return ""
-        return "  " + " · ".join(self._format_stage_line(s) for s in self._sink.stages)
+        return stage_breakdown_line(self._sink.stages)
 
     def _show_loop_summary_panel(self) -> None:
         iterations = self._loop_state.iteration
