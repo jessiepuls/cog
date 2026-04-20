@@ -11,7 +11,9 @@ running transcript (same pattern as refine's interview loop).
 from __future__ import annotations
 
 import os
+import time
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from importlib.resources import files
 from pathlib import Path
 
@@ -21,6 +23,8 @@ from textual.widget import Widget
 from textual.worker import Worker
 
 from cog.core.runner import ResultEvent, StatusEvent
+from cog.state_paths import project_slug, project_state_dir
+from cog.telemetry import StageTelemetry, TelemetryRecord, TelemetryWriter
 from cog.ui.widgets.chat_pane import ChatPaneWidget
 
 _DEFAULT_MODEL = "claude-opus-4-7"
@@ -97,6 +101,7 @@ class ChatView(Widget):
         sandbox = DockerSandbox()
         runner = ClaudeCliRunner(sandbox)
         model = os.environ.get("COG_CHAT_MODEL", _DEFAULT_MODEL)
+        telemetry = TelemetryWriter(project_state_dir(self._project_dir))
 
         while True:
             user_message = await self._chat_pane.prompt()
@@ -109,18 +114,70 @@ class ChatView(Widget):
 
             prompt = self._build_prompt()
             final_message = ""
+            turn_cost = 0.0
+            turn_start = time.monotonic()
+            failed_error: str | None = None
             try:
                 async for event in runner.stream(prompt, model=model):
                     if isinstance(event, ResultEvent):
                         final_message = event.result.final_message
+                        turn_cost = event.result.total_cost_usd
                         continue
                     await self._chat_pane.emit(event)
             except Exception as e:  # noqa: BLE001 — surface any runner error in-line
+                failed_error = f"{type(e).__name__}: {e}"
                 await self._chat_pane.emit(StatusEvent(message=f"[red]chat error: {e}[/red]"))
-                continue
 
-            if final_message:
+            if final_message and not failed_error:
                 self._transcript.append(_Turn(role="assistant", content=final_message))
+
+            # One telemetry record per turn so chat shows up on the dashboard's
+            # recent-runs strip. Ephemeral (no item, no branch, no PR).
+            turn_duration = time.monotonic() - turn_start
+            await self._write_turn_telemetry(
+                telemetry,
+                model=model,
+                cost=turn_cost,
+                duration=turn_duration,
+                failed=failed_error,
+            )
+
+    async def _write_turn_telemetry(
+        self,
+        writer: TelemetryWriter,
+        *,
+        model: str,
+        cost: float,
+        duration: float,
+        failed: str | None,
+    ) -> None:
+        from cog import __version__ as cog_version
+
+        stage = StageTelemetry(
+            stage="chat-turn",
+            model=model,
+            duration_s=duration,
+            cost_usd=cost,
+            exit_status=1 if failed else 0,
+            commits=0,
+        )
+        record = TelemetryRecord(
+            ts=datetime.now(UTC).isoformat(),
+            cog_version=cog_version,
+            project=project_slug(self._project_dir),
+            workflow="chat",
+            item=None,
+            outcome="error" if failed else "success",
+            branch=None,
+            pr_url=None,
+            duration_seconds=duration,
+            stages=(stage,),
+            total_cost_usd=cost,
+            error=failed,
+            cause_class=None,
+            resumed=False,
+        )
+        await writer.write(record)
 
     def _build_prompt(self) -> str:
         parts = [_load_preamble(), "\n## Conversation\n"]

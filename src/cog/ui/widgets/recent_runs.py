@@ -96,10 +96,15 @@ class RecentRunsWidget(Widget):
         height: auto;
     }
     RecentRunsWidget > #recent-sparkline-row {
-        height: 1;
+        height: 2;
+    }
+    RecentRunsWidget > #recent-sparkline-row > #recent-sparkline-label {
+        width: auto;
+        color: $text-muted;
     }
     RecentRunsWidget > #recent-sparkline-row > Sparkline {
         width: 1fr;
+        height: 2;
     }
     RecentRunsWidget > #recent-outcome-bar {
         height: 1;

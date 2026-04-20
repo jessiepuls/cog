@@ -53,7 +53,7 @@ class TelemetryRecord:
     cog_version: str
     project: str
     workflow: str
-    item: int
+    item: int | None  # None for workflow-less surfaces (e.g. chat)
     outcome: TelemetryOutcome
     branch: str | None
     pr_url: str | None
