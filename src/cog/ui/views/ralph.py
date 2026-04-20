@@ -135,6 +135,16 @@ class RalphView(Widget):
         if self._substate == "idle":
             await self.refresh_queue()
 
+    def focus_content(self) -> None:
+        """Called by the shell after this view becomes active. Focus the
+        queue in idle state so Enter / arrows work without a click first."""
+        if self._substate == "idle":
+            try:
+                self.query_one("#ralph-queue", ListView).focus()
+            except Exception:  # noqa: BLE001
+                pass
+        # running / post_run: bindings are on the view; no sub-widget needs focus.
+
     async def action_refresh_queue(self) -> None:
         await self.refresh_queue()
 

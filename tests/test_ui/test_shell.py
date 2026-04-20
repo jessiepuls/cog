@@ -70,6 +70,29 @@ async def test_shell_ctrl_1_2_3_switch_views(tmp_path: Path) -> None:
         assert pilot.app.query_one("#view-ralph", Widget).display is False
 
 
+async def test_shell_focuses_refine_queue_after_switching_to_refine(tmp_path: Path) -> None:
+    async with _ShellApp(tmp_path).run_test(headless=True) as pilot:
+        await pilot.pause()
+        await pilot.press("ctrl+2")
+        # call_after_refresh runs on the next frame; pause a few times.
+        for _ in range(3):
+            await pilot.pause()
+        focused = pilot.app.focused
+        assert focused is not None
+        assert focused.id == "refine-queue"
+
+
+async def test_shell_focuses_ralph_queue_after_switching_to_ralph(tmp_path: Path) -> None:
+    async with _ShellApp(tmp_path).run_test(headless=True) as pilot:
+        await pilot.pause()
+        await pilot.press("ctrl+3")
+        for _ in range(3):
+            await pilot.pause()
+        focused = pilot.app.focused
+        assert focused is not None
+        assert focused.id == "ralph-queue"
+
+
 async def test_shell_sidebar_click_switches_view(tmp_path: Path) -> None:
     async with _ShellApp(tmp_path).run_test(headless=True) as pilot:
         await pilot.pause()

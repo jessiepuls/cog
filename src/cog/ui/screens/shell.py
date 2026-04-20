@@ -172,6 +172,10 @@ class CogShellScreen(Screen):
         for v in _VIEWS:
             widget = self.query_one(f"#view-{v.id}")
             widget.display = v.id == self._active_view_id
+            if v.id == self._active_view_id and hasattr(widget, "focus_content"):
+                # Defer focus until the layout pass finishes; otherwise the
+                # target widget's focusable state may not be settled yet.
+                self.call_after_refresh(widget.focus_content)
 
     def _highlight_sidebar_row(self, view_id: str) -> None:
         list_view = self.query_one("#sidebar-nav", ListView)

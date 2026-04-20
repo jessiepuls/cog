@@ -149,6 +149,25 @@ class RefineView(Widget):
         if self._substate == "idle":
             await self.refresh_queue()
 
+    def focus_content(self) -> None:
+        """Called by the shell after this view becomes active. Focus the
+        sub-widget that makes sense for the current sub-state so the user
+        can interact without clicking first."""
+        if self._substate == "idle":
+            try:
+                self.query_one("#refine-queue", ListView).focus()
+            except Exception:  # noqa: BLE001
+                pass
+        elif self._substate == "running" and self._chat_pane is not None:
+            # Focus the chat pane's text input for typing replies.
+            try:
+                from textual.widgets import TextArea
+
+                self._chat_pane.query_one("#input-area", TextArea).focus()
+            except Exception:  # noqa: BLE001
+                pass
+        # review sub-state: no specific input — bindings fire on the view.
+
     async def action_refresh_queue(self) -> None:
         await self.refresh_queue()
 
