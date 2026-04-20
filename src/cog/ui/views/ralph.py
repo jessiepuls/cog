@@ -136,6 +136,12 @@ class RalphView(Widget, can_focus=True):
         if self._substate == "idle":
             await self.refresh_queue()
 
+    def needs_attention(self) -> str | None:
+        """Current attention state (synchronous). Returns a short reason or None."""
+        if self._substate == "post_run":
+            return "run complete"
+        return None
+
     def busy_description(self) -> str | None:
         """Human-readable description of in-flight work, or None when idle.
 

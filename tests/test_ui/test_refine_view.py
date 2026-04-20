@@ -222,6 +222,45 @@ async def test_refine_view_busy_description_matches_substate(
         assert view.busy_description() == "Refine review pending on #42"
 
 
+async def test_refine_view_needs_attention_when_chat_awaiting_reply(
+    tmp_path: Path, xdg_state: Path
+) -> None:
+    import asyncio
+
+    from cog.ui.widgets.chat_pane import ChatPaneWidget
+
+    tracker = _tracker_with([])
+    async with _RefineApp(tmp_path, tracker).run_test(headless=True) as pilot:
+        await pilot.pause()
+        view = pilot.app.query_one(RefineView)
+        chat = ChatPaneWidget()
+        await view.mount(chat)
+        view._chat_pane = chat
+        view._substate = "running"
+
+        # No pending future — no attention
+        chat._input_future = None
+        assert view.needs_attention() is None
+
+        # Create a pending future — attention
+        loop = asyncio.get_running_loop()
+        chat._input_future = loop.create_future()
+        assert view.needs_attention() == "awaiting reply"
+
+        # Resolve it — no attention
+        chat._input_future.set_result("done")
+        assert view.needs_attention() is None
+
+
+async def test_refine_view_needs_attention_in_review_state(tmp_path: Path, xdg_state: Path) -> None:
+    tracker = _tracker_with([])
+    async with _RefineApp(tmp_path, tracker).run_test(headless=True) as pilot:
+        await pilot.pause()
+        view = pilot.app.query_one(RefineView)
+        view._substate = "review"
+        assert view.needs_attention() == "review ready"
+
+
 async def test_refine_view_posts_attention_on_review_substate(
     tmp_path: Path, xdg_state: Path
 ) -> None:

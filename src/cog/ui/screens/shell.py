@@ -208,10 +208,16 @@ class CogShellScreen(Screen):
             return
         if view_id not in {v.id for v in _VIEWS}:
             return
+        previous_id = self._active_view_id
         self._active_view_id = view_id
         self._apply_active_view()
         self._highlight_sidebar_row(view_id)
+        # Target view just became active — clear its attention (user is looking).
         self._clear_attention(view_id)
+        # Previous view just became inactive — if it's in an attention-worthy
+        # state (e.g. refine chat pending) re-mark the sidebar so the user
+        # sees they need to come back.
+        self._refresh_attention_for(previous_id)
 
     def on_view_attention(self, event: ViewAttention) -> None:
         # Don't mark the currently-active view — user is already looking at it.
@@ -231,6 +237,18 @@ class CogShellScreen(Screen):
         except Exception:  # noqa: BLE001
             return
         sidebar.set_attention(view_id, False)
+
+    def _refresh_attention_for(self, view_id: str) -> None:
+        """Poll a view's current needs_attention() and update the sidebar."""
+        try:
+            widget = self.query_one(f"#view-{view_id}")
+            sidebar = self.query_one(Sidebar)
+        except Exception:  # noqa: BLE001
+            return
+        if not hasattr(widget, "needs_attention"):
+            return
+        state = widget.needs_attention()
+        sidebar.set_attention(view_id, state is not None)
 
     def on_list_view_selected(self, event: ListView.Selected) -> None:
         chosen_id = (event.item.id or "").removeprefix("nav-")

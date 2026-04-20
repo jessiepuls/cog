@@ -303,6 +303,29 @@ async def test_shell_does_not_mark_active_view(tmp_path: Path) -> None:
         assert "dashboard" not in sidebar._attention
 
 
+async def test_shell_marks_previous_view_on_switch_if_it_needs_attention(
+    tmp_path: Path,
+) -> None:
+    # Regression: if the chat is awaiting input while the user is on refine,
+    # the initial ViewAttention gets ignored (active). Switching away then
+    # has to re-check the previous view and mark it.
+    async with _ShellApp(tmp_path).run_test(headless=True) as pilot:
+        await pilot.pause()
+        refine_view = pilot.app.query_one(RefineView)
+
+        # Simulate: refine is in review substate (needs_attention returns
+        # "review ready") while we're on dashboard.
+        refine_view._substate = "review"
+        # Not on refine, so we switch FROM dashboard to refine (clears) and
+        # then away again to trigger the re-check.
+        await pilot.press("ctrl+2")  # switch to refine → clears
+        await pilot.pause()
+        assert "refine" not in pilot.app.query_one(Sidebar)._attention
+        await pilot.press("ctrl+1")  # back to dashboard → re-check refine
+        await pilot.pause()
+        assert "refine" in pilot.app.query_one(Sidebar)._attention
+
+
 async def test_sidebar_label_shows_dot_marker_when_attention_set(tmp_path: Path) -> None:
     async with _ShellApp(tmp_path).run_test(headless=True) as pilot:
         await pilot.pause()

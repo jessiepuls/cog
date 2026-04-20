@@ -164,6 +164,21 @@ class RefineView(Widget, can_focus=True):
         if self._substate == "idle":
             await self.refresh_queue()
 
+    def needs_attention(self) -> str | None:
+        """Current attention state (synchronous). Returns a short reason or None.
+
+        Distinct from busy_description(), which is for the quit-confirm modal
+        and describes what's in flight. Attention is about "would the user want
+        to switch here?"
+        """
+        if self._substate == "review":
+            return "review ready"
+        if self._substate == "running" and self._chat_pane is not None:
+            future = self._chat_pane._input_future
+            if future is not None and not future.done():
+                return "awaiting reply"
+        return None
+
     def busy_description(self) -> str | None:
         """Human-readable description of in-flight work, or None when idle."""
         if self._substate == "idle":
