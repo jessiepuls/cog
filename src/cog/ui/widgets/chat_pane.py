@@ -10,7 +10,7 @@ from textual.events import Key
 from textual.widget import Widget
 from textual.widgets import RichLog, Static, TextArea
 
-from cog.core.runner import AssistantTextEvent, ResultEvent, RunEvent, ToolUseEvent
+from cog.core.runner import AssistantTextEvent, ResultEvent, RunEvent, StatusEvent, ToolUseEvent
 from cog.ui.widgets._shared import tool_preview
 
 
@@ -114,6 +114,8 @@ class ChatPaneWidget(Widget):
             self._append_tool_line(f"[dim]🔧 {event.tool}{suffix}[/dim]")
         elif isinstance(event, ResultEvent):
             self._hide_thinking_indicator()
+        elif isinstance(event, StatusEvent):
+            self._append_tool_line(f"[dim]{event.message}[/dim]")
 
     async def prompt(self) -> str | None:
         """Block until the user submits a message via Enter (str, possibly empty),

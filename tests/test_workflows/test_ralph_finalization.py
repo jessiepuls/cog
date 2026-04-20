@@ -9,10 +9,10 @@ import pytest
 
 from cog.core.context import ExecutionContext
 from cog.core.errors import HostError, StageError
-from cog.core.host import GitHost, PullRequest
+from cog.core.host import GitHost, PrChecks, PullRequest
 from cog.core.tracker import IssueTracker
 from cog.workflows.ralph import RalphWorkflow, _split_final_message
-from tests.fakes import InMemoryStateCache, make_item, make_stage_result
+from tests.fakes import InMemoryStateCache, RecordingEventSink, make_item, make_stage_result
 
 
 @pytest.fixture(autouse=True)
@@ -56,6 +56,9 @@ def _make_host(*, pr: PullRequest | None = None, push_error: HostError | None = 
     host.get_pr_for_branch.return_value = pr
     host.create_pr.return_value = _make_pr()
     host.update_pr.return_value = None
+    host.comment_on_pr.return_value = None
+    # Default: all checks pass so CI wait resolves immediately
+    host.get_pr_checks.return_value = PrChecks(runs=())
     return host
 
 
@@ -89,6 +92,7 @@ def _make_ctx(
         item=make_item(item_id=item_id, title="Fix the bug"),
         work_branch=work_branch,
         telemetry=telemetry,
+        event_sink=RecordingEventSink(),
     )
 
 
@@ -457,6 +461,7 @@ async def test_finalize_success_saves_state_cache(tmp_path: Path) -> None:
         headless=True,
         item=make_item(item_id="42", title="Fix the bug"),
         work_branch="cog/42-fix",
+        event_sink=RecordingEventSink(),
     )
     await wf.finalize_success(ctx, [make_stage_result("build", commits=1)])
     cache.save.assert_called_once()
@@ -830,6 +835,7 @@ async def test_full_iteration_end_to_end_success(tmp_path: Path) -> None:
         tmp_dir=tmp_path,
         state_cache=cache,
         headless=True,
+        event_sink=RecordingEventSink(),
     )
 
     await StageExecutor().run(wf, ctx)
@@ -883,6 +889,7 @@ async def test_full_iteration_end_to_end_noop(tmp_path: Path) -> None:
         tmp_dir=tmp_path,
         state_cache=cache,
         headless=True,
+        event_sink=RecordingEventSink(),
     )
 
     await StageExecutor().run(wf, ctx)

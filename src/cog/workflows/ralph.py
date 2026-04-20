@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 import re
 import sys
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from importlib.resources import files
@@ -14,11 +16,19 @@ from typing import ClassVar, Literal
 import cog.git as git
 from cog.checks import RALPH_CHECKS
 from cog.core.context import ExecutionContext
-from cog.core.errors import GitError, HostError, RebaseUnresolvedError, StageError, TrackerError
-from cog.core.host import GitHost
+from cog.core.errors import (
+    CiChecksFailedError,
+    CiTimeoutError,
+    GitError,
+    HostError,
+    RebaseUnresolvedError,
+    StageError,
+    TrackerError,
+)
+from cog.core.host import GitHost, PrChecks, PullRequest
 from cog.core.item import Item
 from cog.core.outcomes import Outcome, StageResult
-from cog.core.runner import AgentRunner
+from cog.core.runner import AgentRunner, StatusEvent
 from cog.core.stage import Stage
 from cog.core.tracker import IssueTracker
 from cog.core.workflow import StageExecutor, Workflow
@@ -31,6 +41,18 @@ from cog.ui.widgets.log_pane import LogPaneWidget
 class RebaseOutcome:
     status: Literal["clean", "conflict"]
     final_message: str = ""  # claude's analysis on conflict; empty on clean
+
+
+def _parse_float_env(key: str, default: float) -> float:
+    try:
+        return float(os.environ[key])
+    except (KeyError, ValueError):
+        return default
+
+
+_DEFAULT_POLL_INTERVAL = 15.0
+_DEFAULT_CI_TIMEOUT = 1800.0
+_HEARTBEAT_INTERVAL = 60.0
 
 
 _PRIORITY_RE = re.compile(r"^p(\d+)$")
@@ -265,15 +287,127 @@ class RalphWorkflow(Workflow):
             pr = existing
 
         await self._tracker.comment(ctx.item, f"🤖 Cog opened a PR for this: {pr.url}")
-        await self._tracker.remove_label(ctx.item, "agent-ready")
+
         try:
-            await self._tracker.remove_label(ctx.item, "agent-failed")
+            checks = await self._wait_for_ci(ctx, pr)
+        except CiTimeoutError as e:
+            await self._handle_ci_failure(ctx, results, pr, None, e)
+            return
+
+        if checks.all_passed:
+            await self._mark_ci_success(ctx, results, pr)
+        else:
+            error = CiChecksFailedError(failing=tuple(r.name for r in checks.failed))
+            await self._handle_ci_failure(ctx, results, pr, checks, error)
+
+    async def _wait_for_ci(self, ctx: ExecutionContext, pr: PullRequest) -> PrChecks:
+        poll_interval = _parse_float_env("COG_CI_POLL_INTERVAL_SECONDS", _DEFAULT_POLL_INTERVAL)
+        ci_timeout = _parse_float_env("COG_CI_TIMEOUT_SECONDS", _DEFAULT_CI_TIMEOUT)
+        await self._emit(ctx, StatusEvent(message=f"⏳ Waiting for CI on PR #{pr.number}..."))
+
+        started = time.monotonic()
+        last_heartbeat = started
+        checks: PrChecks | None = None
+
+        try:
+            async with asyncio.timeout(ci_timeout):
+                while True:
+                    checks = await self._host.get_pr_checks(pr.number)  # type: ignore[union-attr]
+                    if not checks.pending:
+                        break
+
+                    now = time.monotonic()
+                    if now - last_heartbeat >= _HEARTBEAT_INTERVAL:
+                        passed = sum(1 for r in checks.runs if r.state == "passed")
+                        total = len(checks.runs)
+                        pending = sum(1 for r in checks.runs if r.state == "pending")
+                        elapsed_m = int((now - started) / 60)
+                        await self._emit(
+                            ctx,
+                            StatusEvent(
+                                message=(
+                                    f"⏳ CI: {passed}/{total} passed, "
+                                    f"{pending} pending ({elapsed_m}m elapsed)"
+                                )
+                            ),
+                        )
+                        last_heartbeat = now
+
+                    await asyncio.sleep(poll_interval)
+        except TimeoutError:
+            raise CiTimeoutError(timeout_seconds=ci_timeout) from None
+
+        assert checks is not None
+        if checks.all_passed:
+            await self._emit(ctx, StatusEvent(message="✓ All CI checks passed"))
+        else:
+            failed_names = ", ".join(r.name for r in checks.failed)
+            await self._emit(ctx, StatusEvent(message=f"✗ CI failed: {failed_names}"))
+        return checks
+
+    @staticmethod
+    async def _emit(ctx: ExecutionContext, event: StatusEvent) -> None:
+        if ctx.event_sink is not None:
+            await ctx.event_sink.emit(event)
+
+    async def _mark_ci_success(
+        self,
+        ctx: ExecutionContext,
+        results: list[StageResult],
+        pr: PullRequest,
+    ) -> None:
+        await self._tracker.remove_label(ctx.item, "agent-ready")  # type: ignore[arg-type]
+        try:
+            await self._tracker.remove_label(ctx.item, "agent-failed")  # type: ignore[arg-type]
         except TrackerError:
             pass
-        ctx.state_cache.mark_processed(ctx.item, "success")
+        ctx.state_cache.mark_processed(ctx.item, "success")  # type: ignore[arg-type]
         ctx.state_cache.save()
         await self._write_telemetry(ctx, results, "success", pr_url=pr.url)
         await self.write_report(ctx, results, "success", error=None)
+
+    async def _handle_ci_failure(
+        self,
+        ctx: ExecutionContext,
+        results: list[StageResult],
+        pr: PullRequest,
+        checks: PrChecks | None,
+        error: CiChecksFailedError | CiTimeoutError,
+    ) -> None:
+        assert ctx.item is not None
+        assert self._host is not None
+
+        lines = ["🤖 Cog: CI failed on this PR. See:"]
+        if checks is not None:
+            for r in checks.failed:
+                lines.append(f"- **{r.name}**: {r.link}")
+        await self._host.comment_on_pr(pr.number, "\n".join(lines))
+
+        await self._tracker.comment(
+            ctx.item,
+            f"🤖 Cog opened PR #{pr.number} but CI failed. "
+            f"See the PR for failing checks. `agent-failed` applied.",
+        )
+
+        await self._tracker.ensure_label(
+            "agent-failed",
+            color="d93f0b",
+            description="Cog attempted this and hit an error; retry is still eligible",
+        )
+        await self._tracker.add_label(ctx.item, "agent-failed")
+        await self._tracker.remove_label(ctx.item, "agent-ready")
+
+        ctx.state_cache.mark_processed(ctx.item, "ci-failed")
+        ctx.state_cache.save()
+        await self._write_telemetry(
+            ctx,
+            results,
+            "ci-failed",
+            pr_url=pr.url,
+            error=error,
+            cause_class=type(error).__name__,
+        )
+        await self.write_report(ctx, results, "error", error=error)
 
     async def finalize_noop(
         self,
@@ -561,7 +695,11 @@ class RalphWorkflow(Workflow):
         resolved_cause_class = cause_class
         if error is not None:
             error_str = str(error)
-            if cause_class is None and isinstance(error, StageError) and error.cause is not None:
+            if (
+                resolved_cause_class is None
+                and isinstance(error, StageError)
+                and error.cause is not None
+            ):
                 resolved_cause_class = type(error.cause).__name__
         if ctx.telemetry is None:
             return

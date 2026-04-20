@@ -9,10 +9,10 @@ import pytest
 
 from cog.core.context import ExecutionContext
 from cog.core.errors import HostError, TrackerError
-from cog.core.host import GitHost, PullRequest
+from cog.core.host import GitHost, PrChecks, PullRequest
 from cog.core.tracker import IssueTracker
 from cog.workflows.ralph import RalphWorkflow
-from tests.fakes import InMemoryStateCache, make_item, make_stage_result
+from tests.fakes import InMemoryStateCache, RecordingEventSink, make_item, make_stage_result
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -59,6 +59,8 @@ def _make_host(*, pr: PullRequest | None = None) -> AsyncMock:
         head_branch="cog/42-fix",
     )
     host.update_pr.return_value = None
+    host.comment_on_pr.return_value = None
+    host.get_pr_checks.return_value = PrChecks(runs=())
     return host
 
 
@@ -284,6 +286,7 @@ def _make_ctx_with_tmp(tmp_path: Path, *, item_id: str = "42") -> ExecutionConte
         headless=True,
         item=make_item(item_id=item_id, title="Fix the bug"),
         work_branch="cog/42-fix-the-bug",
+        event_sink=RecordingEventSink(),
     )
 
 

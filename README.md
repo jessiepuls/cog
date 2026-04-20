@@ -89,7 +89,7 @@ Key fields:
 | Field | Type | Description |
 |-------|------|-------------|
 | `ts` | string | ISO-8601 UTC timestamp |
-| `outcome` | string | `success`, `error`, `no-op`, `push-failed`, `deferred-by-blocker`, `rebase-conflict` |
+| `outcome` | string | `success`, `error`, `no-op`, `push-failed`, `deferred-by-blocker`, `rebase-conflict`, `ci-failed` |
 | `stages` | array | Per-stage entry with `stage`, `duration_s`, `cost_usd`, `exit_status`, `commits`; for `cog refine` the first entry is `"interview"` |
 | `total_cost_usd` | float | Sum of stage costs |
 | `duration_seconds` | float | Wall time across all stages |

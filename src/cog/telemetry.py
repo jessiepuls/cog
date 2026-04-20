@@ -20,6 +20,7 @@ TelemetryOutcome = Literal[
     "push-failed",
     "deferred-by-blocker",
     "rebase-conflict",
+    "ci-failed",
 ]
 
 

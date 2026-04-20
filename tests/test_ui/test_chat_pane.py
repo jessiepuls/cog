@@ -312,3 +312,14 @@ async def test_chat_pane_richlog_has_wrap_enabled() -> None:
         widget = pilot.app.query_one(ChatPaneWidget)
         log = widget.query_one("#scrollback", RichLog)
         assert log.wrap is True
+
+
+async def test_chat_pane_renders_status_event_as_dim_line() -> None:
+    from cog.core.runner import StatusEvent
+
+    async with _ChatApp().run_test(headless=True) as pilot:
+        widget = pilot.app.query_one(ChatPaneWidget)
+        await widget.emit(StatusEvent(message="⏳ Waiting for CI on PR #42..."))
+        await pilot.pause()
+        content = _log_text(widget.query_one("#scrollback", RichLog))
+        assert "⏳ Waiting for CI on PR #42..." in content

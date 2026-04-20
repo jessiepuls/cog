@@ -89,3 +89,12 @@ async def test_flush_called_after_each_emit(sink):
         mock_stderr.write = lambda s: None
         await sink.emit(StageStartEvent(stage_name="x", model="m"))
         mock_stderr.flush.assert_called()
+
+
+async def test_stderr_sink_renders_status_event_to_stderr_with_dim_prefix(sink, capsys):
+    from cog.core.runner import StatusEvent
+
+    await sink.emit(StatusEvent(message="⏳ Waiting for CI on PR #42..."))
+    captured = capsys.readouterr()
+    assert "⏳ Waiting for CI on PR #42..." in captured.err
+    assert captured.err.startswith("--")
