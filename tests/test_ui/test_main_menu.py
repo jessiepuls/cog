@@ -250,6 +250,35 @@ async def test_main_menu_preflight_fails_does_not_show_picker() -> None:
     assert not picker_shown[0]
 
 
+async def test_main_menu_selection_dispatches_to_worker() -> None:
+    # Regression: on_list_view_selected calls push_screen_wait, which requires
+    # worker context. The message handler itself is not a worker, so the flow
+    # must be dispatched via run_worker or Textual raises NoActiveWorker.
+    captured: list[object] = []
+
+    def capture(coro, *args, **kwargs):  # noqa: ANN001, ANN002, ANN003, ARG001
+        captured.append(coro)
+        coro.close()  # suppress "coroutine was never awaited" warning
+        return MagicMock()
+
+    tracker = _FakeTracker(items=[_item(1)])
+    with patch("cog.ui.screens.main_menu.WORKFLOWS", [_FakeWorkflow]):
+        async with _make_app(tracker).run_test(headless=True) as pilot:
+            await pilot.pause()
+            screen = pilot.app.screen
+            assert isinstance(screen, MainMenuScreen)
+            with patch.object(screen, "run_worker", side_effect=capture):
+                list_view = pilot.app.query_one("#workflows", ListView)
+                list_view.focus()
+                await pilot.pause()
+                await pilot.press("enter")
+                await pilot.pause()
+            assert captured, (
+                "on_list_view_selected must dispatch via run_worker; "
+                "calling push_screen_wait directly from a message handler raises NoActiveWorker"
+            )
+
+
 async def test_main_menu_picker_cancel_does_not_push_run_screen() -> None:
     fake_item = _item(1)
     run_screen_pushed = [False]

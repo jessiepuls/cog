@@ -8,6 +8,7 @@ from textual.screen import Screen
 from textual.widgets import Footer, Header, Label, ListItem, ListView
 
 from cog.core.tracker import IssueTracker
+from cog.core.workflow import Workflow
 from cog.workflows import WORKFLOWS
 
 
@@ -50,15 +51,16 @@ class MainMenuScreen(Screen):
             list_view.index = 0
 
     async def on_list_view_selected(self, event: ListView.Selected) -> None:
-        from cog.ui.picker import PickerScreen
-        from cog.ui.preflight import PreflightScreen
-        from cog.ui.wire import build_run_screen
-
         list_view = self.query_one("#workflows", ListView)
         idx = list_view.index
         if idx is None or idx >= len(WORKFLOWS):
             return
-        chosen_cls = WORKFLOWS[idx]
+        self.run_worker(self._launch_workflow(WORKFLOWS[idx]), exclusive=True)
+
+    async def _launch_workflow(self, chosen_cls: type[Workflow]) -> None:
+        from cog.ui.picker import PickerScreen
+        from cog.ui.preflight import PreflightScreen
+        from cog.ui.wire import build_run_screen
 
         ok = await self.app.push_screen_wait(PreflightScreen(chosen_cls, self._project_dir))
         if not ok:
