@@ -204,6 +204,31 @@ async def test_refine_view_check_action_hides_review_bindings_outside_review(
         assert view.check_action("refresh_queue", ()) is True
 
 
+async def test_refine_view_posts_attention_on_review_substate(
+    tmp_path: Path, xdg_state: Path
+) -> None:
+    from cog.ui.messages import ViewAttention
+
+    tracker = _tracker_with([])
+    async with _RefineApp(tmp_path, tracker).run_test(headless=True) as pilot:
+        await pilot.pause()
+        view = pilot.app.query_one(RefineView)
+        captured: list[ViewAttention] = []
+        original_post = view.post_message
+
+        def _capture(msg):
+            if isinstance(msg, ViewAttention):
+                captured.append(msg)
+            return original_post(msg)
+
+        view.post_message = _capture  # type: ignore[method-assign]
+
+        view._switch_to("review")
+        await pilot.pause()
+
+        assert any(m.view_id == "refine" for m in captured)
+
+
 async def test_refine_view_title_strip_marks_unchanged_when_titles_match(
     tmp_path: Path, xdg_state: Path
 ) -> None:

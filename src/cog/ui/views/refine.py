@@ -32,10 +32,25 @@ from cog.state import JsonFileStateCache
 from cog.state_paths import project_state_dir
 from cog.telemetry import TelemetryWriter
 from cog.ui.editor import suspend_and_edit
+from cog.ui.messages import ViewAttention
 from cog.ui.widgets.chat_pane import ChatPaneWidget
 from cog.workflows.refine import RefineWorkflow, ReviewDecision, ReviewOutcome
 
 _SubState = Literal["idle", "running", "review"]
+
+
+class _AttentionInputProvider:
+    """Wraps ChatPaneWidget's prompt() to post a ViewAttention when the
+    interview loop blocks waiting for user input — so the sidebar shows a
+    dot on the Refine row if the user is on another view."""
+
+    def __init__(self, inner: ChatPaneWidget, view: RefineView) -> None:
+        self._inner = inner
+        self._view = view
+
+    async def prompt(self) -> str | None:
+        self._view.post_message(ViewAttention("refine", reason="awaiting reply"))
+        return await self._inner.prompt()
 
 
 class RefineView(Widget, can_focus=True):
@@ -237,7 +252,7 @@ class RefineView(Widget, can_focus=True):
             item=item,
             telemetry=telemetry,
             event_sink=chat,
-            input_provider=chat,
+            input_provider=_AttentionInputProvider(chat, self),
             review_provider=self,
         )
         # Workflow needs a runner + tracker. Build them here since the view
@@ -354,6 +369,8 @@ class RefineView(Widget, can_focus=True):
         # Internal substate changes (e.g. running → review) don't trigger
         # the shell's auto-focus hook, so re-focus here.
         self.call_after_refresh(self.focus_content)
+        if substate == "review":
+            self.post_message(ViewAttention("refine", reason="review ready"))
 
     def _set_status(self, text: str) -> None:
         self.query_one("#refine-status", Static).update(text)

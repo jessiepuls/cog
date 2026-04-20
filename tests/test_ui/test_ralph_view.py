@@ -174,6 +174,32 @@ async def test_ralph_view_dismiss_post_run_returns_to_idle(tmp_path: Path, xdg_s
         assert view._substate == "idle"
 
 
+async def test_ralph_view_posts_attention_on_post_run_substate(
+    tmp_path: Path, xdg_state: Path
+) -> None:
+    from cog.ui.messages import ViewAttention
+
+    tracker = _tracker_with([])
+    async with _RalphApp(tmp_path, tracker).run_test(headless=True) as pilot:
+        await pilot.pause()
+        view = pilot.app.query_one(RalphView)
+        # Capture messages posted by the view.
+        captured: list[ViewAttention] = []
+        original_post = view.post_message
+
+        def _capture(msg):
+            if isinstance(msg, ViewAttention):
+                captured.append(msg)
+            return original_post(msg)
+
+        view.post_message = _capture  # type: ignore[method-assign]
+
+        view._switch_to("post_run")
+        await pilot.pause()
+
+        assert any(m.view_id == "ralph" for m in captured)
+
+
 async def test_ralph_view_failure_marks_running_stages_failed(
     tmp_path: Path, xdg_state: Path
 ) -> None:

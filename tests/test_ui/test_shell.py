@@ -10,7 +10,8 @@ from textual.widget import Widget
 from textual.widgets import ListView, Static
 
 from cog.core.tracker import IssueTracker
-from cog.ui.screens.shell import CogShellScreen
+from cog.ui.messages import ViewAttention
+from cog.ui.screens.shell import CogShellScreen, Sidebar
 from cog.ui.views.dashboard import DashboardView
 from cog.ui.views.ralph import RalphView
 from cog.ui.views.refine import RefineView
@@ -170,3 +171,59 @@ async def test_shell_active_row_gets_highlighted_class(tmp_path: Path) -> None:
         active = [r for r in list_view.children if r.has_class("-active")]
         assert len(active) == 1
         assert active[0].id == "nav-ralph"
+
+
+# ---------------------------------------------------------------------------
+# Attention indicators (#128)
+# ---------------------------------------------------------------------------
+
+
+async def test_shell_sidebar_shows_dot_when_view_attention_posted(tmp_path: Path) -> None:
+    async with _ShellApp(tmp_path).run_test(headless=True) as pilot:
+        await pilot.pause()
+        screen = pilot.app.screen
+        assert isinstance(screen, CogShellScreen)
+        # Default active is dashboard; posting attention on refine should mark it.
+        screen.post_message(ViewAttention("refine", reason="test"))
+        await pilot.pause()
+        sidebar = pilot.app.query_one(Sidebar)
+        assert "refine" in sidebar._attention
+
+
+async def test_shell_sidebar_clears_dot_when_switching_to_view(tmp_path: Path) -> None:
+    async with _ShellApp(tmp_path).run_test(headless=True) as pilot:
+        await pilot.pause()
+        screen = pilot.app.screen
+        assert isinstance(screen, CogShellScreen)
+        screen.post_message(ViewAttention("refine", reason="test"))
+        await pilot.pause()
+        sidebar = pilot.app.query_one(Sidebar)
+        assert "refine" in sidebar._attention
+
+        # Switch to refine — dot should clear.
+        await pilot.press("ctrl+2")
+        await pilot.pause()
+        assert "refine" not in sidebar._attention
+
+
+async def test_shell_does_not_mark_active_view(tmp_path: Path) -> None:
+    async with _ShellApp(tmp_path).run_test(headless=True) as pilot:
+        await pilot.pause()
+        screen = pilot.app.screen
+        assert isinstance(screen, CogShellScreen)
+        # Active view is dashboard — posting attention on dashboard should be a no-op.
+        screen.post_message(ViewAttention("dashboard", reason="test"))
+        await pilot.pause()
+        sidebar = pilot.app.query_one(Sidebar)
+        assert "dashboard" not in sidebar._attention
+
+
+async def test_sidebar_label_shows_dot_marker_when_attention_set(tmp_path: Path) -> None:
+    async with _ShellApp(tmp_path).run_test(headless=True) as pilot:
+        await pilot.pause()
+        sidebar = pilot.app.query_one(Sidebar)
+        sidebar.set_attention("ralph", True)
+        await pilot.pause()
+        ralph_row = sidebar.query_one("#nav-ralph")
+        label = ralph_row.query_one("Label")
+        assert "●" in str(label.renderable)

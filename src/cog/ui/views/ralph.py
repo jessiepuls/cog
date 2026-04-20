@@ -34,6 +34,7 @@ from cog.core.tracker import IssueTracker
 from cog.state import JsonFileStateCache
 from cog.state_paths import project_state_dir
 from cog.telemetry import TelemetryWriter
+from cog.ui.messages import ViewAttention
 from cog.ui.picker import PickerHistory, load_picker_history
 from cog.ui.screens.run import StageCountingSink, stage_breakdown_line
 from cog.ui.widgets.log_pane import LogPaneWidget
@@ -340,6 +341,8 @@ class RalphView(Widget, can_focus=True):
         # internal substate change (e.g. running → post_run when a run
         # completes).
         self.call_after_refresh(self.focus_content)
+        if substate == "post_run":
+            self.post_message(ViewAttention("ralph", reason="run complete"))
 
     def _set_status(self, text: str) -> None:
         self.query_one("#ralph-status", Static).update(text)

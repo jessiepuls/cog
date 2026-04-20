@@ -24,6 +24,7 @@ from textual.widget import Widget
 from textual.widgets import Footer, Header, Label, ListItem, ListView, Static
 
 from cog.core.tracker import IssueTracker
+from cog.ui.messages import ViewAttention
 from cog.ui.views.dashboard import DashboardView
 from cog.ui.views.ralph import RalphView
 from cog.ui.views.refine import RefineView
@@ -90,19 +91,47 @@ class Sidebar(Widget):
     def __init__(self, views: Iterable[ShellView]) -> None:
         super().__init__()
         self._views = tuple(views)
+        self._attention: set[str] = set()
+
+    def _label_for(self, v: ShellView) -> str:
+        keybind = f"[dim]{v.keybind.replace('ctrl+', '^')}[/dim]"
+        dot = "[yellow]●[/yellow] " if v.id in self._attention else "  "
+        return f"{keybind} {dot}{v.label}"
 
     def compose(self) -> ComposeResult:
         yield Static("cog", id="sidebar-title")
         yield ListView(
             *(
                 ListItem(
-                    Label(f"[dim]{v.keybind.replace('ctrl+', '^')}[/dim]  {v.label}"),
+                    Label(self._label_for(v)),
                     id=f"nav-{v.id}",
                 )
                 for v in self._views
             ),
             id="sidebar-nav",
         )
+
+    def set_attention(self, view_id: str, on: bool) -> None:
+        if on:
+            if view_id in self._attention:
+                return
+            self._attention.add(view_id)
+        else:
+            if view_id not in self._attention:
+                return
+            self._attention.discard(view_id)
+        self._rerender_row(view_id)
+
+    def _rerender_row(self, view_id: str) -> None:
+        target = next((v for v in self._views if v.id == view_id), None)
+        if target is None:
+            return
+        try:
+            row = self.query_one(f"#nav-{view_id}", ListItem)
+        except Exception:  # noqa: BLE001 — not yet mounted
+            return
+        label = row.query_one(Label)
+        label.update(self._label_for(target))
 
 
 class CogShellScreen(Screen):
@@ -162,6 +191,26 @@ class CogShellScreen(Screen):
         self._active_view_id = view_id
         self._apply_active_view()
         self._highlight_sidebar_row(view_id)
+        self._clear_attention(view_id)
+
+    def on_view_attention(self, event: ViewAttention) -> None:
+        # Don't mark the currently-active view — user is already looking at it.
+        if event.view_id == self._active_view_id:
+            return
+        try:
+            sidebar = self.query_one(Sidebar)
+        except Exception:  # noqa: BLE001 — not yet mounted
+            return
+        sidebar.set_attention(event.view_id, True)
+        if event.reason:
+            self.app.notify(f"{event.view_id}: {event.reason}", timeout=4)
+
+    def _clear_attention(self, view_id: str) -> None:
+        try:
+            sidebar = self.query_one(Sidebar)
+        except Exception:  # noqa: BLE001
+            return
+        sidebar.set_attention(view_id, False)
 
     def on_list_view_selected(self, event: ListView.Selected) -> None:
         chosen_id = (event.item.id or "").removeprefix("nav-")
