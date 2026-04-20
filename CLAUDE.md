@@ -110,12 +110,66 @@ strict).
   "must run in a worker" need to assert dispatch (e.g. `run_worker`
   was called), not just the downstream flow.
 
+### Test granularity
+
+- **Parametrize** when inputs vary but the behavior being checked is the
+  same. Keep separate tests when the *intent* differs — each test should
+  have a name that explains one thing.
+- **Group assertions** within a single test when they verify the same
+  outcome (e.g., all fields of a returned object). Split into separate
+  tests when each assertion tests a distinct, independently-breakable
+  behavior.
+- **Pick one abstraction level per behavior.** A unit test and an
+  integration test for the exact same assertion is redundancy, not
+  coverage. Test at the level that gives the clearest failure signal.
+- **Signal that a test is over-testing**: if the test name ends with
+  `_field_X` or reads like a field enumeration, consider grouping. If
+  fixing one bug causes five tests to fail for the same reason, those
+  five tests are likely one test written five ways.
+
 ## Prompts
 
 Prompts live as markdown in `src/cog/prompts/claude/{ralph,refine}/*.md`
 and are loaded via `importlib.resources` at runtime. Each stage has its
 own file. When changing prompt behavior, change the markdown — not
 Python strings.
+
+### Prompt-writing conventions
+
+**Prefer on-demand fetching over context injection.** For any content that
+is large (>few KB), variable, or only partially consumed: give claude a
+pointer + instruction, not the content itself.
+
+Bad:
+```
+### Issue body
+{{full item body interpolated here — 20KB}}
+```
+
+Good:
+```
+To see the item body, run `gh issue view {id} --json body,comments`.
+Fetch when you need it; don't assume you need the full body for every decision.
+```
+
+Benefits: smaller prompts start faster, allow claude-code's context compaction
+to drop unused content, leave headroom before stall classes emerge, and pick up
+live state on retry.
+
+Exceptions (keep injected): small, always-needed, stable context — item number,
+item title, branch name.
+
+**Bounded tool calls warning.** All ralph prompts warn claude about the >30KB
+tool-output persistence behavior. Preserve that warning in any new prompt or
+when updating existing ones.
+
+**Structured final-message sections.** Build prompts tell claude to end with
+`### Summary / ### Key changes / ### Test plan`. Never change these section
+names without updating `_split_final_message` in `workflows/ralph.py` and
+matching fixtures.
+
+**Tracker-agnostic language.** Refer to "tracked items" not "GitHub issues" in
+prompts and non-GitHub-specific code.
 
 ## Style / conventions
 

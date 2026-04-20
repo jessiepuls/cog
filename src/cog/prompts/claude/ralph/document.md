@@ -9,6 +9,16 @@ the new or changed behavior. This stage uses `tolerate_failure=True`,
 so failures here do not abort the iteration — do your best, but don't
 worry if some documentation is deferred.
 
+## Item context
+
+To see the item's current body and comments:
+
+    gh issue view {item_id} --json body,comments --jq '.body, (.comments[] | .body)'
+
+Fetch when you need it. Claude Code persists any tool output >30KB to a
+session-scoped file; prefer `--jq` or pipe through `head -c 30000` to keep
+output bounded.
+
 ## What to document
 
 Focus on user-facing changes that aren't self-evident from the code:
@@ -30,8 +40,8 @@ Focus on user-facing changes that aren't self-evident from the code:
 3. Run `git log --oneline $(git merge-base HEAD main 2>/dev/null || git merge-base HEAD master)..HEAD`
    for bounded commit subjects to inform the narrative (NOT `-p`, which
    includes full patches).
-4. Read the item body (provided in the runtime context below) for context
-   on the intent of the change.
+4. Fetch the item body via `gh issue view` (see **Item context** above) for
+   context on the intent of the change.
 5. Update relevant documentation files (README, CHANGELOG, docstrings,
    inline comments that explain WHY — not what).
 6. If there is nothing to document (internal refactors, test-only changes),

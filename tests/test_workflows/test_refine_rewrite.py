@@ -13,6 +13,7 @@ from cog.workflows.refine import (
     InterviewTurn,
     RefineWorkflow,
     _extract_title_body,
+    _format_transcript_markdown,
 )
 from tests.fakes import InMemoryStateCache, ScriptedRewriteRunner, make_item
 
@@ -82,6 +83,15 @@ def test_load_rewrite_prompt_reads_package_data():
 # ---------------------------------------------------------------------------
 
 
+def _set_transcript(wf: RefineWorkflow, tmp_path: Path, item_id: str, transcript: list) -> Path:
+    """Set up transcript + path on workflow; returns the path."""
+    wf._transcripts[item_id] = transcript
+    path = tmp_path / f"interview-{item_id}.md"
+    path.write_text("transcript", encoding="utf-8")
+    wf._transcript_paths[item_id] = path
+    return path
+
+
 def test_rewrite_prompt_includes_original_body_and_comments(tmp_path):
     from datetime import UTC, datetime
 
@@ -92,7 +102,7 @@ def test_rewrite_prompt_includes_original_body_and_comments(tmp_path):
     )
     item = make_item(item_id="1", title="My issue", body="Original body", comments=(comment,))
     wf = _make_workflow([])
-    wf._transcripts["1"] = _make_sentinel_transcript()
+    _set_transcript(wf, tmp_path, "1", _make_sentinel_transcript())
     ctx = _make_ctx(tmp_path, item=item)
     prompt = wf._build_rewrite_prompt(ctx)
     assert "Original body" in prompt
@@ -100,22 +110,24 @@ def test_rewrite_prompt_includes_original_body_and_comments(tmp_path):
     assert "Good point" in prompt
 
 
-def test_rewrite_prompt_includes_full_transcript(tmp_path):
+def test_rewrite_prompt_does_not_inline_transcript_content(tmp_path):
     item = make_item(item_id="2", title="T", body="B")
     wf = _make_workflow([])
     transcript = _make_sentinel_transcript()
     wf._transcripts["2"] = transcript
+    transcript_path = tmp_path / "interview-2.md"
+    transcript_path.write_text("transcript content", encoding="utf-8")
+    wf._transcript_paths["2"] = transcript_path
     ctx = _make_ctx(tmp_path, item=item)
     prompt = wf._build_rewrite_prompt(ctx)
-    assert "What does this item need?" in prompt
-    assert "It needs caching." in prompt
-    assert "Got it." in prompt
+    assert "What does this item need?" not in prompt
+    assert "It needs caching." not in prompt
 
 
 def test_rewrite_prompt_omits_early_end_block_on_sentinel_end(tmp_path):
     item = make_item(item_id="3", title="T", body="B")
     wf = _make_workflow([])
-    wf._transcripts["3"] = _make_sentinel_transcript()
+    _set_transcript(wf, tmp_path, "3", _make_sentinel_transcript())
     ctx = _make_ctx(tmp_path, item=item)
     prompt = wf._build_rewrite_prompt(ctx)
     # The runtime-injected block uses "## Refinement status" as a heading
@@ -125,7 +137,7 @@ def test_rewrite_prompt_omits_early_end_block_on_sentinel_end(tmp_path):
 def test_rewrite_prompt_includes_early_end_block_on_user_end(tmp_path):
     item = make_item(item_id="4", title="T", body="B")
     wf = _make_workflow([])
-    wf._transcripts["4"] = _make_user_end_transcript()
+    _set_transcript(wf, tmp_path, "4", _make_user_end_transcript())
     ctx = _make_ctx(tmp_path, item=item)
     prompt = wf._build_rewrite_prompt(ctx)
     # The runtime-injected block uses "## Refinement status" as a heading
@@ -218,3 +230,98 @@ async def test_classify_outcome_returns_noop_on_abandon(tmp_path):
     ctx = _make_ctx(tmp_path, item=item)
     outcome = await wf.classify_outcome(ctx, [])
     assert outcome == "noop"
+
+
+# ---------------------------------------------------------------------------
+# Transcript file writing
+# ---------------------------------------------------------------------------
+
+
+def test_format_transcript_markdown_includes_all_turns():
+    transcript = _make_sentinel_transcript()
+    md = _format_transcript_markdown(transcript)
+    assert "## Turn 1 — Assistant" in md
+    assert "What does this item need?" in md
+    assert "## Turn 1 — User" in md
+    assert "It needs caching." in md
+    assert "## Turn 2 — Assistant" in md
+    assert "Got it." in md
+
+
+def test_format_transcript_markdown_omits_user_section_when_none():
+    transcript = _make_user_end_transcript()
+    md = _format_transcript_markdown(transcript)
+    assert "## Turn 1 — Assistant" in md
+    assert "## Turn 1 — User" not in md
+
+
+@pytest.mark.asyncio
+async def test_pre_stages_writes_transcript_to_ctx_tmp_dir_with_expected_filename(tmp_path):
+    from unittest.mock import AsyncMock
+
+    from tests.fakes import RecordingEventSink, ScriptedInputProvider, ScriptedInterviewRunner
+
+    _SENTINEL = "<<interview-complete>>"
+    responses = [("All done! " + _SENTINEL, 0.01)]
+    runner = ScriptedInterviewRunner(responses)
+    sink = RecordingEventSink()
+    provider = ScriptedInputProvider([])
+    item = make_item(item_id="77", title="Test item")
+    ctx = ExecutionContext(
+        project_dir=tmp_path,
+        tmp_dir=tmp_path,
+        state_cache=InMemoryStateCache(),
+        headless=False,
+        item=item,
+        event_sink=sink,
+        input_provider=provider,
+    )
+    wf = RefineWorkflow(runner=runner, tracker=AsyncMock())
+    await wf.pre_stages(ctx)
+
+    expected = tmp_path / "interview-77.md"
+    assert expected.exists()
+
+
+@pytest.mark.asyncio
+async def test_transcript_file_contains_all_turns_in_markdown_format(tmp_path):
+    from unittest.mock import AsyncMock
+
+    from tests.fakes import RecordingEventSink, ScriptedInputProvider, ScriptedInterviewRunner
+
+    _SENTINEL = "<<interview-complete>>"
+    responses = [
+        ("First question?", 0.01),
+        ("All done! " + _SENTINEL, 0.02),
+    ]
+    runner = ScriptedInterviewRunner(responses)
+    sink = RecordingEventSink()
+    provider = ScriptedInputProvider(["my answer"])
+    item = make_item(item_id="88", title="Test item")
+    ctx = ExecutionContext(
+        project_dir=tmp_path,
+        tmp_dir=tmp_path,
+        state_cache=InMemoryStateCache(),
+        headless=False,
+        item=item,
+        event_sink=sink,
+        input_provider=provider,
+    )
+    wf = RefineWorkflow(runner=runner, tracker=AsyncMock())
+    await wf.pre_stages(ctx)
+
+    content = (tmp_path / "interview-88.md").read_text(encoding="utf-8")
+    assert "## Turn 1 — Assistant" in content
+    assert "First question?" in content
+    assert "## Turn 1 — User" in content
+    assert "my answer" in content
+    assert "## Turn 2 — Assistant" in content
+
+
+def test_rewrite_prompt_references_actual_transcript_path(tmp_path):
+    item = make_item(item_id="55", title="T", body="B")
+    wf = _make_workflow([])
+    transcript_path = _set_transcript(wf, tmp_path, "55", _make_sentinel_transcript())
+    ctx = _make_ctx(tmp_path, item=item)
+    prompt = wf._build_rewrite_prompt(ctx)
+    assert str(transcript_path) in prompt

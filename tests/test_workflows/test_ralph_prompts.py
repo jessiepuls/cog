@@ -2,6 +2,7 @@
 
 import re
 from datetime import UTC, datetime
+from pathlib import Path
 
 import pytest
 
@@ -9,6 +10,8 @@ from cog.core.context import ExecutionContext
 from cog.core.item import Comment
 from cog.workflows.ralph import _build_prompt, _load_prompt
 from tests.fakes import InMemoryStateCache, make_item
+
+_REPO_ROOT = Path(__file__).parent.parent.parent
 
 _UNBOUNDED_DIFF_RE = re.compile(r"git diff\s+(?:main|master)\.\.HEAD(?!\s+--?)")
 
@@ -75,11 +78,11 @@ def test_build_prompt_includes_issue_number_and_title(tmp_path):
     assert "Issue #42: Test issue" in prompt
 
 
-def test_build_prompt_includes_body(tmp_path):
+def test_build_prompt_does_not_include_body(tmp_path):
     item = make_item(body="The body content here.")
     ctx = _make_ctx(tmp_path, item=item)
     prompt = _build_prompt("build", ctx)
-    assert "The body content here." in prompt
+    assert "The body content here." not in prompt
 
 
 def test_build_prompt_includes_branch_when_set(tmp_path):
@@ -96,7 +99,7 @@ def test_build_prompt_omits_branch_when_none(tmp_path):
     assert "Branch:" not in prompt
 
 
-def test_build_prompt_includes_comments_section_when_present(tmp_path):
+def test_build_prompt_does_not_include_comments(tmp_path):
     comment = Comment(
         author="alice",
         body="Great idea!",
@@ -105,22 +108,70 @@ def test_build_prompt_includes_comments_section_when_present(tmp_path):
     item = make_item(comments=(comment,))
     ctx = _make_ctx(tmp_path, item=item)
     prompt = _build_prompt("build", ctx)
-    assert "### Comments" in prompt
-    assert "alice" in prompt
-    assert "Great idea!" in prompt
-
-
-def test_build_prompt_omits_comments_section_when_empty(tmp_path):
-    item = make_item(comments=())
-    ctx = _make_ctx(tmp_path, item=item)
-    prompt = _build_prompt("build", ctx)
-    assert "### Comments" not in prompt
+    assert "Great idea!" not in prompt
+    assert "alice" not in prompt
 
 
 def test_build_prompt_raises_when_item_unset(tmp_path):
     ctx = _make_ctx(tmp_path, item=None)
     with pytest.raises(AssertionError):
         _build_prompt("build", ctx)
+
+
+def test_build_prompt_runtime_assembly_does_not_include_full_item_body(tmp_path):
+    item = make_item(body="Detailed body content that should not appear inline.")
+    ctx = _make_ctx(tmp_path, item=item)
+    prompt = _build_prompt("build", ctx)
+    assert "Detailed body content that should not appear inline." not in prompt
+
+
+def test_build_prompt_runtime_assembly_does_not_include_comments_section(tmp_path):
+    comment = Comment(
+        author="bob",
+        body="A comment.",
+        created_at=datetime(2024, 3, 1, tzinfo=UTC),
+    )
+    item = make_item(comments=(comment,))
+    ctx = _make_ctx(tmp_path, item=item)
+    prompt = _build_prompt("build", ctx)
+    assert "A comment." not in prompt
+
+
+def test_build_prompt_runtime_assembly_still_includes_item_number_and_title(tmp_path):
+    item = make_item(item_id="99", title="Important feature")
+    ctx = _make_ctx(tmp_path, item=item)
+    prompt = _build_prompt("build", ctx)
+    assert "Issue #99: Important feature" in prompt
+
+
+def test_build_prompt_runtime_assembly_still_includes_branch_name_when_set(tmp_path):
+    item = make_item(item_id="99", title="T")
+    ctx = _make_ctx(tmp_path, item=item, work_branch="cog/99-important-feature")
+    prompt = _build_prompt("build", ctx)
+    assert "Branch: cog/99-important-feature" in prompt
+
+
+def test_build_prompt_tells_claude_to_fetch_body_via_gh_issue_view():
+    content = _load_prompt("build")
+    assert "gh issue view" in content
+
+
+def test_review_prompt_tells_claude_to_fetch_body_via_gh_issue_view():
+    content = _load_prompt("review")
+    assert "gh issue view" in content
+
+
+def test_document_prompt_tells_claude_to_fetch_body_via_gh_issue_view():
+    content = _load_prompt("document")
+    assert "gh issue view" in content
+
+
+def test_ralph_prompts_include_bounded_output_guidance_for_gh_fetch():
+    for stage in ("build", "review", "document"):
+        content = _load_prompt(stage)
+        assert "30000" in content or "30KB" in content, (
+            f"{stage}.md is missing bounded-output guidance for gh fetch"
+        )
 
 
 def test_no_unbounded_git_diff_in_prompts():
@@ -313,3 +364,7 @@ def test_review_prompt_cadence_is_language_agnostic():
 def test_review_prompt_does_not_have_commit_discipline_section():
     content = _load_prompt("review")
     assert "## Commit discipline" not in content
+
+
+def test_claude_md_exists_at_repo_root():
+    assert (_REPO_ROOT / "CLAUDE.md").exists()

@@ -11,10 +11,20 @@ linter, fix failures, commit. Nothing else. Pushing the branch, opening
 the PR, and commenting on the item all happen in the wrapper after you
 exit.
 
+## Item context
+
+To see the item's current body and comments:
+
+    gh issue view {item_id} --json body,comments --jq '.body, (.comments[] | .body)'
+
+Fetch when you need it. Claude Code persists any tool output >30KB to a
+session-scoped file; prefer `--jq` or pipe through `head -c 30000` to keep
+output bounded.
+
 ## Steps
 
-1. Read the item title, body, and comments (provided in the runtime
-   context section appended below).
+1. Fetch the item body and comments via `gh issue view` (see **Item context**
+   above). Read what's needed; not every decision requires the full body.
 2. Implement the change required by the item.
 3. Write or update tests that exercise the new or changed behavior.
 4. Run the project's test suite. Fix any failures.

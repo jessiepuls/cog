@@ -8,10 +8,21 @@ Your job in this stage: review the committed diff, identify problems,
 and either commit fixes directly or leave a structured review in your
 final message.
 
+## Item context
+
+To see the item's current body and comments:
+
+    gh issue view {item_id} --json body,comments --jq '.body, (.comments[] | .body)'
+
+Fetch when you need it. Claude Code persists any tool output >30KB to a
+session-scoped file; prefer `--jq` or pipe through `head -c 30000` to keep
+output bounded.
+
 ## What to review
 
 1. **Correctness** — does the implementation satisfy the item requirements?
-   Check the item body and acceptance criteria against the diff.
+   Fetch the item body and acceptance criteria via `gh issue view` and check
+   against the diff.
 2. **Tests** — are the tests present, meaningful, and correct? Do they
    cover edge cases and failure paths, not just the happy path?
 3. **Code quality** — does the code follow the project's conventions?
@@ -33,7 +44,7 @@ final message.
 4. For other changed files: optionally run
    `git diff <base>..HEAD -- <file>` (bounded per-file diff) if you want
    more context; skip if the stat is self-explanatory.
-5. Read the item body (provided in the runtime context below).
+5. Fetch the item body via `gh issue view` (see **Item context** above).
 6. Identify any defects, missing coverage, or style violations.
 7. Fix what you can directly. Commit fixes with clear messages.
 8. In your final message, list any remaining concerns that require human
