@@ -30,6 +30,37 @@ def test_load_prompt_reads_all_three_files():
         assert len(text) > 0, f"{stage}.md is empty"
 
 
+# ---------------------------------------------------------------------------
+# Rebase prompt
+# ---------------------------------------------------------------------------
+
+
+def test_rebase_prompt_exists_and_loads():
+    text = _load_prompt("rebase")
+    assert len(text) > 0
+
+
+def test_rebase_prompt_instructs_claude_to_run_git_rebase_themselves():
+    content = _load_prompt("rebase")
+    assert "git rebase" in content
+
+
+def test_rebase_prompt_describes_bail_semantics():
+    content = _load_prompt("rebase")
+    # Must mention aborting and exiting when conflict can't be resolved
+    assert "git rebase --abort" in content
+    assert "exit" in content.lower()
+
+
+def test_rebase_prompt_does_not_inject_repo_state():
+    # Regression guard: rebase prompt must use on-demand pattern —
+    # no pre-injected git state placeholders.
+    content = _load_prompt("rebase")
+    assert "{git_status}" not in content
+    assert "{branch}" not in content
+    assert "{{" not in content
+
+
 def test_build_prompt_contains_static_text(tmp_path):
     item = make_item()
     ctx = _make_ctx(tmp_path, item=item)

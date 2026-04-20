@@ -208,6 +208,20 @@ def test_outcome_literal_accepted():
         assert record.outcome == outcome
 
 
+def test_telemetry_outcome_literal_accepts_rebase_conflict():
+    record = TelemetryRecord.build(
+        project="p",
+        workflow="ralph",
+        item=_make_item(),
+        outcome="rebase-conflict",
+        results=[],
+        duration_seconds=1.0,
+        cause_class="RebaseUnresolvedError",
+    )
+    assert record.outcome == "rebase-conflict"
+    assert record.cause_class == "RebaseUnresolvedError"
+
+
 def test_telemetry_record_cause_class_default_is_none():
     record = TelemetryRecord.build(
         project="p",

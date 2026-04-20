@@ -21,6 +21,17 @@ def _writable_state_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
 
 
+@pytest.fixture(autouse=True)
+def _clean_rebase(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Patch _rebase_before_push to return clean so finalize_success tests don't hit git."""
+    from cog.workflows.ralph import RebaseOutcome
+
+    async def _noop(self: object, ctx: object) -> RebaseOutcome:
+        return RebaseOutcome(status="clean")
+
+    monkeypatch.setattr(RalphWorkflow, "_rebase_before_push", _noop)
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

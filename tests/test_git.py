@@ -17,6 +17,8 @@ from cog.git import (
     delete_branch,
     fetch_origin,
     merge_ff_only,
+    rebase_abort,
+    rebase_in_progress,
 )
 from tests.fakes import FakeSubprocessRegistry
 
@@ -190,3 +192,42 @@ async def test_delete_branch_removes_branch(tmp_path: Path) -> None:
     with _patch_exec(registry):
         await delete_branch(tmp_path, "cog/42-my-branch")
     assert ("git", "branch", "-D", "cog/42-my-branch") in registry.calls
+
+
+# ---------------------------------------------------------------------------
+# rebase_in_progress — filesystem checks, no subprocess
+# ---------------------------------------------------------------------------
+
+
+async def test_rebase_in_progress_returns_false_when_no_rebase_state(tmp_path: Path) -> None:
+    (tmp_path / ".git").mkdir()
+    assert await rebase_in_progress(tmp_path) is False
+
+
+async def test_rebase_in_progress_returns_true_when_rebase_merge_dir_exists(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / ".git").mkdir()
+    (tmp_path / ".git" / "rebase-merge").mkdir()
+    assert await rebase_in_progress(tmp_path) is True
+
+
+async def test_rebase_in_progress_returns_true_when_rebase_apply_dir_exists(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / ".git").mkdir()
+    (tmp_path / ".git" / "rebase-apply").mkdir()
+    assert await rebase_in_progress(tmp_path) is True
+
+
+# ---------------------------------------------------------------------------
+# rebase_abort — subprocess
+# ---------------------------------------------------------------------------
+
+
+async def test_rebase_abort_calls_git_rebase_abort(tmp_path: Path) -> None:
+    registry = FakeSubprocessRegistry()
+    registry.expect(("git", "rebase", "--abort"), stdout=b"")
+    with _patch_exec(registry):
+        await rebase_abort(tmp_path)
+    assert ("git", "rebase", "--abort") in registry.calls
