@@ -49,10 +49,6 @@ def test_class_attributes():
     assert RalphWorkflow.preflight_checks is RALPH_CHECKS
 
 
-def test_ralph_checks_identity_still_holds():
-    assert RalphWorkflow.preflight_checks is RALPH_CHECKS
-
-
 def test_ralph_checks_do_not_contain_default_branch():
     names = {c.name for c in RALPH_CHECKS}
     assert "default_branch" not in names
