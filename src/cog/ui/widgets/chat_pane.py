@@ -7,11 +7,22 @@ from rich.markdown import Markdown
 from rich.text import Text
 from textual.app import ComposeResult
 from textual.binding import Binding
+from textual.containers import ScrollableContainer
 from textual.widget import Widget
 from textual.widgets import RichLog, Static, TextArea
 
-from cog.core.runner import AssistantTextEvent, ResultEvent, RunEvent, StatusEvent, ToolUseEvent
+from cog.core.item import Item
+from cog.core.runner import (
+    AssistantTextEvent,
+    ItemSelectedEvent,
+    ResultEvent,
+    RunEvent,
+    StatusEvent,
+    ToolUseEvent,
+)
 from cog.ui.widgets._shared import tool_preview
+
+_TITLE_TRUNCATE = 80
 
 
 class ChatPaneWidget(Widget):
@@ -25,6 +36,11 @@ class ChatPaneWidget(Widget):
         Binding("enter", "submit", "Submit", priority=True),
         Binding("escape", "end_interview", "End interview", priority=True),
         Binding("ctrl+d", "end_interview", "End interview", priority=True, show=False),
+        # Two bindings on the same key with different descriptions; check_action
+        # hides the inactive one so the footer shows "Show issue" when
+        # collapsed and "Hide issue" when expanded.
+        Binding("ctrl+i", "show_info", "Show issue", priority=True),
+        Binding("ctrl+i", "hide_info", "Hide issue", priority=True),
     ]
 
     DEFAULT_CSS = """
@@ -32,6 +48,22 @@ class ChatPaneWidget(Widget):
         height: 1fr;
         border: solid $accent;
         layout: vertical;
+    }
+    ChatPaneWidget #info-header {
+        height: 1;
+        padding: 0 1;
+        background: $surface;
+        color: $text;
+    }
+    ChatPaneWidget #info-body {
+        height: auto;
+        max-height: 30%;
+        padding: 1;
+        border-bottom: solid $primary;
+        background: $surface;
+    }
+    ChatPaneWidget #info-body.hidden {
+        display: none;
     }
     ChatPaneWidget #scrollback {
         height: 1fr;
@@ -49,8 +81,13 @@ class ChatPaneWidget(Widget):
     def __init__(self, *args: object, **kwargs: object) -> None:
         super().__init__(*args, **kwargs)  # type: ignore[arg-type]
         self._input_future: asyncio.Future[str | None] | None = None
+        self._item: Item | None = None
+        self._info_expanded: bool = False
 
     def compose(self) -> ComposeResult:
+        yield Static(self._header_text(), id="info-header")
+        with ScrollableContainer(id="info-body", classes="hidden"):
+            yield Static("", id="info-body-content")
         yield RichLog(id="scrollback", highlight=True, markup=True, wrap=True)
         yield Static("⏳ Thinking…", id="thinking")
         yield TextArea(id="input-area")
@@ -63,6 +100,46 @@ class ChatPaneWidget(Widget):
     def on_mount(self) -> None:
         self.query_one("#thinking", Static).display = False
         self._ensure_future()
+
+    def _header_text(self) -> str:
+        if self._item is None:
+            return "[dim](no item yet)[/dim]"
+        title = self._item.title
+        if len(title) > _TITLE_TRUNCATE:
+            title = title[: _TITLE_TRUNCATE - 1] + "…"
+        labels = f"  [dim]\\[{', '.join(self._item.labels)}][/dim]" if self._item.labels else ""
+        return f"[bold]#{self._item.item_id}[/bold] — {title}{labels}"
+
+    def set_item(self, item: Item) -> None:
+        self._item = item
+        self.query_one("#info-header", Static).update(self._header_text())
+        self.query_one("#info-body-content", Static).update(Markdown(item.body or "*(empty body)*"))
+
+    def action_show_info(self) -> None:
+        self._set_info_expanded(True)
+
+    def action_hide_info(self) -> None:
+        self._set_info_expanded(False)
+
+    def _set_info_expanded(self, expanded: bool) -> None:
+        self._info_expanded = expanded
+        body = self.query_one("#info-body")
+        if expanded:
+            body.remove_class("hidden")
+        else:
+            body.add_class("hidden")
+        self.refresh_bindings()
+
+    def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:
+        if action == "show_info":
+            if self._item is None or self._info_expanded:
+                return None
+            return True
+        if action == "hide_info":
+            if self._item is None or not self._info_expanded:
+                return None
+            return True
+        return True
 
     def _append_message(self, renderable: object) -> None:
         log = self.query_one("#scrollback", RichLog)
@@ -108,7 +185,9 @@ class ChatPaneWidget(Widget):
             future.set_result(None)
 
     async def emit(self, event: RunEvent) -> None:
-        if isinstance(event, AssistantTextEvent):
+        if isinstance(event, ItemSelectedEvent):
+            self.set_item(event.item)
+        elif isinstance(event, AssistantTextEvent):
             self._append_message(
                 Group(
                     Text.from_markup("[bold blue]Claude:[/bold blue]"),

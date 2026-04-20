@@ -13,7 +13,13 @@ from cog.core.errors import GitError, StageError
 from cog.core.item import Item
 from cog.core.outcomes import Outcome, StageResult
 from cog.core.preflight import PreflightCheck
-from cog.core.runner import ResultEvent, RunResult, StageEndEvent, StageStartEvent
+from cog.core.runner import (
+    ItemSelectedEvent,
+    ResultEvent,
+    RunResult,
+    StageEndEvent,
+    StageStartEvent,
+)
 from cog.core.stage import Stage
 
 if TYPE_CHECKING:
@@ -79,6 +85,9 @@ class StageExecutor:
             if item is None:
                 return []
             ctx.item = item
+        assert ctx.item is not None
+        if ctx.event_sink is not None:
+            await ctx.event_sink.emit(ItemSelectedEvent(item=ctx.item))
         results: list[StageResult] = []
         try:
             await workflow.pre_stages(ctx)

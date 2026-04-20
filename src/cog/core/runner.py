@@ -2,7 +2,10 @@ from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from cog.core.item import Item
 
 
 @dataclass(frozen=True)
@@ -48,8 +51,19 @@ class StatusEvent:
     message: str
 
 
+@dataclass(frozen=True)
+class ItemSelectedEvent:
+    item: "Item"
+
+
 RunEvent = (
-    AssistantTextEvent | ToolUseEvent | ResultEvent | StageStartEvent | StageEndEvent | StatusEvent
+    AssistantTextEvent
+    | ToolUseEvent
+    | ResultEvent
+    | StageStartEvent
+    | StageEndEvent
+    | StatusEvent
+    | ItemSelectedEvent
 )
 
 

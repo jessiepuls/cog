@@ -131,6 +131,44 @@ async def test_select_item_none_exits_cleanly(ctx_factory, echo_runner):
     assert wf.finalize_called is None
 
 
+async def test_stage_executor_emits_item_selected_event(ctx_factory, echo_runner):
+    from cog.core.runner import ItemSelectedEvent
+    from tests.fakes import RecordingEventSink
+
+    sink = RecordingEventSink()
+    wf = _SimpleWorkflow(echo_runner)
+    ctx = ctx_factory(event_sink=sink)
+    await StageExecutor().run(wf, ctx)
+    item_events = [e for e in sink.events if isinstance(e, ItemSelectedEvent)]
+    assert len(item_events) == 1
+    assert item_events[0].item is ctx.item
+
+
+async def test_stage_executor_emits_item_selected_when_pre_selected(ctx_factory, echo_runner):
+    from cog.core.runner import ItemSelectedEvent
+    from tests.fakes import RecordingEventSink
+
+    sink = RecordingEventSink()
+    wf = _SimpleWorkflow(echo_runner)
+    ctx = ctx_factory(event_sink=sink, item=_make_item())
+    await StageExecutor().run(wf, ctx)
+    item_events = [e for e in sink.events if isinstance(e, ItemSelectedEvent)]
+    assert len(item_events) == 1
+
+
+async def test_stage_executor_does_not_emit_item_selected_when_queue_empty(
+    ctx_factory, echo_runner
+):
+    from cog.core.runner import ItemSelectedEvent
+    from tests.fakes import RecordingEventSink
+
+    sink = RecordingEventSink()
+    wf = _EmptyQueueWorkflow(echo_runner)
+    await StageExecutor().run(wf, ctx_factory(event_sink=sink))
+    item_events = [e for e in sink.events if isinstance(e, ItemSelectedEvent)]
+    assert item_events == []
+
+
 async def test_stage_nonzero_exit_raises_stage_error(ctx_factory):
     wf = _SimpleWorkflow(_FailRunner())
     with pytest.raises(StageError) as exc_info:
