@@ -42,13 +42,13 @@ from cog.workflows.ralph import RalphWorkflow
 _SubState = Literal["idle", "running", "post_run"]
 
 
-class RalphView(Widget):
+class RalphView(Widget, can_focus=True):
     """Host of the ralph workflow's inline flow."""
 
     BINDINGS = [
         Binding("r", "refresh_queue", "Refresh", show=False),
         Binding("ctrl+c", "cancel_run", "Cancel"),
-        Binding("enter", "dismiss_post_run", "Dismiss", show=False),
+        Binding("enter", "dismiss_post_run", "Dismiss"),
     ]
 
     DEFAULT_CSS = """
@@ -137,13 +137,16 @@ class RalphView(Widget):
 
     def focus_content(self) -> None:
         """Called by the shell after this view becomes active. Focus the
-        queue in idle state so Enter / arrows work without a click first."""
+        sub-widget or the view itself so keybinds fire without a click."""
         if self._substate == "idle":
             try:
                 self.query_one("#ralph-queue", ListView).focus()
             except Exception:  # noqa: BLE001
                 pass
-        # running / post_run: bindings are on the view; no sub-widget needs focus.
+        else:
+            # running / post_run: bindings are on the view itself, so the
+            # view needs focus for Enter / Ctrl+C to reach them.
+            self.focus()
 
     async def action_refresh_queue(self) -> None:
         await self.refresh_queue()
@@ -332,6 +335,11 @@ class RalphView(Widget):
         self.query_one("#ralph-running", Container).display = substate == "running"
         self.query_one("#ralph-post-run", Static).display = substate == "post_run"
         self.refresh_bindings()
+        # Re-focus the right sub-widget for the new substate — the shell's
+        # call_after_refresh hook only fires on view switch, not on an
+        # internal substate change (e.g. running → post_run when a run
+        # completes).
+        self.call_after_refresh(self.focus_content)
 
     def _set_status(self, text: str) -> None:
         self.query_one("#ralph-status", Static).update(text)

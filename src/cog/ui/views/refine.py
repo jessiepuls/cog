@@ -38,7 +38,7 @@ from cog.workflows.refine import RefineWorkflow, ReviewDecision, ReviewOutcome
 _SubState = Literal["idle", "running", "review"]
 
 
-class RefineView(Widget):
+class RefineView(Widget, can_focus=True):
     """Host of the refine workflow's inline flow."""
 
     BINDINGS = [
@@ -150,23 +150,25 @@ class RefineView(Widget):
             await self.refresh_queue()
 
     def focus_content(self) -> None:
-        """Called by the shell after this view becomes active. Focus the
-        sub-widget that makes sense for the current sub-state so the user
-        can interact without clicking first."""
+        """Called by the shell after this view becomes active and by
+        _switch_to on internal substate changes. Focus the sub-widget or
+        the view itself so keybinds fire without a click."""
         if self._substate == "idle":
             try:
                 self.query_one("#refine-queue", ListView).focus()
             except Exception:  # noqa: BLE001
                 pass
         elif self._substate == "running" and self._chat_pane is not None:
-            # Focus the chat pane's text input for typing replies.
             try:
                 from textual.widgets import TextArea
 
                 self._chat_pane.query_one("#input-area", TextArea).focus()
             except Exception:  # noqa: BLE001
                 pass
-        # review sub-state: no specific input — bindings fire on the view.
+        elif self._substate == "review":
+            # Review bindings (a / e / shift+q) fire on the view itself —
+            # focus the view so Enter-style keypresses reach them.
+            self.focus()
 
     async def action_refresh_queue(self) -> None:
         await self.refresh_queue()
@@ -349,6 +351,9 @@ class RefineView(Widget):
         self.query_one("#refine-running", Container).display = substate == "running"
         self.query_one("#refine-review", Container).display = substate == "review"
         self.refresh_bindings()
+        # Internal substate changes (e.g. running → review) don't trigger
+        # the shell's auto-focus hook, so re-focus here.
+        self.call_after_refresh(self.focus_content)
 
     def _set_status(self, text: str) -> None:
         self.query_one("#refine-status", Static).update(text)
