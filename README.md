@@ -198,8 +198,7 @@ Exiting without saving returns to the review prompt — not abandon.
 ## Preflight checks
 
 Every workflow run starts with a preflight check bundle. Ralph runs all
-checks; refine skips `clean_tree` and `default_branch` (refine doesn't
-touch git).
+checks; refine skips `clean_tree` (refine doesn't touch git).
 
 | Check | Scope | What it verifies |
 |-------|-------|-------------------|
@@ -208,7 +207,6 @@ touch git).
 | `host_tool.docker` | both | `docker` on PATH |
 | `git_repo` | both | inside a git worktree |
 | `clean_tree` | ralph | working tree has no staged / unstaged / untracked changes |
-| `default_branch` | ralph | currently on the default branch |
 | `origin_remote` | both | `origin` remote is configured |
 | `gh_auth` | both | `gh auth status` passes |
 | `gh_token_file` | both | gh token is file-based (not macOS keychain) |
