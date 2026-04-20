@@ -104,6 +104,15 @@ async def test_shell_keybinds_show_in_footer(tmp_path: Path) -> None:
         assert "Dashboard" in descriptions
         assert "Refine" in descriptions
         assert "Ralph" in descriptions
+        assert "Quit" in descriptions
+
+
+async def test_shell_ctrl_q_exits_app(tmp_path: Path) -> None:
+    async with _ShellApp(tmp_path).run_test(headless=True) as pilot:
+        await pilot.pause()
+        await pilot.press("ctrl+q")
+        await pilot.pause()
+        assert not pilot.app.is_running
 
 
 async def test_shell_switch_to_same_view_is_noop(tmp_path: Path) -> None:

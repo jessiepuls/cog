@@ -124,7 +124,10 @@ class CogShellScreen(Screen):
     }
     """
 
-    BINDINGS = [Binding(v.keybind, f"switch_to('{v.id}')", v.label) for v in _VIEWS]
+    BINDINGS = [
+        *(Binding(v.keybind, f"switch_to('{v.id}')", v.label) for v in _VIEWS),
+        Binding("ctrl+q", "quit_app", "Quit"),
+    ]
 
     def __init__(self, project_dir: Path, tracker: IssueTracker) -> None:
         super().__init__()
@@ -145,6 +148,9 @@ class CogShellScreen(Screen):
     def on_mount(self) -> None:
         self._apply_active_view()
         self._highlight_sidebar_row(self._active_view_id)
+
+    def action_quit_app(self) -> None:
+        self.app.exit()
 
     def action_switch_to(self, view_id: str) -> None:
         if view_id == self._active_view_id:
