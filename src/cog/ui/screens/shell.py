@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from dataclasses import dataclass
+from pathlib import Path
 
 from textual.app import ComposeResult
 from textual.binding import Binding
@@ -21,6 +22,9 @@ from textual.containers import Container, Horizontal
 from textual.screen import Screen
 from textual.widget import Widget
 from textual.widgets import Footer, Header, Label, ListItem, ListView, Static
+
+from cog.core.tracker import IssueTracker
+from cog.ui.views.dashboard import DashboardView
 
 
 @dataclass(frozen=True)
@@ -122,8 +126,10 @@ class CogShellScreen(Screen):
 
     BINDINGS = [Binding(v.keybind, f"switch_to('{v.id}')", v.label) for v in _VIEWS]
 
-    def __init__(self) -> None:
+    def __init__(self, project_dir: Path, tracker: IssueTracker) -> None:
         super().__init__()
+        self._project_dir = project_dir
+        self._tracker = tracker
         self._active_view_id: str = _VIEWS[0].id
 
     def compose(self) -> ComposeResult:
@@ -131,7 +137,8 @@ class CogShellScreen(Screen):
         with Horizontal(id="shell-body"):
             yield Sidebar(_VIEWS)
             with Container(id="content-area"):
-                for v in _VIEWS:
+                yield DashboardView(self._project_dir, self._tracker)
+                for v in _VIEWS[1:]:
                     yield _StubView(v)
         yield Footer()
 
@@ -155,7 +162,7 @@ class CogShellScreen(Screen):
 
     def _apply_active_view(self) -> None:
         for v in _VIEWS:
-            widget = self.query_one(f"#view-{v.id}", _StubView)
+            widget = self.query_one(f"#view-{v.id}")
             widget.display = v.id == self._active_view_id
 
     def _highlight_sidebar_row(self, view_id: str) -> None:

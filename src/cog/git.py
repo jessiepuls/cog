@@ -1,10 +1,23 @@
 """Async git subprocess helpers. All failures raise GitError."""
 
 import asyncio
+from dataclasses import dataclass
 from pathlib import Path
 from subprocess import PIPE
 
 from cog.core.errors import GitError
+
+
+@dataclass(frozen=True)
+class WorkingTreeStatus:
+    """Lightweight summary of `git status --porcelain` output."""
+
+    changed: int  # staged + unstaged modifications
+    untracked: int
+
+    @property
+    def is_clean(self) -> bool:
+        return self.changed == 0 and self.untracked == 0
 
 
 async def _run(args: list[str], cwd: Path) -> str:
@@ -26,6 +39,26 @@ async def default_branch(project_dir: Path) -> str:
 async def current_branch(project_dir: Path) -> str:
     """`git symbolic-ref --short HEAD`. Raises GitError on detached HEAD."""
     return await _run(["git", "symbolic-ref", "--short", "HEAD"], project_dir)
+
+
+async def working_tree_status(project_dir: Path) -> WorkingTreeStatus:
+    """Parse `git status --porcelain` into a (changed, untracked) count.
+
+    Untracked lines start with `??`; any other non-empty line counts as a
+    tracked change (staged, unstaged, or both). Raises GitError if git
+    fails or the directory isn't a repository.
+    """
+    out = await _run(["git", "status", "--porcelain", "--untracked-files=normal"], project_dir)
+    changed = 0
+    untracked = 0
+    for line in out.splitlines():
+        if not line.strip():
+            continue
+        if line.startswith("??"):
+            untracked += 1
+        else:
+            changed += 1
+    return WorkingTreeStatus(changed=changed, untracked=untracked)
 
 
 async def current_head_sha(project_dir: Path) -> str:

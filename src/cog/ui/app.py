@@ -45,11 +45,9 @@ async def run_textual(
 
 
 async def _run_main_menu(project_dir: Path) -> None:
+    from cog.trackers.github import GitHubIssueTracker
     from cog.ui.screens.shell import CogShellScreen
 
-    # `project_dir` is unused by the shell itself; the individual views
-    # that will replace the stubs (#123-#125) need it. Keep the signature
-    # stable so cli.py doesn't need to change.
-    _ = project_dir
-    app = CogApp(CogShellScreen())
+    tracker = GitHubIssueTracker(project_dir)
+    app = CogApp(CogShellScreen(project_dir, tracker))
     await app.run_async()
