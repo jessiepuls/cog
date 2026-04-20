@@ -297,9 +297,7 @@ class RalphWorkflow(Workflow):
         if checks.all_passed:
             await self._mark_ci_success(ctx, results, pr)
         else:
-            error = CiChecksFailedError(
-                failing=tuple(r.name for r in checks.failed)
-            )
+            error = CiChecksFailedError(failing=tuple(r.name for r in checks.failed))
             await self._handle_ci_failure(ctx, results, pr, checks, error)
 
     async def _wait_for_ci(self, ctx: ExecutionContext, pr: PullRequest) -> PrChecks:
