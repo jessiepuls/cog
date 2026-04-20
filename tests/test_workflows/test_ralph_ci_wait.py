@@ -514,9 +514,11 @@ async def test_finalize_success_ci_fail_marks_processed_with_ci_failed_outcome(
     assert ctx.state_cache._processed[ctx.state_cache._key(ctx.item)] == "ci-failed"
 
 
-async def test_finalize_success_ci_fail_writes_telemetry_with_cause_class_ci_checks_failed_error(
+async def test_finalize_success_ci_fail_writes_telemetry_with_ci_failed_outcome(
     tmp_path: Path,
 ) -> None:
+    # When CI fails and the fix stage commits nothing (EchoRunner returns 0 commits),
+    # cause_class is CiFixFailedError (the fix stage ran but couldn't reproduce/fix).
     tel = _make_telemetry()
     host = _make_host()
     wf = _make_wf(host=host)
@@ -529,7 +531,7 @@ async def test_finalize_success_ci_fail_writes_telemetry_with_cause_class_ci_che
     tel.write.assert_awaited_once()
     record = tel.write.call_args.args[0]
     assert record.outcome == "ci-failed"
-    assert record.cause_class == "CiChecksFailedError"
+    assert record.cause_class == "CiFixFailedError"
 
 
 async def test_finalize_success_ci_timeout_writes_telemetry_with_cause_class_ci_timeout_error(

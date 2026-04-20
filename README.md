@@ -96,9 +96,13 @@ Key fields:
 | `error` | string\|null | `"stage 'X' failed \| cause=RunnerStalledError: ..."` on failure |
 | `cause_class` | string\|null | Exception class name of the underlying cause (e.g. `RunnerStalledError`, `RunnerTimeoutError`) |
 | `pr_url` | string\|null | PR URL if one was opened |
+| `retry_count` | int | Number of CI-fix retries attempted this iteration (0 when no CI failures occurred) |
+| `ci_failed_checks` | array | Deduplicated names of CI checks that failed across all retry attempts; empty when no failures |
 
 `cause_class` is populated when a stage fails with a classifiable runner error — useful for filtering
 retry-eligible failures (`RunnerStalledError`, `RunnerTimeoutError`, `RebaseUnresolvedError`) from logic errors in telemetry queries.
+CI-specific values: `CiFixFailedError` (claude exited without committing — unreproducible or couldn't fix),
+`CiRetryCapExhaustedError` (retry cap hit; all attempts failed).
 
 When a stage fails after the runner has done real work (e.g. committed code), the partial result is
 preserved: `stages` will contain an entry for the failed stage with accurate `duration_s`, `cost_usd`,

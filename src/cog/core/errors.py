@@ -101,3 +101,19 @@ class CiTimeoutError(CiError):
     def __init__(self, timeout_seconds: float) -> None:
         self.timeout_seconds = timeout_seconds
         super().__init__(f"CI did not resolve within {timeout_seconds:.0f}s")
+
+
+class CiFixFailedError(CiError):
+    """Claude exited without committing — unreproducible or couldn't fix."""
+
+    def __init__(self, reason: str) -> None:
+        self.reason = reason
+        super().__init__(f"CI fix failed: {reason}")
+
+
+class CiRetryCapExhaustedError(CiError):
+    """All CI fix retry attempts exhausted; still failing."""
+
+    def __init__(self, attempts: int) -> None:
+        self.attempts = attempts
+        super().__init__(f"CI retry cap exhausted after {attempts} attempts")
