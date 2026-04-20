@@ -119,6 +119,48 @@ async def test_build_and_run_preselects_item_when_item_id_given(tmp_path: Path) 
     assert captured_ctx["ctx"].item == fake_item
 
 
+async def test_build_and_run_handles_tracker_error_for_item_fetch(tmp_path: Path, capsys) -> None:
+    # Regression: `cog ralph --item 9999` against a non-existent issue used to
+    # dump a raw Python traceback. Should now return exit 1 with a clean
+    # stderr message.
+    from cog.core.errors import TrackerError
+    from cog.ui.wire import build_and_run
+
+    with (
+        patch("cog.ui.wire.run_checks", new=AsyncMock(return_value=[])),
+        patch("cog.ui.wire.print_results"),
+        patch("cog.ui.wire.DockerSandbox", return_value=MagicMock()),
+        patch("cog.ui.wire.ClaudeCliRunner", return_value=MagicMock()),
+        patch("cog.ui.wire.GitHubIssueTracker") as mock_tracker_cls,
+        patch("cog.ui.wire.JsonFileStateCache") as mock_cache_cls,
+        patch("cog.ui.wire.TelemetryWriter"),
+        patch("cog.ui.wire.project_state_dir", return_value=tmp_path / ".cog"),
+    ):
+        mock_tracker = AsyncMock()
+        mock_tracker.get = AsyncMock(
+            side_effect=TrackerError("gh issue view 9999 failed (exit 1): not found")
+        )
+        mock_tracker_cls.return_value = mock_tracker
+
+        mock_cache = MagicMock()
+        mock_cache.was_corrupt.return_value = False
+        mock_cache.is_empty.return_value = False
+        mock_cache_cls.return_value = mock_cache
+
+        code = await build_and_run(
+            _FakeWorkflow,  # type: ignore[arg-type]
+            tmp_path,
+            item_id=9999,
+            loop=False,
+            headless=False,
+        )
+
+    assert code == 1
+    err = capsys.readouterr().err
+    assert "could not load item #9999" in err
+    assert "not found" in err
+
+
 async def test_build_and_run_headless_invokes_run_headless(tmp_path: Path) -> None:
     """--headless path dispatches to cog.headless.run_headless."""
     from cog.ui.wire import build_and_run

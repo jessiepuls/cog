@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from cog.core.context import ExecutionContext
+from cog.core.errors import TrackerError
 from cog.core.preflight import PreflightResult, print_results, run_checks
 from cog.core.workflow import Workflow
 from cog.headless import run_headless
@@ -116,7 +117,11 @@ async def build_and_run(
     )
 
     if item_id is not None:
-        ctx.item = await tracker.get(str(item_id))
+        try:
+            ctx.item = await tracker.get(str(item_id))
+        except TrackerError as e:
+            print(f"error: could not load item #{item_id}: {e}", file=sys.stderr)
+            return 1
 
     if headless:
         return await run_headless(workflow, ctx, loop=loop, max_iterations=max_iterations)
