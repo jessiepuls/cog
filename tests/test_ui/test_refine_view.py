@@ -204,6 +204,24 @@ async def test_refine_view_check_action_hides_review_bindings_outside_review(
         assert view.check_action("refresh_queue", ()) is True
 
 
+async def test_refine_view_busy_description_matches_substate(
+    tmp_path: Path, xdg_state: Path
+) -> None:
+    tracker = _tracker_with([])
+    async with _RefineApp(tmp_path, tracker).run_test(headless=True) as pilot:
+        await pilot.pause()
+        view = pilot.app.query_one(RefineView)
+        # Idle → None
+        assert view.busy_description() is None
+        # Running → "interview"
+        view._substate = "running"
+        view._active_item = _item(42)
+        assert view.busy_description() == "Refine interview on #42"
+        # Review → "review pending"
+        view._substate = "review"
+        assert view.busy_description() == "Refine review pending on #42"
+
+
 async def test_refine_view_posts_attention_on_review_substate(
     tmp_path: Path, xdg_state: Path
 ) -> None:

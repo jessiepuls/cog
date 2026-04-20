@@ -164,6 +164,17 @@ class RefineView(Widget, can_focus=True):
         if self._substate == "idle":
             await self.refresh_queue()
 
+    def busy_description(self) -> str | None:
+        """Human-readable description of in-flight work, or None when idle."""
+        if self._substate == "idle":
+            return None
+        item_id = self._active_item.item_id if self._active_item else "?"
+        if self._substate == "running":
+            return f"Refine interview on #{item_id}"
+        if self._substate == "review":
+            return f"Refine review pending on #{item_id}"
+        return None
+
     def focus_content(self) -> None:
         """Called by the shell after this view becomes active and by
         _switch_to on internal substate changes. Focus the sub-widget or

@@ -181,7 +181,27 @@ class CogShellScreen(Screen):
         self._highlight_sidebar_row(self._active_view_id)
 
     def action_quit_app(self) -> None:
-        self.app.exit()
+        busy: list[str] = []
+        for v in _VIEWS:
+            try:
+                widget = self.query_one(f"#view-{v.id}")
+            except Exception:  # noqa: BLE001 — not mounted yet
+                continue
+            if not hasattr(widget, "busy_description"):
+                continue
+            desc = widget.busy_description()
+            if desc:
+                busy.append(desc)
+        if not busy:
+            self.app.exit()
+            return
+        from cog.ui.screens.quit_confirm import QuitConfirmScreen
+
+        self.app.push_screen(QuitConfirmScreen(busy), self._on_quit_confirmed)
+
+    def _on_quit_confirmed(self, confirmed: bool | None) -> None:
+        if confirmed:
+            self.app.exit()
 
     def action_switch_to(self, view_id: str) -> None:
         if view_id == self._active_view_id:

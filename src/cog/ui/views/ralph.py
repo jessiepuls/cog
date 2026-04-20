@@ -136,6 +136,16 @@ class RalphView(Widget, can_focus=True):
         if self._substate == "idle":
             await self.refresh_queue()
 
+    def busy_description(self) -> str | None:
+        """Human-readable description of in-flight work, or None when idle.
+
+        post_run is not busy — the run finished; the user is just reviewing.
+        """
+        if self._substate != "running":
+            return None
+        item_id = self._active_item.item_id if self._active_item else "?"
+        return f"Ralph run on #{item_id}"
+
     def focus_content(self) -> None:
         """Called by the shell after this view becomes active. Focus the
         sub-widget or the view itself so keybinds fire without a click."""

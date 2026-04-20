@@ -140,6 +140,91 @@ async def test_shell_ctrl_q_exits_app(tmp_path: Path) -> None:
         assert not pilot.app.is_running
 
 
+async def test_shell_ctrl_q_shows_modal_when_refine_in_progress(tmp_path: Path) -> None:
+    from cog.ui.screens.quit_confirm import QuitConfirmScreen
+
+    async with _ShellApp(tmp_path).run_test(headless=True) as pilot:
+        await pilot.pause()
+        refine = pilot.app.query_one(RefineView)
+        refine._substate = "running"
+        refine._active_item = type(
+            "I", (), {"item_id": "42", "title": "t", "labels": (), "comments": (), "body": ""}
+        )()  # type: ignore[assignment]
+
+        await pilot.press("ctrl+q")
+        for _ in range(3):
+            await pilot.pause()
+
+        # App still running; modal pushed on top
+        assert pilot.app.is_running
+        modals = [s for s in pilot.app.screen_stack if isinstance(s, QuitConfirmScreen)]
+        assert len(modals) == 1
+
+
+async def test_shell_quit_modal_lists_busy_descriptions(tmp_path: Path) -> None:
+    from cog.ui.screens.quit_confirm import QuitConfirmScreen
+
+    async with _ShellApp(tmp_path).run_test(headless=True) as pilot:
+        await pilot.pause()
+        refine = pilot.app.query_one(RefineView)
+        refine._substate = "running"
+        refine._active_item = type(
+            "I", (), {"item_id": "42", "title": "t", "labels": (), "comments": (), "body": ""}
+        )()  # type: ignore[assignment]
+        ralph = pilot.app.query_one(RalphView)
+        ralph._substate = "running"
+        ralph._active_item = type(
+            "I", (), {"item_id": "99", "title": "t", "labels": (), "comments": (), "body": ""}
+        )()  # type: ignore[assignment]
+
+        await pilot.press("ctrl+q")
+        for _ in range(3):
+            await pilot.pause()
+        modal = next(s for s in pilot.app.screen_stack if isinstance(s, QuitConfirmScreen))
+        descs = list(modal._descriptions)
+        assert any("#42" in d for d in descs)
+        assert any("#99" in d for d in descs)
+
+
+async def test_shell_quit_modal_yes_exits(tmp_path: Path) -> None:
+    async with _ShellApp(tmp_path).run_test(headless=True) as pilot:
+        await pilot.pause()
+        refine = pilot.app.query_one(RefineView)
+        refine._substate = "running"
+        refine._active_item = type(
+            "I", (), {"item_id": "42", "title": "t", "labels": (), "comments": (), "body": ""}
+        )()  # type: ignore[assignment]
+        await pilot.press("ctrl+q")
+        for _ in range(3):
+            await pilot.pause()
+        await pilot.press("y")
+        for _ in range(3):
+            await pilot.pause()
+        assert not pilot.app.is_running
+
+
+async def test_shell_quit_modal_no_cancels_and_stays(tmp_path: Path) -> None:
+    from cog.ui.screens.quit_confirm import QuitConfirmScreen
+
+    async with _ShellApp(tmp_path).run_test(headless=True) as pilot:
+        await pilot.pause()
+        refine = pilot.app.query_one(RefineView)
+        refine._substate = "running"
+        refine._active_item = type(
+            "I", (), {"item_id": "42", "title": "t", "labels": (), "comments": (), "body": ""}
+        )()  # type: ignore[assignment]
+        await pilot.press("ctrl+q")
+        for _ in range(3):
+            await pilot.pause()
+        await pilot.press("n")
+        for _ in range(3):
+            await pilot.pause()
+        assert pilot.app.is_running
+        # Modal dismissed
+        modals = [s for s in pilot.app.screen_stack if isinstance(s, QuitConfirmScreen)]
+        assert not modals
+
+
 async def test_shell_switch_to_same_view_is_noop(tmp_path: Path) -> None:
     async with _ShellApp(tmp_path).run_test(headless=True) as pilot:
         await pilot.pause()

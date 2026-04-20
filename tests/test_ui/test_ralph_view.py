@@ -174,6 +174,24 @@ async def test_ralph_view_dismiss_post_run_returns_to_idle(tmp_path: Path, xdg_s
         assert view._substate == "idle"
 
 
+async def test_ralph_view_busy_description_matches_substate(
+    tmp_path: Path, xdg_state: Path
+) -> None:
+    tracker = _tracker_with([])
+    async with _RalphApp(tmp_path, tracker).run_test(headless=True) as pilot:
+        await pilot.pause()
+        view = pilot.app.query_one(RalphView)
+        # Idle → None
+        assert view.busy_description() is None
+        # Running → busy with item id
+        view._substate = "running"
+        view._active_item = _item(99)
+        assert view.busy_description() == "Ralph run on #99"
+        # Post-run → not busy (run finished)
+        view._substate = "post_run"
+        assert view.busy_description() is None
+
+
 async def test_ralph_view_posts_attention_on_post_run_substate(
     tmp_path: Path, xdg_state: Path
 ) -> None:
