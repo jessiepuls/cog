@@ -102,6 +102,40 @@ def _make_app(workflow: Workflow, ctx: ExecutionContext) -> App:
     return _TestApp()
 
 
+async def test_run_screen_hides_q_quit_binding_while_textarea_focused(tmp_path: Path) -> None:
+    # Regression: during the refine interview, focus is on a TextArea where
+    # `q` is a printable char — the footer's "q Quit / back" hint is misleading.
+    from textual.widgets import TextArea
+
+    class _ChatContent(NullContentWidget):
+        def compose(self):
+            yield TextArea(id="chat-input")
+
+    class _ChatWorkflow(_FakeWorkflow):
+        content_widget_cls = _ChatContent
+
+    workflow = _ChatWorkflow(EchoRunner())
+    ctx = _ctx(tmp_path)
+
+    async with _make_app(workflow, ctx).run_test(headless=True) as pilot:
+        await pilot.pause()
+        area = pilot.app.query_one("#chat-input", TextArea)
+        area.focus()
+        await pilot.pause()
+        screen = pilot.app.query_one(RunScreen)
+        assert screen.check_action("quit_or_return", ()) is None
+
+
+async def test_run_screen_shows_q_quit_binding_when_textarea_not_focused(tmp_path: Path) -> None:
+    workflow = _FakeWorkflow(EchoRunner())
+    ctx = _ctx(tmp_path)
+
+    async with _make_app(workflow, ctx).run_test(headless=True) as pilot:
+        await pilot.pause()
+        screen = pilot.app.query_one(RunScreen)
+        assert screen.check_action("quit_or_return", ()) is True
+
+
 async def test_run_screen_mounts_content_widget_for_each_workflow(tmp_path: Path) -> None:
     workflow = _FakeWorkflow(EchoRunner())
     ctx = _ctx(tmp_path)

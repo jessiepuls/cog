@@ -22,9 +22,9 @@ class ChatPaneWidget(Widget):
     # shift+enter is not bound here, so it falls through to TextArea's default
     # (insert newline).
     BINDINGS = [
-        Binding("enter", "submit", "Submit", priority=True, show=False),
-        Binding("escape", "end_interview", "End", priority=True, show=False),
-        Binding("ctrl+d", "end_interview", "End", priority=True, show=False),
+        Binding("enter", "submit", "Submit", priority=True),
+        Binding("escape", "end_interview", "End interview", priority=True),
+        Binding("ctrl+d", "end_interview", "End interview", priority=True, show=False),
     ]
 
     DEFAULT_CSS = """

@@ -184,3 +184,14 @@ class RunScreen(Screen):
         if self._state == "running":
             return
         self.app.pop_screen()
+
+    def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:
+        # Hide `q Quit / back` from the footer while a text input is focused —
+        # `q` is a printable char there and the binding won't fire. Ctrl+C still
+        # cancels.
+        if action == "quit_or_return":
+            from textual.widgets import TextArea
+
+            if isinstance(self.focused, TextArea):
+                return None
+        return True
