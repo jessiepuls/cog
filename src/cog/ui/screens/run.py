@@ -115,7 +115,11 @@ class RunScreen(Screen):
                     break
                 self._loop_state.iteration += 1
                 self._announce_iteration_divider()
-                ctx = fresh_iteration_context(self._base_ctx)
+                ctx = fresh_iteration_context(
+                    self._base_ctx,
+                    preserve_item=self._loop_state.iteration == 1
+                    and self._base_ctx.item is not None,
+                )
                 results = await StageExecutor().run(self._workflow, ctx)
                 if not results:
                     self._loop_state.iteration -= 1  # empty-queue probe: don't count

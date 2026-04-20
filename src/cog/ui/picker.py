@@ -20,7 +20,7 @@ class PickerScreen(ModalScreen[Item | None]):
 
     def __init__(self, items: Sequence[Item], tracker: IssueTracker) -> None:
         super().__init__()
-        self._items = list(items[:4])
+        self._items = list(items)
         self._tracker = tracker
 
     def compose(self) -> ComposeResult:

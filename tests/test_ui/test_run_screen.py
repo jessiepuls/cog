@@ -255,6 +255,10 @@ def _make_loop_app(
     loop: bool = True,
     max_iterations: int | None = None,
 ) -> App:
+    # Loop-mode tests exercise select_item end-to-end, so the base ctx must not
+    # carry a pre-selected item (which fresh_iteration_context preserves on iter 1).
+    ctx.item = None
+
     class _TestApp(App):
         def compose(self) -> ComposeResult:
             return iter([])
@@ -263,6 +267,40 @@ def _make_loop_app(
             self.push_screen(RunScreen(workflow, ctx, loop=loop, max_iterations=max_iterations))
 
     return _TestApp()
+
+
+async def test_run_screen_preselected_item_skips_select_item_on_iter_1(tmp_path: Path) -> None:
+    # Regression: main-menu flow (and `cog --item N`) pre-populates base_ctx.item.
+    # RunScreen must preserve that item on iteration 1 — otherwise the workflow's
+    # select_item runs and, for RefineWorkflow with >1 candidates and no ItemPicker,
+    # raises "refine requires an ItemPicker".
+    class _RecordingWorkflow(_FakeWorkflow):
+        def __init__(self, runner: EchoRunner) -> None:
+            super().__init__(runner)
+            self.select_item_calls = 0
+
+        async def select_item(self, ctx: ExecutionContext) -> Item | None:
+            self.select_item_calls += 1
+            return _item()
+
+    workflow = _RecordingWorkflow(EchoRunner())
+    ctx = _ctx(tmp_path)  # _ctx pre-populates ctx.item
+    assert ctx.item is not None  # sanity
+
+    class _TestApp(App):
+        def compose(self) -> ComposeResult:
+            return iter([])
+
+        def on_mount(self) -> None:
+            self.push_screen(RunScreen(workflow, ctx, loop=False, max_iterations=1))
+
+    async with _TestApp().run_test(headless=True) as pilot:
+        for _ in range(10):
+            await pilot.pause()
+
+    assert workflow.select_item_calls == 0, (
+        "base_ctx.item was pre-set; select_item should not run on iteration 1"
+    )
 
 
 async def test_run_screen_loop_mode_iterates_multiple_times(tmp_path: Path) -> None:

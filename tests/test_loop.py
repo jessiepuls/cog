@@ -59,3 +59,18 @@ def test_fresh_iteration_context_creates_new_tmp_dir(tmp_path: Path) -> None:
     fresh = fresh_iteration_context(ctx)
     assert fresh.tmp_dir != original_tmp
     assert fresh.tmp_dir.exists()
+
+
+def test_fresh_iteration_context_preserve_item_keeps_item(tmp_path: Path) -> None:
+    # Regression: main-menu flow + `cog --item N` pre-populate base_ctx.item.
+    # On iteration 1 we must preserve it, else select_item re-runs and (for
+    # refine) errors because no ItemPicker is wired.
+    from tests.fakes import make_item
+
+    ctx = _make_ctx(tmp_path)
+    item = make_item()
+    ctx.item = item
+    ctx.work_branch = "feat/123"
+    fresh = fresh_iteration_context(ctx, preserve_item=True)
+    assert fresh.item is item
+    assert fresh.work_branch is None  # still reset

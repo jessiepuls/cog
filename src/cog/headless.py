@@ -56,7 +56,10 @@ async def run_headless(
         state.iteration += 1
         if loop:
             sys.stderr.write(f"\n═══ iteration {state.iteration} ═══\n")
-        ctx = fresh_iteration_context(base_ctx)
+        ctx = fresh_iteration_context(
+            base_ctx,
+            preserve_item=state.iteration == 1 and base_ctx.item is not None,
+        )
         try:
             results = await StageExecutor().run(workflow, ctx)
         except StageError as e:

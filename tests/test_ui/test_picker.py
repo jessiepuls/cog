@@ -41,15 +41,15 @@ async def _set_input_value(pilot, selector: str, value: str) -> None:
     inp.focus()
 
 
-async def test_picker_screen_lists_top_4_with_titles():
-    items = _make_items(5)
+async def test_picker_screen_lists_all_items_with_titles():
+    items = _make_items(7)
     tracker = AsyncMock(spec=IssueTracker)
     screen = PickerScreen(items, tracker)
     app = _PickerApp(screen)
     async with app.run_test() as _:
         list_view = app.query_one("#picker-list")
-        # 4 items + 1 "Other" = 5 children
-        assert len(list_view.children) == 5
+        # 7 items + 1 "Other" = 8 children
+        assert len(list_view.children) == 8
 
 
 async def test_picker_screen_fifth_option_is_other():
