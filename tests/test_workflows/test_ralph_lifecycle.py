@@ -49,6 +49,16 @@ def test_class_attributes():
     assert RalphWorkflow.preflight_checks is RALPH_CHECKS
 
 
+def test_ralph_checks_do_not_contain_default_branch():
+    names = {c.name for c in RALPH_CHECKS}
+    assert "default_branch" not in names
+
+
+def test_ralph_checks_still_contain_clean_tree():
+    names = {c.name for c in RALPH_CHECKS}
+    assert "clean_tree" in names
+
+
 def test_content_widget_cls_is_log_pane_widget():
     from cog.ui.widgets.log_pane import LogPaneWidget
 

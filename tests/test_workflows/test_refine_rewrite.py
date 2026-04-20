@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from cog.checks import REFINE_CHECKS
 from cog.core.context import ExecutionContext
 from cog.workflows.refine import (
     _INTERVIEW_COMPLETE,
@@ -351,3 +352,13 @@ async def test_rewrite_prompt_references_actual_transcript_path(tmp_path):
     prompt = wf._build_rewrite_prompt(ctx)
     expected_path = str(ctx.tmp_dir / "interview-22.md")
     assert expected_path in prompt
+
+
+def test_refine_checks_do_not_contain_default_branch():
+    names = {c.name for c in REFINE_CHECKS}
+    assert "default_branch" not in names
+
+
+def test_refine_checks_do_not_contain_clean_tree():
+    names = {c.name for c in REFINE_CHECKS}
+    assert "clean_tree" not in names

@@ -327,7 +327,6 @@ ALL_CHECKS: tuple[PreflightCheck, ...] = (
     CheckHostTool("docker"),
     CheckGitRepo(),
     CheckCleanTree(),
-    CheckDefaultBranch(),
     CheckOriginRemote(),
     CheckGhAuth(),
     CheckGhTokenFile(),
@@ -337,6 +336,4 @@ ALL_CHECKS: tuple[PreflightCheck, ...] = (
 
 # Reusable subsets — workflow issues (#12, #18) will use these
 RALPH_CHECKS: tuple[PreflightCheck, ...] = ALL_CHECKS
-REFINE_CHECKS: tuple[PreflightCheck, ...] = tuple(
-    c for c in ALL_CHECKS if c.name not in ("clean_tree", "default_branch")
-)
+REFINE_CHECKS: tuple[PreflightCheck, ...] = tuple(c for c in ALL_CHECKS if c.name != "clean_tree")
