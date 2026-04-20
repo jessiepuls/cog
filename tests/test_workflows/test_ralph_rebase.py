@@ -547,7 +547,7 @@ async def test_clean_rebase_does_not_add_rebase_stage_to_telemetry_when_precheck
 
 
 async def test_finalize_success_calls_rebase_before_push(tmp_path: Path) -> None:
-    from cog.core.host import PullRequest
+    from cog.core.host import PrChecks, PullRequest
 
     host = AsyncMock(spec=GitHost)
     host.push_branch.return_value = None
@@ -570,9 +570,13 @@ async def test_finalize_success_calls_rebase_before_push(tmp_path: Path) -> None
         rebase_called.append(True)
         return RebaseOutcome(status="clean")
 
+    async def _fake_wait_ci(self_: object, ctx_: object, pr_: object) -> PrChecks:
+        return PrChecks(runs=())  # all_passed=True (no failing checks)
+
     with patch.object(RalphWorkflow, "_rebase_before_push", _fake_rebase):
-        with patch.object(wf, "write_report", new_callable=AsyncMock):
-            await wf.finalize_success(ctx, [make_stage_result("build", commits=1)])
+        with patch.object(RalphWorkflow, "_wait_for_ci", _fake_wait_ci):
+            with patch.object(wf, "write_report", new_callable=AsyncMock):
+                await wf.finalize_success(ctx, [make_stage_result("build", commits=1)])
 
     assert rebase_called
 
