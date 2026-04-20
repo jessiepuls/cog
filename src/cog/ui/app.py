@@ -13,6 +13,7 @@ from cog.ui.screens.run import RunScreen
 
 class CogApp(App):
     CSS_PATH = "cog.tcss"
+    TITLE = "Cog"
 
     def __init__(self, initial_screen: Screen) -> None:
         super().__init__()

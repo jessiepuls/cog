@@ -66,27 +66,33 @@ class _StubView(Widget):
 class Sidebar(Widget):
     """Left sidebar listing views with keybind hints."""
 
+    _SIDEBAR_WIDTH = 28
+    # Content width inside a row = sidebar width - ListView scroll/padding
+    # reservations. Tuned empirically.
+    _ROW_CONTENT_WIDTH = 22
+
     DEFAULT_CSS = """
     Sidebar {
-        width: 24;
+        width: 28;
         border-right: solid $primary;
         background: $surface;
-    }
-    Sidebar #sidebar-title {
-        height: 1;
-        padding: 0 1;
-        text-style: bold;
-        color: $text-muted;
+        padding-top: 1;
     }
     Sidebar ListView {
         background: $surface;
     }
     Sidebar ListItem {
         padding: 0 1;
+        border-left: blank;
+        height: 1;
+    }
+    Sidebar ListItem:hover {
+        background: $surface-lighten-1;
     }
     Sidebar ListItem.-active {
-        background: $accent;
-        color: $text;
+        border-left: thick $accent;
+        background: $surface-lighten-1;
+        text-style: bold;
     }
     """
 
@@ -96,12 +102,19 @@ class Sidebar(Widget):
         self._attention: set[str] = set()
 
     def _label_for(self, v: ShellView) -> str:
-        keybind = f"[dim]{v.keybind.replace('ctrl+', '^')}[/dim]"
-        dot = "[yellow]●[/yellow] " if v.id in self._attention else "  "
-        return f"{keybind} {dot}{v.label}"
+        # Left: view name + optional attention dot.
+        # Right: dim keybind hint (e.g. ^1).
+        # Use string padding so keybinds right-align within the row.
+        dot = " [yellow]●[/yellow]" if v.id in self._attention else "  "
+        name = f"{v.label}{dot}"
+        # Left-pad the keybind so it ends at the right edge.
+        keybind = v.keybind.replace("ctrl+", "^")
+        # Strip markup chars when measuring width.
+        visible_len = len(v.label) + 2  # name + dot/spacer
+        pad = max(1, self._ROW_CONTENT_WIDTH - visible_len - len(keybind))
+        return f"{name}{' ' * pad}[dim]{keybind}[/dim]"
 
     def compose(self) -> ComposeResult:
-        yield Static("cog", id="sidebar-title")
         yield ListView(
             *(
                 ListItem(

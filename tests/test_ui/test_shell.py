@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock
 
 from textual.app import App
 from textual.widget import Widget
-from textual.widgets import ListView, Static
+from textual.widgets import ListView
 
 from cog.core.tracker import IssueTracker
 from cog.ui.messages import ViewAttention
@@ -235,11 +235,13 @@ async def test_shell_switch_to_same_view_is_noop(tmp_path: Path) -> None:
         assert dash.display is True
 
 
-async def test_shell_sidebar_title_rendered(tmp_path: Path) -> None:
+async def test_shell_app_title_is_cog(tmp_path: Path) -> None:
+    # The sidebar no longer has its own "cog" heading — the app header at
+    # the top already shows "Cog" (CogApp.TITLE). This test guards that we
+    # don't accidentally re-add a redundant sidebar title.
     async with _ShellApp(tmp_path).run_test(headless=True) as pilot:
         await pilot.pause()
-        title = pilot.app.query_one("#sidebar-title", Static)
-        assert "cog" in str(title.renderable)
+        assert len(pilot.app.query("#sidebar-title")) == 0
 
 
 async def test_shell_active_row_gets_highlighted_class(tmp_path: Path) -> None:

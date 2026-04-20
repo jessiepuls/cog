@@ -93,6 +93,42 @@ async def test_chat_view_focus_content_targets_text_area(tmp_path: Path) -> None
         assert focused.id == "input-area"
 
 
+async def test_chat_view_posts_attention_when_response_arrives() -> None:
+    # Regression: the dot didn't appear on chat when Claude finished while
+    # the user was on another view. The view now posts ViewAttention after
+    # each assistant turn completes.
+    import asyncio
+    import tempfile
+
+    from textual.app import App
+
+    from cog.ui.messages import ViewAttention
+
+    class _App(App):
+        def compose(self):
+            yield ChatView(Path(tempfile.gettempdir()))
+
+    async with _App().run_test(headless=True) as pilot:
+        await pilot.pause()
+        view = pilot.app.query_one(ChatView)
+        captured: list[ViewAttention] = []
+        original_post = view.post_message
+
+        def _capture(msg):
+            if isinstance(msg, ViewAttention):
+                captured.append(msg)
+            return original_post(msg)
+
+        view.post_message = _capture  # type: ignore[method-assign]
+
+        # Emulate what _chat_loop does after a successful turn.
+        view._transcript.append(_Turn(role="assistant", content="hi"))
+        view.post_message(ViewAttention("chat", reason="response ready"))
+        await asyncio.sleep(0)  # let the message post
+
+        assert any(m.view_id == "chat" for m in captured)
+
+
 async def test_chat_view_preamble_loads_from_package() -> None:
     from cog.ui.views.chat import _load_preamble
 

@@ -25,6 +25,7 @@ from textual.worker import Worker
 from cog.core.runner import ResultEvent, StatusEvent
 from cog.state_paths import project_slug, project_state_dir
 from cog.telemetry import StageTelemetry, TelemetryRecord, TelemetryWriter
+from cog.ui.messages import ViewAttention
 from cog.ui.widgets.chat_pane import ChatPaneWidget
 
 _DEFAULT_MODEL = "claude-opus-4-7"
@@ -130,6 +131,10 @@ class ChatView(Widget):
 
             if final_message and not failed_error:
                 self._transcript.append(_Turn(role="assistant", content=final_message))
+                # If the user is on another view, show a sidebar dot so they
+                # know Claude has finished responding. Shell ignores this if
+                # chat is already the active view.
+                self.post_message(ViewAttention("chat", reason="response ready"))
 
             # One telemetry record per turn so chat shows up on the dashboard's
             # recent-runs strip. Ephemeral (no item, no branch, no PR).
