@@ -15,7 +15,7 @@ flowchart TD
     Start([Select needs-refinement item]) --> Interview[Interview turn:<br/>Claude asks one question]
     Interview --> Reply{Reply?}
     Reply -->|user answers| Turn[Next turn]
-    Turn --> Exit{Claude emits<br/>&#x3C;&#x3C;interview-complete&#x3E;&#x3E;?}
+    Turn --> Exit{Interview-complete<br/>token emitted?}
     Exit -->|no| Interview
     Exit -->|yes| Rewrite[Rewrite stage<br/>opus-4-7]
     Reply -->|Escape / Ctrl+D| Early[End interview early]
