@@ -15,7 +15,7 @@ from cog.core.context import ExecutionContext
 from cog.core.errors import WorkflowError
 from cog.core.item import Item
 from cog.core.outcomes import Outcome, StageResult
-from cog.core.runner import AgentRunner, ResultEvent
+from cog.core.runner import AgentRunner, ResultEvent, StageEndEvent
 from cog.core.stage import Stage
 from cog.core.tracker import IssueTracker
 from cog.core.workflow import Workflow
@@ -407,6 +407,11 @@ class RefineWorkflow(Workflow):
                     continue
                 await ctx.event_sink.emit(event)
             duration = time.monotonic() - start
+            # Synthesize a StageEndEvent so the RunScreen footer cost counter
+            # (driven by StageEndEvent) reflects interview turn costs live.
+            await ctx.event_sink.emit(
+                StageEndEvent(stage_name="interview", cost_usd=total_cost, exit_status=0)
+            )
             if _INTERVIEW_COMPLETE in final_message:
                 cleaned = final_message.replace(_INTERVIEW_COMPLETE, "").strip()
                 transcript.append(

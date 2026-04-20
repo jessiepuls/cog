@@ -8,7 +8,7 @@ import pytest
 
 from cog.core.context import ExecutionContext
 from cog.core.item import Comment, Item
-from cog.core.runner import AssistantTextEvent, ResultEvent
+from cog.core.runner import AssistantTextEvent, ResultEvent, StageEndEvent
 from cog.workflows.refine import (
     _INTERVIEW_COMPLETE,
     InterviewEnd,
@@ -192,6 +192,28 @@ async def test_interview_sentinel_stripped_from_assistant_message(tmp_path):
 # ---------------------------------------------------------------------------
 # Loop — user early-end
 # ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_interview_emits_stage_end_event_per_turn_with_cost(tmp_path):
+    # Regression: the RunScreen footer's live cost counter consumes StageEndEvent.
+    # Each interview turn must synthesize one so interview costs show up in the
+    # footer — otherwise the user sees $0 throughout the interview.
+    wf = _make_workflow(
+        [
+            ("First question?", 0.02),
+            (f"All done. {_INTERVIEW_COMPLETE}", 0.03),
+        ]
+    )
+    item = make_item(item_id="1", title="T", body="B")
+    sink = RecordingEventSink()
+    provider = ScriptedInputProvider(["an answer"])
+    ctx = _make_ctx(item=item, sink=sink, provider=provider, tmp_path=tmp_path)
+    await wf._run_interview(ctx)
+
+    stage_ends = [e for e in sink.events if isinstance(e, StageEndEvent)]
+    assert [e.cost_usd for e in stage_ends] == [0.02, 0.03]
+    assert all(e.stage_name == "interview" for e in stage_ends)
 
 
 @pytest.mark.asyncio
