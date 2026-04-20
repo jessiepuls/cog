@@ -58,6 +58,25 @@ async def test_chat_pane_enter_submits() -> None:
         assert "test message" in _log_text(log)
 
 
+async def test_chat_pane_real_enter_press_submits_not_newline() -> None:
+    # Regression: previously ChatPaneWidget.on_key was bubble-scope, which
+    # TextArea pre-empts — pressing Enter just inserted a newline and never
+    # submitted. Priority binding on the widget must intercept before
+    # TextArea's internal Enter handling.
+    async with _ChatApp().run_test(headless=True) as pilot:
+        widget = pilot.app.query_one(ChatPaneWidget)
+        area = widget.query_one("#input-area", TextArea)
+        area.load_text("hello world")
+        area.focus()
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+        # Submit should have fired: textarea cleared + scrollback has the message
+        assert area.text == ""
+        log = widget.query_one("#scrollback", RichLog)
+        assert "hello world" in _log_text(log)
+
+
 async def test_chat_pane_shift_enter_inserts_newline() -> None:
     async with _ChatApp().run_test(headless=True) as pilot:
         widget = pilot.app.query_one(ChatPaneWidget)

@@ -6,7 +6,7 @@ from rich.console import Group
 from rich.markdown import Markdown
 from rich.text import Text
 from textual.app import ComposeResult
-from textual.events import Key
+from textual.binding import Binding
 from textual.widget import Widget
 from textual.widgets import RichLog, Static, TextArea
 
@@ -16,6 +16,16 @@ from cog.ui.widgets._shared import tool_preview
 
 class ChatPaneWidget(Widget):
     """Multi-turn chat with Claude. Implements RunEventSink + UserInputProvider."""
+
+    # Priority bindings run BEFORE the focused TextArea processes the key, so
+    # Enter submits instead of being consumed by TextArea as a newline insert.
+    # shift+enter is not bound here, so it falls through to TextArea's default
+    # (insert newline).
+    BINDINGS = [
+        Binding("enter", "submit", "Submit", priority=True, show=False),
+        Binding("escape", "end_interview", "End", priority=True, show=False),
+        Binding("ctrl+d", "end_interview", "End", priority=True, show=False),
+    ]
 
     DEFAULT_CSS = """
     ChatPaneWidget {
@@ -71,14 +81,11 @@ class ChatPaneWidget(Widget):
     def _hide_thinking_indicator(self) -> None:
         self.query_one("#thinking", Static).display = False
 
-    def on_key(self, event: Key) -> None:
-        if event.key == "enter":
-            event.stop()
-            self._submit()
-        elif event.key in ("escape", "ctrl+d"):
-            event.stop()
-            self._end_interview()
-        # shift+enter inserts newline — TextArea handles this by default
+    def action_submit(self) -> None:
+        self._submit()
+
+    def action_end_interview(self) -> None:
+        self._end_interview()
 
     def _submit(self) -> None:
         area = self.query_one("#input-area", TextArea)
