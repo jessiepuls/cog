@@ -66,7 +66,7 @@ class MainMenuScreen(Screen):
         self.run_worker(self._launch_workflow(WORKFLOWS[idx]), exclusive=True)
 
     async def _launch_workflow(self, chosen_cls: type[Workflow]) -> None:
-        from cog.ui.picker import PickerScreen
+        from cog.ui.picker import PickerScreen, load_picker_history
         from cog.ui.preflight import PreflightScreen
         from cog.ui.wire import build_run_screen
 
@@ -76,7 +76,10 @@ class MainMenuScreen(Screen):
 
         items = await self._tracker.list_by_label(chosen_cls.queue_label, assignee="@me")
         items.sort(key=lambda i: i.created_at)
-        chosen_item = await self.app.push_screen_wait(PickerScreen(items, self._tracker))
+        history = load_picker_history(self._project_dir)
+        chosen_item = await self.app.push_screen_wait(
+            PickerScreen(items, self._tracker, history=history)
+        )
         if chosen_item is None:
             return
 

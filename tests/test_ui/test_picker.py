@@ -1,14 +1,17 @@
 """Tests for PickerScreen, OtherInputScreen, and TextualItemPicker."""
 
+import json
 from unittest.mock import AsyncMock
 
+import pytest
 from textual.app import App
 from textual.widgets import Input, Label
 
 from cog.core.errors import TrackerError
 from cog.core.item import Item
 from cog.core.tracker import IssueTracker
-from cog.ui.picker import OtherInputScreen, PickerScreen
+from cog.state_paths import project_state_dir
+from cog.ui.picker import OtherInputScreen, PickerHistory, PickerScreen, load_picker_history
 from tests.fakes import make_item, make_needs_refinement_items
 
 
@@ -39,6 +42,90 @@ async def _set_input_value(pilot, selector: str, value: str) -> None:
     inp = pilot.app.query_one(selector, Input)
     inp.value = value
     inp.focus()
+
+
+async def test_picker_shows_history_badge_when_item_has_prior_runs():
+    items = _make_items(2)
+    tracker = AsyncMock(spec=IssueTracker)
+    history = {
+        items[0].item_id: PickerHistory(
+            count=3, workflow="ralph", last_outcome="success", total_cost_usd=1.47
+        ),
+    }
+    screen = PickerScreen(items, tracker, history=history)
+    app = _PickerApp(screen)
+    async with app.run_test() as _:
+        list_view = app.query_one("#picker-list")
+        first_label = list_view.children[0].query_one(Label)
+        rendered = str(first_label.renderable)
+        assert "ralph" in rendered
+        assert "×3" in rendered
+        assert "success" in rendered
+        assert "$1.47" in rendered
+
+
+async def test_picker_omits_history_badge_when_item_has_no_prior_runs():
+    items = _make_items(2)
+    tracker = AsyncMock(spec=IssueTracker)
+    screen = PickerScreen(items, tracker, history={})
+    app = _PickerApp(screen)
+    async with app.run_test() as _:
+        list_view = app.query_one("#picker-list")
+        first_label = list_view.children[0].query_one(Label)
+        rendered = str(first_label.renderable)
+        assert "×" not in rendered
+        assert "last " not in rendered
+
+
+async def test_load_picker_history_handles_missing_runs_jsonl(tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "nowhere"))
+    assert load_picker_history(tmp_path) == {}
+
+
+async def test_load_picker_history_skips_malformed_lines(tmp_path, monkeypatch):
+    state_home = tmp_path / "state"
+    monkeypatch.setenv("XDG_STATE_HOME", str(state_home))
+    runs = project_state_dir(tmp_path) / "runs.jsonl"
+    runs.parent.mkdir(parents=True, exist_ok=True)
+    with runs.open("w") as f:
+        f.write(
+            json.dumps(
+                {"item": 1, "workflow": "ralph", "outcome": "success", "total_cost_usd": 0.10}
+            )
+            + "\n"
+        )
+        f.write("not json at all\n")
+        f.write(
+            json.dumps({"item": 1, "workflow": "ralph", "outcome": "no-op", "total_cost_usd": 0.05})
+            + "\n"
+        )
+
+    result = load_picker_history(tmp_path)
+    assert "1" in result
+    assert result["1"].count == 2
+    assert result["1"].last_outcome == "no-op"
+    assert result["1"].total_cost_usd == pytest.approx(0.15)
+
+
+async def test_load_picker_history_aggregates_by_item_id(tmp_path, monkeypatch):
+    state_home = tmp_path / "state"
+    monkeypatch.setenv("XDG_STATE_HOME", str(state_home))
+    runs = project_state_dir(tmp_path) / "runs.jsonl"
+    runs.parent.mkdir(parents=True, exist_ok=True)
+    with runs.open("w") as f:
+        for rec in [
+            {"item": 1, "workflow": "ralph", "outcome": "success", "total_cost_usd": 0.10},
+            {"item": 1, "workflow": "ralph", "outcome": "success", "total_cost_usd": 0.12},
+            {"item": 2, "workflow": "refine", "outcome": "no-op", "total_cost_usd": 0.03},
+        ]:
+            f.write(json.dumps(rec) + "\n")
+
+    result = load_picker_history(tmp_path)
+    assert result["1"].count == 2
+    assert result["1"].total_cost_usd == pytest.approx(0.22)
+    assert result["1"].workflow == "ralph"
+    assert result["2"].count == 1
+    assert result["2"].workflow == "refine"
 
 
 async def test_picker_screen_lists_all_items_with_titles():

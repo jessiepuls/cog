@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 from textual.app import App, ComposeResult
+from textual.widgets import Static
 
 from cog.core.context import ExecutionContext
 from cog.core.item import Item
@@ -168,6 +169,100 @@ async def test_run_screen_clock_advances(tmp_path: Path) -> None:
         await pilot.pause()
         screen = pilot.app.query_one(RunScreen)
         assert screen._started_at > 0.0
+
+
+async def test_run_screen_completion_panel_shows_per_stage_breakdown(tmp_path: Path) -> None:
+    from collections.abc import AsyncIterator
+
+    from cog.core.runner import AgentRunner, RunEvent
+
+    class _CostRunner(AgentRunner):
+        async def stream(self, prompt: str, *, model: str) -> AsyncIterator[RunEvent]:
+            yield ResultEvent(
+                result=RunResult(
+                    final_message="done",
+                    total_cost_usd=0.20,
+                    exit_status=0,
+                    stream_json_path=Path("/dev/null"),
+                    duration_seconds=1.0,
+                )
+            )
+
+    workflow = _FakeWorkflow(_CostRunner())
+    ctx = _ctx(tmp_path)
+    async with _make_app(workflow, ctx).run_test(headless=True) as pilot:
+        for _ in range(5):
+            await pilot.pause()
+        panel = pilot.app.query_one("#result-panel", Static)
+        rendered = str(panel.renderable)
+        # Header line
+        assert "Complete" in rendered
+        # Breakdown line — the _FakeWorkflow's stage is named "s1"
+        assert "s1" in rendered
+        assert "$0.200" in rendered
+
+
+async def test_run_screen_failure_panel_marks_failing_stage_and_shows_prior_stages(
+    tmp_path: Path,
+) -> None:
+    class _FailingWorkflow(_FakeWorkflow):
+        def stages(self, ctx):
+            async def _err_stream(prompt, *, model):
+                raise RuntimeError("boom")
+                yield  # generator
+
+            class _ErrRunner:
+                def stream(self, prompt, *, model):
+                    return _err_stream(prompt, model=model)
+
+                async def run(self, prompt, *, model):  # pragma: no cover
+                    pass
+
+            return [
+                Stage(name="build", prompt_source=lambda _: "x", model="m", runner=_ErrRunner())
+            ]
+
+    workflow = _FailingWorkflow(EchoRunner())
+    ctx = _ctx(tmp_path)
+    async with _make_app(workflow, ctx).run_test(headless=True) as pilot:
+        for _ in range(5):
+            await pilot.pause()
+        screen = pilot.app.query_one(RunScreen)
+        assert screen._state == "failed"
+        panel = pilot.app.query_one("#result-panel", Static)
+        rendered = str(panel.renderable)
+        assert "Failed" in rendered
+        assert "build" in rendered
+        # The failing stage gets marked
+        assert "✗" in rendered
+
+
+async def test_run_screen_panel_aggregates_interview_turns(tmp_path: Path) -> None:
+    # A workflow whose pre_stages emits multiple interview-style StageEndEvents,
+    # no StageStart — mirrors refine's interview behavior.
+    from cog.core.runner import StageEndEvent
+
+    class _InterviewingWorkflow(_FakeWorkflow):
+        async def pre_stages(self, ctx):
+            assert ctx.event_sink is not None
+            await ctx.event_sink.emit(
+                StageEndEvent(stage_name="interview", cost_usd=0.03, exit_status=0)
+            )
+            await ctx.event_sink.emit(
+                StageEndEvent(stage_name="interview", cost_usd=0.04, exit_status=0)
+            )
+
+    workflow = _InterviewingWorkflow(EchoRunner())
+    ctx = _ctx(tmp_path)
+    async with _make_app(workflow, ctx).run_test(headless=True) as pilot:
+        for _ in range(5):
+            await pilot.pause()
+        panel = pilot.app.query_one("#result-panel", Static)
+        rendered = str(panel.renderable)
+        assert "interview" in rendered
+        # Two turns aggregated — cost is 0.07, description shows turn count
+        assert "$0.070" in rendered
+        assert "2 turns" in rendered
 
 
 async def test_run_screen_cost_accumulates_from_result_events(tmp_path: Path) -> None:

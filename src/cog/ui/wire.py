@@ -60,7 +60,7 @@ async def build_run_screen(
     if workflow_cls.needs_item_picker and ctx.item is None:
         from cog.ui.picker import TextualItemPicker
 
-        ctx.item_picker = TextualItemPicker(app, tracker)
+        ctx.item_picker = TextualItemPicker(app, tracker, project_dir=project_dir)
     from cog.ui.screens.run import RunScreen
 
     return RunScreen(workflow, ctx, loop=False, max_iterations=1)

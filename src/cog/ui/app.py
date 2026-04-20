@@ -39,7 +39,7 @@ async def run_textual(
         )
         from cog.ui.picker import TextualItemPicker
 
-        ctx.item_picker = TextualItemPicker(app, tracker)
+        ctx.item_picker = TextualItemPicker(app, tracker, project_dir=ctx.project_dir)
     await app.run_async()
     return 0 if run_screen._state in ("completed", "cancelled") else 1
 

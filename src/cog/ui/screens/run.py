@@ -2,6 +2,7 @@
 
 import asyncio
 import time
+from dataclasses import dataclass
 from typing import Literal
 
 from textual.app import ComposeResult
@@ -11,24 +12,82 @@ from textual.widgets import Footer, Header, Static
 from textual.worker import Worker
 
 from cog.core.context import ExecutionContext
-from cog.core.runner import RunEvent, StageEndEvent
+from cog.core.runner import RunEvent, StageEndEvent, StageStartEvent
 from cog.core.workflow import StageExecutor, Workflow
 from cog.loop import LoopState, fresh_iteration_context
 
 
+@dataclass
+class _StageSummary:
+    name: str
+    model: str = ""
+    cost_usd: float = 0.0
+    duration_s: float = 0.0
+    turns: int = 0
+    status: Literal["running", "completed", "failed"] = "running"
+
+
 class _CountingSink:
-    """Wraps the content widget sink, forwarding events and accumulating cost."""
+    """Wraps the content widget sink, forwarding events, accumulating cost, and
+    building per-stage breakdown data for the completion / failure panels."""
 
     def __init__(self, inner: object, screen: "RunScreen") -> None:
         self._inner = inner
         self._screen = screen
+        self._stages: list[_StageSummary] = []
+        self._stage_starts: dict[str, float] = {}
+
+    @property
+    def stages(self) -> list[_StageSummary]:
+        return self._stages
+
+    def mark_running_stages_failed(self) -> None:
+        """Called when the iteration ended in failure; any running stage is the
+        failing one."""
+        now = time.monotonic()
+        for s in self._stages:
+            if s.status == "running":
+                s.status = "failed"
+                start = self._stage_starts.get(s.name)
+                if start is not None:
+                    s.duration_s = now - start
 
     async def emit(self, event: RunEvent) -> None:
         if hasattr(self._inner, "emit"):
             await self._inner.emit(event)
-        if isinstance(event, StageEndEvent):
+        if isinstance(event, StageStartEvent):
+            self._stages.append(_StageSummary(name=event.stage_name, model=event.model))
+            self._stage_starts[event.stage_name] = time.monotonic()
+        elif isinstance(event, StageEndEvent):
             self._screen._cumulative_cost += event.cost_usd
             self._screen._refresh_footer()
+            running = next(
+                (s for s in self._stages if s.name == event.stage_name and s.status == "running"),
+                None,
+            )
+            if running is not None:
+                start = self._stage_starts.pop(event.stage_name, None)
+                running.duration_s = (time.monotonic() - start) if start is not None else 0.0
+                running.cost_usd = event.cost_usd
+                running.turns = 1
+                running.status = "completed" if event.exit_status == 0 else "failed"
+                return
+            # Orphan StageEnd — e.g. refine interview turns (no StageStartEvent
+            # is emitted per turn). Aggregate into an existing entry or create
+            # a fresh completed one.
+            existing = next((s for s in self._stages if s.name == event.stage_name), None)
+            if existing is not None:
+                existing.cost_usd += event.cost_usd
+                existing.turns += 1
+            else:
+                self._stages.append(
+                    _StageSummary(
+                        name=event.stage_name,
+                        cost_usd=event.cost_usd,
+                        turns=1,
+                        status="completed",
+                    )
+                )
 
 
 class RunScreen(Screen):
@@ -58,6 +117,7 @@ class RunScreen(Screen):
         self._content: Widget | None = None
         self._footer_widget: Static | None = None
         self._worker: Worker[None] | None = None
+        self._sink: _CountingSink | None = None
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -73,7 +133,8 @@ class RunScreen(Screen):
 
     def on_mount(self) -> None:
         self._started_at = time.monotonic()
-        self._base_ctx.event_sink = _CountingSink(self._content, self)
+        self._sink = _CountingSink(self._content, self)
+        self._base_ctx.event_sink = self._sink
         if hasattr(self._content, "prompt"):
             self._base_ctx.input_provider = self._content
         self.set_interval(1.0, self._update_clock)
@@ -160,18 +221,54 @@ class RunScreen(Screen):
         else:
             self.mount(Static(markup, id="result-panel"))
 
+    def _format_duration(self, seconds: float) -> str:
+        secs = int(seconds)
+        if secs < 60:
+            return f"{secs}s"
+        return f"{secs // 60}m{secs % 60:02d}s"
+
+    def _format_stage_line(self, stage: _StageSummary) -> str:
+        parts = []
+        if stage.status == "failed":
+            parts.append("[red]✗[/red]")
+        parts.append(stage.name)
+        parts.append(f"${stage.cost_usd:.3f}")
+        details: list[str] = []
+        if stage.model:
+            details.append(stage.model)
+        if stage.duration_s:
+            details.append(self._format_duration(stage.duration_s))
+        if stage.turns > 1:
+            details.append(f"{stage.turns} turns")
+        if details:
+            parts.append(f"({', '.join(details)})")
+        return " ".join(parts)
+
+    def _stage_breakdown_line(self) -> str:
+        if self._sink is None or not self._sink.stages:
+            return ""
+        return "  " + " · ".join(self._format_stage_line(s) for s in self._sink.stages)
+
     def _show_loop_summary_panel(self) -> None:
         iterations = self._loop_state.iteration
         cost = self._cumulative_cost
+        total_elapsed = self._elapsed()
         if self._loop:
-            self._set_result_panel(
-                f"[green]✓ Complete[/green] — {iterations} iteration(s), ${cost:.3f}"
+            header = (
+                f"[green]✓ Complete[/green] — {iterations} iteration(s), "
+                f"${cost:.3f} · {total_elapsed} total"
             )
         else:
-            self._set_result_panel(f"[green]✓ Complete[/green] — ${cost:.3f}")
+            header = f"[green]✓ Complete[/green] — ${cost:.3f} · {total_elapsed} total"
+        breakdown = self._stage_breakdown_line()
+        self._set_result_panel(f"{header}\n{breakdown}" if breakdown else header)
 
     def _show_error_panel(self, e: Exception) -> None:
-        self._set_result_panel(f"[red]✗ Failed:[/red] {e!s}")
+        if self._sink is not None:
+            self._sink.mark_running_stages_failed()
+        header = f"[red]✗ Failed:[/red] {e!s}"
+        breakdown = self._stage_breakdown_line()
+        self._set_result_panel(f"{header}\n{breakdown}" if breakdown else header)
 
     def _show_cancellation_panel(self) -> None:
         self._set_result_panel("[yellow]Cancelled[/yellow]")
