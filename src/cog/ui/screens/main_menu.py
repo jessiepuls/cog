@@ -9,6 +9,7 @@ from textual.widgets import Footer, Header, Label, ListItem, ListView
 
 from cog.core.tracker import IssueTracker
 from cog.core.workflow import Workflow
+from cog.ui.widgets.recent_runs import RecentRunsWidget
 from cog.workflows import WORKFLOWS
 
 
@@ -23,6 +24,7 @@ class MainMenuScreen(Screen):
     def compose(self) -> ComposeResult:
         yield Header()
         yield ListView(id="workflows")
+        yield RecentRunsWidget(self._project_dir)
         yield Footer()
 
     async def on_mount(self) -> None:
@@ -30,9 +32,15 @@ class MainMenuScreen(Screen):
 
     async def on_screen_resume(self) -> None:
         await self._populate_counts()
+        await self._refresh_recent_runs()
 
     async def action_refresh(self) -> None:
         await self._populate_counts()
+        await self._refresh_recent_runs()
+
+    async def _refresh_recent_runs(self) -> None:
+        widget = self.query_one(RecentRunsWidget)
+        await widget.refresh_runs()
 
     async def _populate_counts(self) -> None:
         list_view = self.query_one("#workflows", ListView)
