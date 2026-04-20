@@ -22,6 +22,17 @@ final message.
    prevents? Near-duplicate blocks that should be extracted? Comments that
    restate what the code does?
 
+## Item context
+
+To see the item's current body and comments:
+
+    gh issue view <item_id> --json body,comments --jq '.body,.comments'
+
+where `<item_id>` is the number shown in the runtime context at the end
+of this prompt. Fetch when you need it — not every decision requires the
+full body. Claude Code persists any tool output >30KB to a session-scoped
+file; pipe through `head -c 30000` or use `--jq` to stay bounded.
+
 ## Steps
 
 1. Run `git diff --stat $(git merge-base HEAD main 2>/dev/null || git merge-base HEAD master)..HEAD`
@@ -33,7 +44,8 @@ final message.
 4. For other changed files: optionally run
    `git diff <base>..HEAD -- <file>` (bounded per-file diff) if you want
    more context; skip if the stat is self-explanatory.
-5. Read the item body (provided in the runtime context below).
+5. Fetch the item body if needed (see **Item context** above) to check
+   implementation against the acceptance criteria.
 6. Identify any defects, missing coverage, or style violations.
 7. Fix what you can directly. Commit fixes with clear messages.
 8. In your final message, list any remaining concerns that require human

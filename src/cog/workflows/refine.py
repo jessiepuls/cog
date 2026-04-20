@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import Enum
 from importlib.resources import files
+from pathlib import Path
 from typing import ClassVar, Literal
 
 from cog.checks import REFINE_CHECKS
@@ -67,6 +68,15 @@ class ReviewOutcome:
     final_title: str
 
 
+def _format_transcript_markdown(turns: list[InterviewTurn]) -> str:
+    parts: list[str] = []
+    for i, turn in enumerate(turns, 1):
+        parts.append(f"## Turn {i} — Assistant\n\n{turn.assistant_message}")
+        if turn.user_message is not None:
+            parts.append(f"## Turn {i} — User\n\n{turn.user_message}")
+    return "\n\n".join(parts)
+
+
 def _load_refine_prompt(name: str) -> str:
     return files("cog.prompts.claude.refine").joinpath(f"{name}.md").read_text(encoding="utf-8")
 
@@ -91,6 +101,7 @@ class RefineWorkflow(Workflow):
         self._runner = runner
         self._tracker = tracker
         self._transcripts: dict[str, list[InterviewTurn]] = {}
+        self._transcript_paths: dict[str, Path] = {}
         self._review_outcomes: dict[str, ReviewOutcome] = {}
 
     async def select_item(self, ctx: ExecutionContext) -> Item | None:
@@ -112,6 +123,9 @@ class RefineWorkflow(Workflow):
         assert ctx.input_provider is not None, "refine interview requires an input provider"
         transcript = await self._run_interview(ctx)
         self._transcripts[ctx.item.item_id] = transcript
+        transcript_path = ctx.tmp_dir / f"interview-{ctx.item.item_id}.md"
+        transcript_path.write_text(_format_transcript_markdown(transcript), encoding="utf-8")
+        self._transcript_paths[ctx.item.item_id] = transcript_path
 
     def stages(self, ctx: ExecutionContext) -> list[Stage]:
         return [
@@ -351,6 +365,7 @@ class RefineWorkflow(Workflow):
     def _build_rewrite_prompt(self, ctx: ExecutionContext) -> str:
         assert ctx.item is not None
         transcript = self._transcripts[ctx.item.item_id]
+        transcript_path = self._transcript_paths[ctx.item.item_id]
         item = ctx.item
         parts = [
             _load_refine_prompt("rewrite"),
@@ -362,11 +377,13 @@ class RefineWorkflow(Workflow):
             parts.append("\n### Comments\n")
             for c in item.comments:
                 parts.append(f"\n**{c.author}**:\n{c.body}\n")
-        parts.append("\n## Interview transcript\n")
-        for i, turn in enumerate(transcript, 1):
-            parts.append(f"\n### Turn {i} — Assistant\n{turn.assistant_message}\n")
-            if turn.user_message is not None:
-                parts.append(f"\n### Turn {i} — User\n{turn.user_message}\n")
+        parts.append(
+            f"\n## Interview transcript\n\n"
+            f"The full interview transcript is at `{transcript_path}`. "
+            f"Read it to understand the user's decisions. Use grep / partial "
+            f"reads if the transcript is long — don't read the whole thing "
+            f"if you don't need to."
+        )
         if transcript[-1].end == InterviewEnd.USER:
             parts.append(
                 "\n## Refinement status\n\n"

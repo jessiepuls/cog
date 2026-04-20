@@ -87,9 +87,11 @@ async def test_refine_iteration_sentinel_accept_updates_body_and_swaps_labels(tm
 
     sink = RecordingEventSink()
     provider = ScriptedInputProvider([])
+    tmp_dir = tmp_path / "tmp"
+    tmp_dir.mkdir()
     ctx = ExecutionContext(
         project_dir=tmp_path,
-        tmp_dir=tmp_path / "tmp",
+        tmp_dir=tmp_dir,
         state_cache=InMemoryStateCache(),
         headless=False,
         item=items[0],

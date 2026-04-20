@@ -110,12 +110,70 @@ strict).
   "must run in a worker" need to assert dispatch (e.g. `run_worker`
   was called), not just the downstream flow.
 
+### Test granularity
+
+- **Parametrize when inputs vary, keep separate tests when behaviors differ.**
+  Use `@pytest.mark.parametrize` to collapse near-identical tests that only
+  differ in input values. Use separate test functions when the assertion or
+  setup differs meaningfully.
+- **Group assertions for one behavior, split for independent behaviors.**
+  Multiple `assert` statements in one test are fine when they all verify a
+  single invariant. Split into separate tests when failures would have
+  different diagnoses.
+- **Unit vs integration: pick one abstraction level per behavior.** Test
+  the public surface (workflow methods, CLI commands) for behavioral
+  correctness; test helpers/internals only when they have non-obvious
+  logic. Avoid testing the same thing at both levels.
+- **Over-testing signals**: if your test name ends in `_field_X_value_Y`,
+  consider grouping. If you have 5 tests that all exercise one code path
+  with different data, parametrize them. If you find yourself asserting
+  implementation details (e.g., internal dict contents) rather than
+  observable behavior, step back.
+
 ## Prompts
 
 Prompts live as markdown in `src/cog/prompts/claude/{ralph,refine}/*.md`
 and are loaded via `importlib.resources` at runtime. Each stage has its
 own file. When changing prompt behavior, change the markdown — not
 Python strings.
+
+### Prompt-writing conventions
+
+**Prefer on-demand fetching over context injection.** For any prompt
+content that is large (>few KB), variable, or would be partially consumed:
+give claude a pointer + instruction, not the content itself.
+
+Bad:
+```
+## Issue body
+{{full item body interpolated here — 20KB}}
+```
+
+Good:
+```
+To see the item body, run `gh issue view <item_id> --json body,comments`.
+Fetch when you need it; don't assume you need the full body for every decision.
+```
+
+Benefits: smaller prompts start faster, allow claude-code's context
+compaction to drop unused content, leave headroom before the #48/#78
+stall classes emerge, and pick up live state on retry.
+
+Exceptions (keep injected): small, always-needed, stable context — item
+number, item title, branch name.
+
+**Structured final-message sections.** Build prompts tell claude to end
+with `### Summary / ### Key changes / ### Test plan` so cog's finalize
+step can extract structured metadata into the PR body. Never change these
+section names without updating `_split_final_message` in
+`workflows/ralph.py` and matching fixtures.
+
+**Tracker-agnostic language.** Refer to "tracked items" not "GitHub
+issues" in prompts and non-GitHub-specific code.
+
+**Bounded tool calls.** All cog prompts warn claude about claude-code's
+>30KB tool-output persistence behavior. Preserve that warning in any new
+prompt.
 
 ## Style / conventions
 
