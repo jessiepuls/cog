@@ -240,7 +240,7 @@ class RalphWorkflow(Workflow):
             Stage(
                 name="review",
                 prompt_source=_make_prompt_source("review"),
-                model=os.environ.get("COG_RALPH_REVIEW_MODEL", "claude-opus-4-6"),
+                model=os.environ.get("COG_RALPH_REVIEW_MODEL", "claude-opus-4-7"),
                 runner=self._runner,
                 tolerate_failure=False,
             ),

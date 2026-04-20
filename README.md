@@ -78,7 +78,7 @@ transcript, and a stage cost table.
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `COG_REFINE_INTERVIEW_MODEL` | `claude-opus-4-7` | Model for each interview turn |
-| `COG_REFINE_REWRITE_MODEL` | `claude-opus-4-6` | Model for the rewrite stage |
+| `COG_REFINE_REWRITE_MODEL` | `claude-opus-4-7` | Model for the rewrite stage |
 
 ## Telemetry
 

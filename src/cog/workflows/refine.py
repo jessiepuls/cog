@@ -118,7 +118,7 @@ class RefineWorkflow(Workflow):
             Stage(
                 name="rewrite",
                 prompt_source=lambda c: self._build_rewrite_prompt(c),
-                model=os.environ.get("COG_REFINE_REWRITE_MODEL", "claude-opus-4-6"),
+                model=os.environ.get("COG_REFINE_REWRITE_MODEL", "claude-opus-4-7"),
                 runner=self._runner,
                 tolerate_failure=False,
             )

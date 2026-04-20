@@ -53,7 +53,7 @@ def test_default_models_are_claude_defaults(tmp_path, monkeypatch):
     wf = RalphWorkflow(EchoRunner(), AsyncMock(spec=IssueTracker))
     stages = {s.name: s for s in wf.stages(_make_ctx(tmp_path))}
     assert "sonnet-4-6" in stages["build"].model
-    assert "opus-4-6" in stages["review"].model
+    assert "opus-4-7" in stages["review"].model
     assert "sonnet-4-6" in stages["document"].model
 
 

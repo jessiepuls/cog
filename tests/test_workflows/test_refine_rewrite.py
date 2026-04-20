@@ -171,7 +171,7 @@ def test_stages_returns_single_rewrite_stage_with_opus_default(tmp_path):
     stages = wf.stages(ctx)
     assert len(stages) == 1
     assert stages[0].name == "rewrite"
-    assert stages[0].model == "claude-opus-4-6"
+    assert stages[0].model == "claude-opus-4-7"
 
 
 def test_stages_honors_cog_refine_rewrite_model_env(tmp_path, monkeypatch):
