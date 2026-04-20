@@ -70,13 +70,14 @@ cog doctor
 
 ## TUI
 
-Running `cog` with no args launches a Textual shell with three views:
+Running `cog` with no args launches a Textual shell with four views:
 
 | Shortcut | View | What you see |
 |----------|------|--------------|
 | `Ctrl+1` | Dashboard | Project status, queue counts, recent-runs strip, cost totals |
 | `Ctrl+2` | Refine | `needs-refinement` queue → inline interview → inline review |
 | `Ctrl+3` | Ralph | `agent-ready` queue → live log pane → completion panel |
+| `Ctrl+4` | Chat | Freeform multi-turn chat with Claude over the current project |
 | `Ctrl+Q` | Quit | Confirms if a workflow is in flight |
 
 Workers persist across view switches — start a ralph run, flip to

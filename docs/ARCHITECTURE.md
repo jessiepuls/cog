@@ -117,16 +117,17 @@ start a ralph run, flip to refine mid-interview, and come back to ralph
 with the log caught up.
 
 ```
-┌──────────┬──────────────────────────────────────────┐
-│ sidebar  │ active view (content area)               │
-│ ^1 Dash  │                                          │
-│ ^2 Ref●  │  <DashboardView / RefineView / RalphView>│
-│ ^3 Ral   │                                          │
-└──────────┴──────────────────────────────────────────┘
+┌──────────┬──────────────────────────────────────────────────┐
+│ sidebar  │ active view (content area)                       │
+│ ^1 Dash  │                                                  │
+│ ^2 Ref●  │  <DashboardView / RefineView / RalphView / ChatView>
+│ ^3 Ral   │                                                  │
+│ ^4 Chat  │                                                  │
+└──────────┴──────────────────────────────────────────────────┘
  ^Q Quit
 ```
 
-- **Ctrl+1/2/3** — switch views
+- **Ctrl+1/2/3/4** — switch views
 - **Ctrl+Q** — quit (confirm if workflows in-flight)
 - Sidebar yellow `●` — attention indicator (refine awaiting reply, run
   complete, etc.)
@@ -194,6 +195,7 @@ Run `cog doctor` to check without launching a workflow.
 | `COG_RALPH_BUILD_MODEL` | `claude-sonnet-4-6` | Ralph build stage |
 | `COG_RALPH_REVIEW_MODEL` | `claude-opus-4-7` | Ralph review stage |
 | `COG_RALPH_DOCUMENT_MODEL` | `claude-sonnet-4-6` | Ralph document stage |
+| `COG_CHAT_MODEL` | `claude-opus-4-7` | Chat view (Ctrl+4) |
 | `COG_RUNNER_TIMEOUT_SECONDS` | `1800` | Overall subprocess wall-clock limit |
 | `COG_RUNNER_INACTIVITY_TIMEOUT_SECONDS` | `300` | Idle window with no stream events |
 | `COG_RUNNER_TOOL_CALL_TIMEOUT_SECONDS` | `600` | Per-tool-call limit |
