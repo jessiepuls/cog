@@ -1,8 +1,8 @@
 """Quit confirmation modal (#129).
 
 Pushed by the shell when the user presses Ctrl+Q while one or more views
-have in-flight workflows. Lists each busy description so the user knows
-what they'd be killing.
+have in-flight workflows. Lists each busy description and warns that
+quitting will cancel them.
 """
 
 from __future__ import annotations
@@ -30,23 +30,12 @@ class QuitConfirmScreen(ModalScreen[bool]):
     QuitConfirmScreen > Container {
         padding: 1 2;
         border: thick $warning;
-        width: 60;
+        width: 70;
         height: auto;
         background: $surface;
     }
-    QuitConfirmScreen #quit-title {
-        text-style: bold;
-        height: 1;
-        padding-bottom: 1;
-    }
-    QuitConfirmScreen #quit-list {
+    QuitConfirmScreen #quit-body {
         height: auto;
-        padding-bottom: 1;
-    }
-    QuitConfirmScreen #quit-prompt {
-        height: 1;
-        padding-top: 1;
-        color: $text-muted;
     }
     """
 
@@ -56,10 +45,17 @@ class QuitConfirmScreen(ModalScreen[bool]):
 
     def compose(self) -> ComposeResult:
         lines = "\n".join(f"  • {d}" for d in self._descriptions)
+        body = (
+            "[bold]These workflows are in progress.[/bold]\n"
+            "[dim]Quitting will cancel them.[/dim]\n"
+            "\n"
+            f"{lines}\n"
+            "\n"
+            "Quit anyway?  [bold]y[/bold] yes   "
+            "[bold]n[/bold] no   [bold]esc[/bold] cancel"
+        )
         with Container():
-            yield Static("Workflows still in progress:", id="quit-title")
-            yield Static(lines, id="quit-list")
-            yield Static("Quit anyway?  [y] yes   [n] no / esc", id="quit-prompt")
+            yield Static(body, id="quit-body")
 
     def action_confirm(self) -> None:
         self.dismiss(True)
