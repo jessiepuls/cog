@@ -5,6 +5,7 @@ from typing import Any
 from typer.testing import CliRunner
 
 from cog import __version__
+from cog.checks import ALL_CHECKS
 from cog.cli import app
 from cog.core.preflight import PreflightResult
 
@@ -86,6 +87,11 @@ def test_doctor_output_goes_to_stderr(monkeypatch, tmp_path):
     result = runner.invoke(app, ["doctor", "--project-dir", str(tmp_path)])
     assert len(captured) == 1  # print_results was called with the check results
     assert result.output == ""  # nothing written directly to stdout
+
+
+def test_doctor_does_not_include_default_branch_check():
+    names = {c.name for c in ALL_CHECKS}
+    assert "default_branch" not in names
 
 
 # --- ralph subcommand ---
