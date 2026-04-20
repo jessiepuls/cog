@@ -544,8 +544,6 @@ async def test_ci_timeout_during_retry_abandons_with_timeout_cause(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """If CI times out during a retry, abandon with CiTimeoutError, not CiRetryCapExhaustedError."""
-    from cog.core.errors import CiTimeoutError
-
     monkeypatch.setenv("COG_CI_MAX_RETRIES", "2")
     monkeypatch.setenv("COG_CI_POLL_INTERVAL_SECONDS", "0.01")
     monkeypatch.setenv("COG_CI_TIMEOUT_SECONDS", "0.01")
