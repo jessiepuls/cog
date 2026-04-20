@@ -463,9 +463,17 @@ class RalphWorkflow(Workflow):
 
             try:
                 checks = await self._wait_for_ci(ctx, pr)
-            except CiTimeoutError:
+            except CiTimeoutError as e:
                 attempt_history.append((retries_done, ()))
-                break
+                await self._abandon_ci(
+                    ctx,
+                    results,
+                    pr,
+                    attempt_history,
+                    claude_analysis=None,
+                    cause=e,
+                )
+                return
 
             if checks.all_passed:
                 await self._mark_ci_success(

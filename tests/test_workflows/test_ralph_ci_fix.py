@@ -106,36 +106,6 @@ def _writable_state_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
 
 
-class CommitOnceRunner(AgentRunner):
-    """Runner that creates one commit the first time, zero on subsequent calls."""
-
-    def __init__(self, project_dir: Path, message: str = "fix: CI failure") -> None:
-        self._project_dir = project_dir
-        self._message = message
-        self._call_count = 0
-
-    async def stream(self, prompt: str, *, model: str):
-        import subprocess
-
-        self._call_count += 1
-        if self._call_count == 1:
-            subprocess.run(
-                ["git", "commit", "--allow-empty", "-m", self._message],
-                cwd=self._project_dir,
-                capture_output=True,
-                check=True,
-            )
-        yield ResultEvent(
-            result=RunResult(
-                final_message="Fixed the failure.",
-                total_cost_usd=0.1,
-                exit_status=0,
-                stream_json_path=Path("/dev/null"),
-                duration_seconds=1.0,
-            )
-        )
-
-
 # ---------------------------------------------------------------------------
 # _dedupe_attempt_checks unit tests
 # ---------------------------------------------------------------------------
@@ -561,6 +531,47 @@ async def test_retry_cap_exhaustion_calls_abandon(
     # Verify that add_label was called with agent-failed (second arg check)
     add_label_calls = [call[0][1] for call in tracker.add_label.call_args_list]
     assert "agent-failed" in add_label_calls
+
+
+# ---------------------------------------------------------------------------
+# CI timeout during retry
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_ci_timeout_during_retry_abandons_with_timeout_cause(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """If CI times out during a retry, abandon with CiTimeoutError, not CiRetryCapExhaustedError."""
+    from cog.core.errors import CiTimeoutError
+
+    monkeypatch.setenv("COG_CI_MAX_RETRIES", "2")
+    monkeypatch.setenv("COG_CI_POLL_INTERVAL_SECONDS", "0.01")
+    monkeypatch.setenv("COG_CI_TIMEOUT_SECONDS", "0.01")
+
+    async def fake_run_stage(self: object, stage: object, ctx_arg: object) -> object:
+        return make_stage_result(getattr(stage, "name", "ci-fix"), commits=1)
+
+    # The fix stage commits; then _wait_for_ci times out
+    host = _make_host()
+    # Make get_pr_checks always return pending so CI times out
+    from cog.core.host import CheckRun, PrChecks
+
+    host.get_pr_checks.return_value = PrChecks(
+        runs=(CheckRun(name="ci", state="pending", link=""),)
+    )
+    tel = _make_telemetry()
+    ctx = _make_ctx(tmp_path, telemetry=tel)
+    tracker = _make_tracker()
+
+    with patch("cog.core.workflow.StageExecutor._run_stage", fake_run_stage):
+        wf = RalphWorkflow(runner=ScriptedFinalMessageRunner(""), tracker=tracker, host=host)
+        await wf._handle_ci_failure(ctx, [], _make_pr(), _failed_checks("test_x"))
+
+    tel.write.assert_called_once()
+    record = tel.write.call_args[0][0]
+    assert record.cause_class == "CiTimeoutError"
 
 
 # ---------------------------------------------------------------------------
