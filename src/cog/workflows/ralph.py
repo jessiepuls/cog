@@ -17,7 +17,8 @@ import cog.git as git
 from cog.checks import RALPH_CHECKS
 from cog.core.context import ExecutionContext
 from cog.core.errors import (
-    CiChecksFailedError,
+    CiFixFailedError,
+    CiRetryCapExhaustedError,
     CiTimeoutError,
     GitError,
     HostError,
@@ -48,6 +49,52 @@ def _parse_float_env(key: str, default: float) -> float:
         return float(os.environ[key])
     except (KeyError, ValueError):
         return default
+
+
+def _parse_int_env(key: str, default: int) -> int:
+    try:
+        return int(os.environ[key])
+    except (KeyError, ValueError):
+        return default
+
+
+# attempt_history: list of (attempt_number, tuple_of_check_names)
+_AttemptHistory = list[tuple[int, tuple[str, ...]]]
+
+
+def _dedupe_attempt_checks(attempt_history: _AttemptHistory) -> tuple[str, ...]:
+    """Return all check names from attempt history, deduplicated (order-preserving)."""
+    seen: set[str] = set()
+    result: list[str] = []
+    for _, names in attempt_history:
+        for name in names:
+            if name not in seen:
+                seen.add(name)
+                result.append(name)
+    return tuple(result)
+
+
+def _format_cap_comment(attempt_history: _AttemptHistory, retries_done: int) -> str:
+    """Build the smart cap-exhausted PR comment."""
+    check_sets = [set(names) for _, names in attempt_history if names]
+    intersection = set.intersection(*check_sets) if len(check_sets) > 1 else set()
+
+    if intersection and len(check_sets) > 1:
+        signal = (
+            f"⚠ These checks failed on every attempt: {sorted(intersection)} — "
+            f"consider whether they're flaky or environment-specific."
+        )
+    elif len(check_sets) > 1:
+        signal = "⚠ Different checks failed on each attempt — fixes may be introducing regressions."
+    else:
+        signal = "⚠ Could not confirm a fix after retrying."
+
+    lines = [f"🤖 Cog exhausted {retries_done + 1} CI fix attempts:"]
+    for n, names in attempt_history:
+        label = "initial" if n == 0 else f"fix {n}"
+        lines.append(f"- Attempt {n} ({label}): {', '.join(names) if names else '(unknown)'}")
+    lines.append(signal)
+    return "\n".join(lines)
 
 
 _DEFAULT_POLL_INTERVAL = 15.0
@@ -138,6 +185,7 @@ class RalphWorkflow(Workflow):
         self._restart = restart
         self._processed_this_loop: set[tuple[str, str]] = set()
         self._resumed_this_iteration: dict[str, bool] = {}
+        self._ci_retries: dict[str, int] = {}
 
     async def select_item(self, ctx: ExecutionContext) -> Item | None:
         items = await self._tracker.list_by_label("agent-ready", assignee="@me")
@@ -291,14 +339,13 @@ class RalphWorkflow(Workflow):
         try:
             checks = await self._wait_for_ci(ctx, pr)
         except CiTimeoutError as e:
-            await self._handle_ci_failure(ctx, results, pr, None, e)
+            await self._abandon_ci(ctx, results, pr, [(0, ())], claude_analysis=None, cause=e)
             return
 
         if checks.all_passed:
             await self._mark_ci_success(ctx, results, pr)
         else:
-            error = CiChecksFailedError(failing=tuple(r.name for r in checks.failed))
-            await self._handle_ci_failure(ctx, results, pr, checks, error)
+            await self._handle_ci_failure(ctx, results, pr, checks)
 
     async def _wait_for_ci(self, ctx: ExecutionContext, pr: PullRequest) -> PrChecks:
         poll_interval = _parse_float_env("COG_CI_POLL_INTERVAL_SECONDS", _DEFAULT_POLL_INTERVAL)
@@ -355,6 +402,9 @@ class RalphWorkflow(Workflow):
         ctx: ExecutionContext,
         results: list[StageResult],
         pr: PullRequest,
+        *,
+        retry_count: int = 0,
+        ci_failed_checks: tuple[str, ...] = (),
     ) -> None:
         await self._tracker.remove_label(ctx.item, "agent-ready")  # type: ignore[arg-type]
         try:
@@ -363,7 +413,14 @@ class RalphWorkflow(Workflow):
             pass
         ctx.state_cache.mark_processed(ctx.item, "success")  # type: ignore[arg-type]
         ctx.state_cache.save()
-        await self._write_telemetry(ctx, results, "success", pr_url=pr.url)
+        await self._write_telemetry(
+            ctx,
+            results,
+            "success",
+            pr_url=pr.url,
+            retry_count=retry_count,
+            ci_failed_checks=ci_failed_checks,
+        )
         await self.write_report(ctx, results, "success", error=None)
 
     async def _handle_ci_failure(
@@ -371,24 +428,144 @@ class RalphWorkflow(Workflow):
         ctx: ExecutionContext,
         results: list[StageResult],
         pr: PullRequest,
-        checks: PrChecks | None,
-        error: CiChecksFailedError | CiTimeoutError,
+        checks: PrChecks,
+    ) -> None:
+        retries_done = self._ci_retries.get(ctx.item.item_id, 0)  # type: ignore[union-attr]
+        max_retries = _parse_int_env("COG_CI_MAX_RETRIES", 2)
+
+        attempt_history: _AttemptHistory = [(0, tuple(r.name for r in checks.failed))]
+
+        while retries_done < max_retries:
+            retries_done += 1
+            self._ci_retries[ctx.item.item_id] = retries_done  # type: ignore[union-attr]
+
+            fix_result = await self._run_ci_fix_stage(
+                ctx, pr, checks, retries_done, attempt_history
+            )
+
+            if fix_result.commits_created == 0:
+                await self._abandon_ci(
+                    ctx,
+                    results,
+                    pr,
+                    attempt_history,
+                    initial_checks=checks,
+                    claude_analysis=fix_result.final_message,
+                    cause=CiFixFailedError(reason="no-commit"),
+                )
+                return
+
+            try:
+                await self._host.push_branch(ctx.work_branch)  # type: ignore[union-attr,arg-type]
+            except HostError as e:
+                await self._handle_push_failed(ctx, results, e)
+                return
+
+            try:
+                checks = await self._wait_for_ci(ctx, pr)
+            except CiTimeoutError:
+                attempt_history.append((retries_done, ()))
+                break
+
+            if checks.all_passed:
+                await self._mark_ci_success(
+                    ctx,
+                    results,
+                    pr,
+                    retry_count=retries_done,
+                    ci_failed_checks=_dedupe_attempt_checks(attempt_history),
+                )
+                return
+            attempt_history.append((retries_done, tuple(r.name for r in checks.failed)))
+
+        await self._abandon_ci(
+            ctx,
+            results,
+            pr,
+            attempt_history,
+            claude_analysis=None,
+            cause=CiRetryCapExhaustedError(attempts=retries_done + 1),
+        )
+
+    async def _run_ci_fix_stage(
+        self,
+        ctx: ExecutionContext,
+        pr: PullRequest,
+        checks: PrChecks,
+        attempt_number: int,
+        attempt_history: _AttemptHistory,
+    ) -> StageResult:
+        stage = Stage(
+            name=f"ci-fix-{attempt_number}",
+            prompt_source=lambda c: self._build_ci_fix_prompt(
+                c, pr, checks, attempt_number, attempt_history
+            ),
+            model=os.environ.get("COG_RALPH_BUILD_MODEL", "claude-sonnet-4-6"),
+            runner=self._runner,
+            tolerate_failure=False,
+        )
+        return await StageExecutor()._run_stage(stage, ctx)
+
+    def _build_ci_fix_prompt(
+        self,
+        ctx: ExecutionContext,
+        pr: PullRequest,
+        checks: PrChecks,
+        attempt_number: int,
+        attempt_history: _AttemptHistory,
+    ) -> str:
+        parts: list[str] = [_load_prompt("ci_fix")]
+        parts.append("\n## Your task this iteration\n")
+        if ctx.item:
+            parts.append(f"Issue #{ctx.item.item_id}: {ctx.item.title}")
+        if ctx.work_branch:
+            parts.append(f"Branch: {ctx.work_branch}")
+        parts.append(f"PR: {pr.url}\n")
+        parts.append("\n## Failing checks\n")
+        for r in checks.failed:
+            parts.append(f"- **{r.name}**: {r.link}")
+        if attempt_number > 1:
+            parts.append("\n## Previous attempts\n")
+            for n, names in attempt_history:
+                check_str = ", ".join(names) if names else "(unknown)"
+                parts.append(f"- Attempt {n}: failed on {check_str}")
+        return "\n".join(parts)
+
+    async def _abandon_ci(
+        self,
+        ctx: ExecutionContext,
+        results: list[StageResult],
+        pr: PullRequest,
+        attempt_history: _AttemptHistory,
+        *,
+        initial_checks: PrChecks | None = None,
+        claude_analysis: str | None,
+        cause: Exception,
     ) -> None:
         assert ctx.item is not None
         assert self._host is not None
 
-        lines = ["🤖 Cog: CI failed on this PR. See:"]
-        if checks is not None:
-            for r in checks.failed:
-                lines.append(f"- **{r.name}**: {r.link}")
-        await self._host.comment_on_pr(pr.number, "\n".join(lines))
+        if isinstance(cause, CiRetryCapExhaustedError):
+            retries_done = self._ci_retries.get(ctx.item.item_id, 0)
+            pr_comment = _format_cap_comment(attempt_history, retries_done)
+        else:
+            lines = ["🤖 Cog: CI failed on this PR. See:"]
+            if initial_checks is not None:
+                for r in initial_checks.failed:
+                    lines.append(f"- **{r.name}**: {r.link}")
+            elif attempt_history and attempt_history[0][1]:
+                for name in attempt_history[0][1]:
+                    lines.append(f"- **{name}**")
+            if claude_analysis:
+                lines.append(f"\nClaude's analysis:\n\n> {claude_analysis[:2000]}")
+            pr_comment = "\n".join(lines)
 
+        await self._host.comment_on_pr(pr.number, pr_comment)
         await self._tracker.comment(
             ctx.item,
-            f"🤖 Cog opened PR #{pr.number} but CI failed. "
-            f"See the PR for failing checks. `agent-failed` applied.",
+            f"🤖 Cog opened PR #{pr.number} but CI failed and could not be automatically fixed. "
+            f"`agent-failed` applied.",
         )
-
         await self._tracker.ensure_label(
             "agent-failed",
             color="d93f0b",
@@ -396,7 +573,6 @@ class RalphWorkflow(Workflow):
         )
         await self._tracker.add_label(ctx.item, "agent-failed")
         await self._tracker.remove_label(ctx.item, "agent-ready")
-
         ctx.state_cache.mark_processed(ctx.item, "ci-failed")
         ctx.state_cache.save()
         await self._write_telemetry(
@@ -404,10 +580,12 @@ class RalphWorkflow(Workflow):
             results,
             "ci-failed",
             pr_url=pr.url,
-            error=error,
-            cause_class=type(error).__name__,
+            error=cause,
+            cause_class=type(cause).__name__,
+            retry_count=self._ci_retries.get(ctx.item.item_id, 0),
+            ci_failed_checks=_dedupe_attempt_checks(attempt_history),
         )
-        await self.write_report(ctx, results, "error", error=error)
+        await self.write_report(ctx, results, "error", error=cause)
 
     async def finalize_noop(
         self,
@@ -690,6 +868,8 @@ class RalphWorkflow(Workflow):
         pr_url: str | None = None,
         error: Exception | None = None,
         cause_class: str | None = None,
+        retry_count: int = 0,
+        ci_failed_checks: tuple[str, ...] = (),
     ) -> None:
         error_str: str | None = None
         resolved_cause_class = cause_class
@@ -716,5 +896,7 @@ class RalphWorkflow(Workflow):
             error=error_str,
             cause_class=resolved_cause_class,
             resumed=resumed,
+            retry_count=retry_count,
+            ci_failed_checks=ci_failed_checks,
         )
         await ctx.telemetry.write(record)

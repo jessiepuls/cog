@@ -63,6 +63,8 @@ class TelemetryRecord:
     error: str | None
     cause_class: str | None = None
     resumed: bool = False
+    retry_count: int = 0
+    ci_failed_checks: tuple[str, ...] = ()
 
     @classmethod
     def build(
@@ -80,6 +82,8 @@ class TelemetryRecord:
         error: str | None = None,
         cause_class: str | None = None,
         resumed: bool = False,
+        retry_count: int = 0,
+        ci_failed_checks: tuple[str, ...] = (),
     ) -> "TelemetryRecord":
         result_stages = tuple(StageTelemetry.from_stage_result(r) for r in results)
         all_stages = tuple(extra_stages) + result_stages
@@ -98,6 +102,8 @@ class TelemetryRecord:
             error=error,
             cause_class=cause_class,
             resumed=resumed,
+            retry_count=retry_count,
+            ci_failed_checks=ci_failed_checks,
         )
 
 
