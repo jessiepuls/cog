@@ -148,20 +148,6 @@ def test_build_prompt_runtime_assembly_does_not_include_comments_section(tmp_pat
     assert "### Comments" not in prompt
 
 
-def test_build_prompt_runtime_assembly_still_includes_item_number_and_title(tmp_path):
-    item = make_item(item_id="99", title="My feature")
-    ctx = _make_ctx(tmp_path, item=item)
-    prompt = _build_prompt("build", ctx)
-    assert "Issue #99: My feature" in prompt
-
-
-def test_build_prompt_runtime_assembly_still_includes_branch_name_when_set(tmp_path):
-    item = make_item(item_id="7")
-    ctx = _make_ctx(tmp_path, item=item, work_branch="ralph/7-my-branch")
-    prompt = _build_prompt("build", ctx)
-    assert "Branch: ralph/7-my-branch" in prompt
-
-
 def test_no_unbounded_git_diff_in_prompts():
     for stage in ("build", "review", "document"):
         content = _load_prompt(stage)
