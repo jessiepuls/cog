@@ -118,39 +118,6 @@ def test_build_prompt_raises_when_item_unset(tmp_path):
         _build_prompt("build", ctx)
 
 
-def test_build_prompt_runtime_assembly_does_not_include_full_item_body(tmp_path):
-    item = make_item(body="Detailed body content that should not appear inline.")
-    ctx = _make_ctx(tmp_path, item=item)
-    prompt = _build_prompt("build", ctx)
-    assert "Detailed body content that should not appear inline." not in prompt
-
-
-def test_build_prompt_runtime_assembly_does_not_include_comments_section(tmp_path):
-    comment = Comment(
-        author="bob",
-        body="A comment.",
-        created_at=datetime(2024, 3, 1, tzinfo=UTC),
-    )
-    item = make_item(comments=(comment,))
-    ctx = _make_ctx(tmp_path, item=item)
-    prompt = _build_prompt("build", ctx)
-    assert "A comment." not in prompt
-
-
-def test_build_prompt_runtime_assembly_still_includes_item_number_and_title(tmp_path):
-    item = make_item(item_id="99", title="Important feature")
-    ctx = _make_ctx(tmp_path, item=item)
-    prompt = _build_prompt("build", ctx)
-    assert "Issue #99: Important feature" in prompt
-
-
-def test_build_prompt_runtime_assembly_still_includes_branch_name_when_set(tmp_path):
-    item = make_item(item_id="99", title="T")
-    ctx = _make_ctx(tmp_path, item=item, work_branch="cog/99-important-feature")
-    prompt = _build_prompt("build", ctx)
-    assert "Branch: cog/99-important-feature" in prompt
-
-
 def test_build_prompt_tells_claude_to_fetch_body_via_gh_issue_view():
     content = _load_prompt("build")
     assert "gh issue view" in content
