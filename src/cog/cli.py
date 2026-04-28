@@ -1,5 +1,6 @@
 import asyncio
 import sys
+from datetime import UTC, datetime
 from pathlib import Path
 
 import typer
@@ -8,6 +9,8 @@ from cog import __version__
 from cog.ui.wire import build_and_run
 
 app = typer.Typer()
+auth = typer.Typer()
+app.add_typer(auth, name="auth")
 
 
 def _version_callback(value: bool) -> None:
@@ -104,6 +107,47 @@ def doctor(
     print_results(results)
     if any(r.level == "error" and not r.ok for r in results):
         raise typer.Exit(1)
+
+
+@auth.command("refresh")
+def auth_refresh() -> None:
+    """Copy Claude Code credentials from the macOS keychain to ~/.claude/.credentials.json."""
+    from cog.runners.docker_sandbox import ensure_credentials
+
+    result = asyncio.run(ensure_credentials(force=True))
+
+    if result == "api_key_set":
+        print("ANTHROPIC_API_KEY is set; no keychain refresh needed")
+        return
+
+    if result == "security_missing":
+        print("keychain refresh requires macOS 'security' binary", file=sys.stderr)
+        raise typer.Exit(1)
+
+    if result == "keychain_missing":
+        print(
+            "Claude Code credentials not found in keychain; log in via 'claude' first",
+            file=sys.stderr,
+        )
+        raise typer.Exit(1)
+
+    # result == "refreshed"
+    print(_format_expiry_message())
+
+
+def _format_expiry_message() -> str:
+    creds_file = Path.home() / ".claude" / ".credentials.json"
+    try:
+        import json
+
+        data = json.loads(creds_file.read_bytes())
+        expires_at_ms = data["claudeAiOauth"]["expiresAt"]
+        dt = datetime.fromtimestamp(expires_at_ms / 1000, tz=UTC).astimezone()
+        return (
+            f"refreshed credentials from keychain (expires {dt.strftime('%Y-%m-%d %H:%M:%S %Z')})"
+        )
+    except Exception:
+        return "refreshed credentials from keychain"
 
 
 main = app
