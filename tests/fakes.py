@@ -61,6 +61,7 @@ def make_item(
     created_at: datetime | None = None,
     updated_at: datetime | None = None,
     url: str = "https://github.com/org/repo/issues/1",
+    assignees: tuple[str, ...] = (),
 ) -> Item:
     return Item(
         tracker_id=tracker_id,
@@ -73,6 +74,7 @@ def make_item(
         created_at=created_at or _EPOCH,
         updated_at=updated_at or _EPOCH,
         url=url,
+        assignees=assignees,
     )
 
 

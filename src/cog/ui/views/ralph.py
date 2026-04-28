@@ -35,7 +35,12 @@ from cog.state import JsonFileStateCache
 from cog.state_paths import project_state_dir
 from cog.telemetry import TelemetryWriter
 from cog.ui.messages import ViewAttention
-from cog.ui.picker import PickerHistory, load_picker_history
+from cog.ui.picker import (
+    PickerHistory,
+    _format_assignees,
+    _format_history_badge,
+    load_picker_history,
+)
 from cog.ui.screens.run import StageCountingSink, stage_breakdown_line
 from cog.ui.widgets.log_pane import LogPaneWidget
 from cog.workflows.ralph import RalphWorkflow
@@ -185,7 +190,7 @@ class RalphView(Widget, can_focus=True):
 
     async def refresh_queue(self) -> None:
         try:
-            items = await self._tracker.list_by_label("agent-ready", assignee="@me")
+            items = await self._tracker.list_by_label("agent-ready")
         except TrackerError as e:
             self._set_status(f"[red]error listing queue: {e}[/red]")
             return
@@ -206,15 +211,14 @@ class RalphView(Widget, can_focus=True):
             return
         for i, item in enumerate(items):
             title = item.title if len(item.title) <= 80 else item.title[:79] + "…"
-            badge = ""
+            assignees_suffix = _format_assignees(item.assignees)
             hist = self._history.get(item.item_id)
-            if hist is not None:
-                badge = (
-                    f" [dim]\\[{hist.workflow} ×{hist.count}: "
-                    f"last {hist.last_outcome}, ${hist.total_cost_usd:.2f}][/dim]"
-                )
+            badge = _format_history_badge(hist) if hist is not None else ""
             await list_view.append(
-                ListItem(Label(f"#{item.item_id} — {title}{badge}"), id=f"queue-{i}")
+                ListItem(
+                    Label(f"#{item.item_id} — {title}{assignees_suffix}{badge}"),
+                    id=f"queue-{i}",
+                )
             )
         list_view.index = 0
         self._set_status(f"{len(items)} item(s) in queue")

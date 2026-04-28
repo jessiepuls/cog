@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 import pytest
@@ -6,7 +7,18 @@ from cog.trackers.github import GitHubIssueTracker
 from tests.fakes import FakeSubprocessRegistry
 from tests.test_trackers.conftest import load_fixture, register_repo
 
-LIST_FIELDS = "number,title,body,labels,state,createdAt,updatedAt,url"
+_BASE_RECORD = {
+    "number": 1,
+    "title": "t",
+    "body": "b",
+    "labels": [],
+    "state": "OPEN",
+    "createdAt": "2026-01-01T00:00:00Z",
+    "updatedAt": "2026-01-01T00:00:00Z",
+    "url": "https://github.com/o/r/issues/1",
+}
+
+LIST_FIELDS = "number,title,body,labels,assignees,state,createdAt,updatedAt,url"
 LIST_BASE_ARGV = (
     "gh",
     "issue",
@@ -95,7 +107,17 @@ async def test_list_by_label_json_fields(
     json_idx = list(list_call).index("--json")
     field_str = list_call[json_idx + 1]
     fields = set(field_str.split(","))
-    assert fields == {"number", "title", "body", "labels", "state", "createdAt", "updatedAt", "url"}
+    assert fields == {
+        "number",
+        "title",
+        "body",
+        "labels",
+        "assignees",
+        "state",
+        "createdAt",
+        "updatedAt",
+        "url",
+    }
 
 
 async def test_list_by_label_json_field_list_includes_state(
@@ -114,6 +136,29 @@ async def test_list_by_label_state_lowercased(
     registry.expect(LIST_BASE_ARGV, stdout=load_fixture("list_by_label_happy.json"))
     items = await list_by_label(registry, tmp_path, monkeypatch=monkeypatch)
     assert all(item.state == item.state.lower() for item in items)
+
+
+@pytest.mark.parametrize(
+    "raw_assignees, expected",
+    [
+        ([], ()),
+        ([{"login": "alice"}], ("alice",)),
+        ([{"login": "alice"}, {"login": "bob"}, {"login": "carol"}], ("alice", "bob", "carol")),
+    ],
+)
+async def test_to_item_populates_assignees(
+    registry: FakeSubprocessRegistry,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    raw_assignees: list,
+    expected: tuple,
+) -> None:
+    register_repo(registry)
+    record = {**_BASE_RECORD, "assignees": raw_assignees}
+    registry.expect(LIST_BASE_ARGV, stdout=json.dumps([record]).encode())
+    items = await list_by_label(registry, tmp_path, monkeypatch=monkeypatch)
+    assert len(items) == 1
+    assert items[0].assignees == expected
 
 
 async def test_list_by_label_label_normalization(

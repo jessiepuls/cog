@@ -119,7 +119,7 @@ class RefineWorkflow(Workflow):
         path.unlink(missing_ok=True)
 
     async def select_item(self, ctx: ExecutionContext) -> Item | None:
-        items = await self._tracker.list_by_label("needs-refinement", assignee="@me")
+        items = await self._tracker.list_by_label("needs-refinement")
         if not items:
             return None
         items.sort(key=lambda i: i.created_at)

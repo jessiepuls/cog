@@ -21,3 +21,4 @@ class Item:
     created_at: datetime
     updated_at: datetime
     url: str
+    assignees: tuple[str, ...] = ()
