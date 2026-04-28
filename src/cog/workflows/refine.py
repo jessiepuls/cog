@@ -101,8 +101,22 @@ class RefineWorkflow(Workflow):
         self._runner = runner
         self._tracker = tracker
         self._transcripts: dict[str, list[InterviewTurn]] = {}
-        self._transcript_paths: dict[str, Path] = {}
         self._review_outcomes: dict[str, ReviewOutcome] = {}
+
+    @staticmethod
+    def _transcript_host_path(project_dir: Path, item_id: str) -> Path:
+        return project_dir / ".cog" / f"interview-{item_id}.md"
+
+    @staticmethod
+    def _transcript_sandbox_path(item_id: str) -> str:
+        # cwd is mounted at /work inside DockerSandbox; the rewrite stage
+        # reads the transcript from there.
+        return f"/work/.cog/interview-{item_id}.md"
+
+    @classmethod
+    def _cleanup_transcript_file(cls, project_dir: Path, item_id: str) -> None:
+        path = cls._transcript_host_path(project_dir, item_id)
+        path.unlink(missing_ok=True)
 
     async def select_item(self, ctx: ExecutionContext) -> Item | None:
         items = await self._tracker.list_by_label("needs-refinement", assignee="@me")
@@ -123,9 +137,9 @@ class RefineWorkflow(Workflow):
         assert ctx.input_provider is not None, "refine interview requires an input provider"
         transcript = await self._run_interview(ctx)
         self._transcripts[ctx.item.item_id] = transcript
-        transcript_path = ctx.tmp_dir / f"interview-{ctx.item.item_id}.md"
+        transcript_path = self._transcript_host_path(ctx.project_dir, ctx.item.item_id)
+        transcript_path.parent.mkdir(parents=True, exist_ok=True)
         transcript_path.write_text(_format_transcript_markdown(transcript), encoding="utf-8")
-        self._transcript_paths[ctx.item.item_id] = transcript_path
 
     def stages(self, ctx: ExecutionContext) -> list[Stage]:
         return [
@@ -203,6 +217,7 @@ class RefineWorkflow(Workflow):
         )
         await ctx.telemetry.write(record)
         await self._write_report(ctx, results, transcript, review, outcome="success")
+        self._cleanup_transcript_file(ctx.project_dir, ctx.item.item_id)
 
     async def finalize_noop(self, ctx: ExecutionContext, results: list[StageResult]) -> None:
         assert ctx.item is not None
@@ -235,6 +250,7 @@ class RefineWorkflow(Workflow):
 
         if review is not None:
             await self._write_report(ctx, results, transcript, review, outcome="noop")
+        self._cleanup_transcript_file(ctx.project_dir, ctx.item.item_id)
 
     async def finalize_error(
         self, ctx: ExecutionContext, error: Exception, results: list[StageResult]
@@ -366,7 +382,7 @@ class RefineWorkflow(Workflow):
     def _build_rewrite_prompt(self, ctx: ExecutionContext) -> str:
         assert ctx.item is not None
         transcript = self._transcripts[ctx.item.item_id]
-        transcript_path = self._transcript_paths[ctx.item.item_id]
+        transcript_path = self._transcript_sandbox_path(ctx.item.item_id)
         item = ctx.item
         parts = [
             _load_refine_prompt("rewrite"),

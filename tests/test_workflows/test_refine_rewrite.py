@@ -104,10 +104,7 @@ def test_rewrite_prompt_includes_original_body_and_comments(tmp_path):
     wf = _make_workflow([])
     transcript = _make_sentinel_transcript()
     wf._transcripts["1"] = transcript
-    transcript_path = tmp_path / "tmp" / "interview-1.md"
-    transcript_path.parent.mkdir(parents=True, exist_ok=True)
-    transcript_path.write_text("stub", encoding="utf-8")
-    wf._transcript_paths["1"] = transcript_path
+    _setup_transcript_path(tmp_path, "1")
     ctx = _make_ctx(tmp_path, item=item)
     prompt = wf._build_rewrite_prompt(ctx)
     assert "Original body" in prompt
@@ -120,28 +117,24 @@ def test_rewrite_prompt_does_not_inline_transcript_content(tmp_path):
     wf = _make_workflow([])
     transcript = _make_sentinel_transcript()
     wf._transcripts["2"] = transcript
-    transcript_path = tmp_path / "tmp" / "interview-2.md"
-    transcript_path.parent.mkdir(parents=True, exist_ok=True)
-    transcript_path.write_text("stub", encoding="utf-8")
-    wf._transcript_paths["2"] = transcript_path
+    _setup_transcript_path(tmp_path, "2")
     ctx = _make_ctx(tmp_path, item=item)
     prompt = wf._build_rewrite_prompt(ctx)
     assert "What does this item need?" not in prompt
     assert "It needs caching." not in prompt
 
 
-def _setup_transcript_path(wf: RefineWorkflow, tmp_path: Path, item_id: str) -> None:
-    path = tmp_path / "tmp" / f"interview-{item_id}.md"
+def _setup_transcript_path(tmp_path: Path, item_id: str) -> None:
+    path = tmp_path / ".cog" / f"interview-{item_id}.md"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("stub", encoding="utf-8")
-    wf._transcript_paths[item_id] = path
 
 
 def test_rewrite_prompt_omits_early_end_block_on_sentinel_end(tmp_path):
     item = make_item(item_id="3", title="T", body="B")
     wf = _make_workflow([])
     wf._transcripts["3"] = _make_sentinel_transcript()
-    _setup_transcript_path(wf, tmp_path, "3")
+    _setup_transcript_path(tmp_path, "3")
     ctx = _make_ctx(tmp_path, item=item)
     prompt = wf._build_rewrite_prompt(ctx)
     # The runtime-injected block uses "## Refinement status" as a heading
@@ -152,7 +145,7 @@ def test_rewrite_prompt_includes_early_end_block_on_user_end(tmp_path):
     item = make_item(item_id="4", title="T", body="B")
     wf = _make_workflow([])
     wf._transcripts["4"] = _make_user_end_transcript()
-    _setup_transcript_path(wf, tmp_path, "4")
+    _setup_transcript_path(tmp_path, "4")
     ctx = _make_ctx(tmp_path, item=item)
     prompt = wf._build_rewrite_prompt(ctx)
     # The runtime-injected block uses "## Refinement status" as a heading
@@ -324,12 +317,12 @@ def _make_pre_stages_ctx(tmp_path: Path, item_id: str) -> ExecutionContext:
 
 
 @pytest.mark.asyncio
-async def test_pre_stages_writes_transcript_to_ctx_tmp_dir_with_expected_filename(tmp_path):
+async def test_pre_stages_writes_transcript_to_dotcog_dir_with_expected_filename(tmp_path):
     runner = ScriptedInterviewRunner([(f"Question\n{_INTERVIEW_COMPLETE}", 0.1)])
     wf = RefineWorkflow(runner=runner, tracker=AsyncMock())
     ctx = _make_pre_stages_ctx(tmp_path, "20")
     await wf.pre_stages(ctx)
-    assert (ctx.tmp_dir / "interview-20.md").exists()
+    assert (ctx.project_dir / ".cog" / "interview-20.md").exists()
 
 
 @pytest.mark.asyncio
@@ -338,20 +331,19 @@ async def test_transcript_file_contains_all_turns_in_markdown_format(tmp_path):
     wf = RefineWorkflow(runner=runner, tracker=AsyncMock())
     ctx = _make_pre_stages_ctx(tmp_path, "21")
     await wf.pre_stages(ctx)
-    content = (ctx.tmp_dir / "interview-21.md").read_text(encoding="utf-8")
+    content = (ctx.project_dir / ".cog" / "interview-21.md").read_text(encoding="utf-8")
     assert "## Turn 1 — Assistant" in content
     assert "My question" in content
 
 
 @pytest.mark.asyncio
-async def test_rewrite_prompt_references_actual_transcript_path(tmp_path):
+async def test_rewrite_prompt_references_sandbox_transcript_path(tmp_path):
     runner = ScriptedInterviewRunner([(f"Q\n{_INTERVIEW_COMPLETE}", 0.1)])
     wf = RefineWorkflow(runner=runner, tracker=AsyncMock())
     ctx = _make_pre_stages_ctx(tmp_path, "22")
     await wf.pre_stages(ctx)
     prompt = wf._build_rewrite_prompt(ctx)
-    expected_path = str(ctx.tmp_dir / "interview-22.md")
-    assert expected_path in prompt
+    assert "/work/.cog/interview-22.md" in prompt
 
 
 def test_refine_checks_do_not_contain_default_branch():

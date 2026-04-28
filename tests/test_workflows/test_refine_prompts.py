@@ -43,11 +43,10 @@ def _make_workflow_with_transcript(
         ),
     ]
     wf._transcripts[item_id] = turns
-    transcript_path = tmp_path / "tmp" / f"interview-{item_id}.md"
+    ctx = _make_ctx(tmp_path, item_id)
+    transcript_path = tmp_path / ".cog" / f"interview-{item_id}.md"
     transcript_path.parent.mkdir(parents=True, exist_ok=True)
     transcript_path.write_text("stub content", encoding="utf-8")
-    wf._transcript_paths[item_id] = transcript_path
-    ctx = _make_ctx(tmp_path, item_id)
     return wf, ctx
 
 
@@ -58,11 +57,10 @@ def test_refine_rewrite_prompt_tells_claude_to_read_transcript_file(tmp_path):
     assert "interview-30.md" in prompt
 
 
-def test_refine_rewrite_prompt_points_to_tmp_dir_path(tmp_path):
+def test_refine_rewrite_prompt_points_to_sandbox_path(tmp_path):
     wf, ctx = _make_workflow_with_transcript(tmp_path, "31")
     prompt = wf._build_rewrite_prompt(ctx)
-    expected = str(ctx.tmp_dir / "interview-31.md")
-    assert expected in prompt
+    assert "/work/.cog/interview-31.md" in prompt
 
 
 def test_refine_rewrite_prompt_does_not_inline_transcript_content(tmp_path):

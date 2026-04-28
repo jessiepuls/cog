@@ -247,3 +247,29 @@ async def test_finalize_noop_writes_report_with_body_after_placeholder(tmp_path,
     content = report_files[0].read_text()
     assert "Abandoned" in content
     assert "body unchanged" in content
+
+
+@pytest.mark.parametrize(
+    "outcome",
+    [ReviewDecision.ACCEPT, ReviewDecision.ABANDON],
+)
+@pytest.mark.asyncio
+async def test_finalize_deletes_transcript_file(tmp_path, monkeypatch, outcome):
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    tracker = AsyncMock()
+    item_id = "12"
+    item = make_item(item_id=item_id, title="T", body="B")
+    review = ReviewOutcome(decision=outcome, final_body="B", final_title="T")
+    wf = _make_wf_with_data(
+        item_id, transcript=_sentinel_transcript(), review=review, tracker=tracker
+    )
+    transcript_path = tmp_path / ".cog" / f"interview-{item_id}.md"
+    transcript_path.parent.mkdir(parents=True, exist_ok=True)
+    transcript_path.write_text("stub", encoding="utf-8")
+    telemetry = AsyncMock() if outcome == ReviewDecision.ACCEPT else None
+    ctx = _make_ctx(tmp_path, item=item, telemetry=telemetry)
+    if outcome == ReviewDecision.ACCEPT:
+        await wf.finalize_success(ctx, [make_stage_result("rewrite")])
+    else:
+        await wf.finalize_noop(ctx, [make_stage_result("rewrite")])
+    assert not transcript_path.exists()
