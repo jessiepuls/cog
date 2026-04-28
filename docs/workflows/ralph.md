@@ -108,8 +108,12 @@ cog ralph --item 42 --restart
 
 Within the shell, **Ctrl+3** opens the Ralph view:
 
-- Idle: queue list with per-item history badges (prior run count +
-  outcome + total cost, pulled from `runs.jsonl`).
+- Idle: queue list showing all `agent-ready` items (team-wide, not
+  filtered to `@me`). Each row shows the item title, an assignee suffix
+  `(@login)` when assigned, and a history badge (prior run count +
+  outcome + total cost from `runs.jsonl`). The autonomous run loop
+  still only picks items assigned to you — the broader queue list is
+  for visibility, not auto-selection.
 - Running: live log pane + footer showing cost and elapsed time.
 - Post-run: completion / failure panel with per-stage cost breakdown.
 

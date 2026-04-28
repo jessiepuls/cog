@@ -33,6 +33,7 @@ from cog.state_paths import project_state_dir
 from cog.telemetry import TelemetryWriter
 from cog.ui.editor import suspend_and_edit
 from cog.ui.messages import ViewAttention
+from cog.ui.picker import _format_assignees
 from cog.ui.widgets.chat_pane import ChatPaneWidget
 from cog.workflows.refine import RefineWorkflow, ReviewDecision, ReviewOutcome
 
@@ -216,7 +217,7 @@ class RefineView(Widget, can_focus=True):
 
     async def refresh_queue(self) -> None:
         try:
-            items = await self._tracker.list_by_label("needs-refinement", assignee="@me")
+            items = await self._tracker.list_by_label("needs-refinement")
         except Exception as e:  # noqa: BLE001 — surface any list-failure
             self._set_status(f"[red]error listing queue: {e}[/red]")
             return
@@ -232,7 +233,10 @@ class RefineView(Widget, can_focus=True):
             return
         for i, item in enumerate(items):
             title = item.title if len(item.title) <= 80 else item.title[:79] + "…"
-            await list_view.append(ListItem(Label(f"#{item.item_id} — {title}"), id=f"queue-{i}"))
+            assignees_suffix = _format_assignees(item.assignees)
+            await list_view.append(
+                ListItem(Label(f"#{item.item_id} — {title}{assignees_suffix}"), id=f"queue-{i}")
+            )
         list_view.index = 0
         self._set_status(f"{len(items)} item(s) in queue")
 

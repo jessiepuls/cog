@@ -91,6 +91,14 @@ def _format_history_badge(h: PickerHistory) -> str:
     )
 
 
+def _format_assignees(assignees: tuple[str, ...]) -> str:
+    if not assignees:
+        return ""
+    if len(assignees) == 1:
+        return f" [dim](@{assignees[0]})[/dim]"
+    return f" [dim](@{assignees[0]} +{len(assignees) - 1})[/dim]"
+
+
 class PickerScreen(ModalScreen[Item | None]):
     BINDINGS = [Binding("q", "cancel", "Cancel")]
 
@@ -124,12 +132,16 @@ class PickerScreen(ModalScreen[Item | None]):
                     if len(item.title) <= _TITLE_MAX
                     else item.title[: _TITLE_MAX - 1] + "…"
                 )
+                assignees_suffix = _format_assignees(item.assignees)
                 badge = ""
                 hist = self._history.get(item.item_id)
                 if hist is not None:
                     badge = _format_history_badge(hist)
                 list_items.append(
-                    ListItem(Label(f"#{item.item_id} — {title}{badge}"), id=f"pick-{i}")
+                    ListItem(
+                        Label(f"#{item.item_id} — {title}{assignees_suffix}{badge}"),
+                        id=f"pick-{i}",
+                    )
                 )
         list_items.append(ListItem(Label("Other — enter item number"), id="pick-other"))
         yield ListView(*list_items, id="picker-list")

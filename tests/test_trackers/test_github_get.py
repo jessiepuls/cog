@@ -6,7 +6,7 @@ from cog.trackers.github import GitHubIssueTracker
 from tests.fakes import FakeSubprocessRegistry
 from tests.test_trackers.conftest import load_fixture, register_repo
 
-GET_FIELDS = "number,title,body,labels,comments,state,createdAt,updatedAt,url"
+GET_FIELDS = "number,title,body,labels,assignees,comments,state,createdAt,updatedAt,url"
 
 
 async def get_item(

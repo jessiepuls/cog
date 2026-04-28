@@ -312,3 +312,25 @@ async def test_refine_view_title_strip_marks_unchanged_when_titles_match(
         strip = view.query_one("#review-title-strip", Static)
         assert "unchanged" in str(strip.renderable)
         await task
+
+
+async def test_refine_view_renders_assignee_suffix(tmp_path: Path, xdg_state: Path) -> None:
+    item = Item(
+        tracker_id="gh",
+        item_id="3",
+        title="item 3",
+        body="body",
+        labels=(),
+        comments=(),
+        state="open",
+        created_at=datetime(2026, 4, 20, tzinfo=UTC),
+        updated_at=datetime(2026, 4, 20, tzinfo=UTC),
+        url="",
+        assignees=("bob",),
+    )
+    tracker = _tracker_with([item])
+    async with _RefineApp(tmp_path, tracker).run_test(headless=True) as pilot:
+        await pilot.pause()
+        queue = pilot.app.query_one("#refine-queue", ListView)
+        label_text = str(queue.children[0].query_one("Label").renderable)
+        assert "(@bob)" in label_text

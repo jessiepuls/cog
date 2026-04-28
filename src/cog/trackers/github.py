@@ -34,7 +34,7 @@ class GitHubIssueTracker(IssueTracker):
             "--state",
             "open",
             "--json",
-            "number,title,body,labels,state,createdAt,updatedAt,url",
+            "number,title,body,labels,assignees,state,createdAt,updatedAt,url",
         ]
         if assignee is not None:
             args += ["--assignee", assignee]
@@ -50,7 +50,7 @@ class GitHubIssueTracker(IssueTracker):
                 "view",
                 item_id,
                 "--json",
-                "number,title,body,labels,comments,state,createdAt,updatedAt,url",
+                "number,title,body,labels,assignees,comments,state,createdAt,updatedAt,url",
             ]
         )
         tracker_id = await self._tracker_id_cached()
@@ -152,4 +152,5 @@ class GitHubIssueTracker(IssueTracker):
             created_at=datetime.fromisoformat(record["createdAt"].replace("Z", "+00:00")),
             updated_at=datetime.fromisoformat(record["updatedAt"].replace("Z", "+00:00")),
             url=record["url"],
+            assignees=tuple(a["login"] for a in record.get("assignees", [])),
         )

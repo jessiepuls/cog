@@ -101,6 +101,12 @@ ctx)` per iteration with a fresh `ExecutionContext`.
 - **Deferred items aren't labels.** Ralph parses `blocked by #N` /
   `depends on #N` from body + comments; defers via `state.json` until
   blockers close. No tracker-visible state change.
+- **`@me` filter is intentionally split.** Interactive picker-flow
+  surfaces (ralph queue list, refine queue list, dashboard counts) show
+  team-wide items so users can see shared work. The autonomous ralph
+  selection loop (`RalphWorkflow.select_item`) and its state-recovery
+  counterpart (`state.py:recover_from_remote`) keep `assignee="@me"` so
+  ralph never auto-implements a teammate's item without explicit opt-in.
 - **Refine runs only in Textual mode.** Requires an ItemPicker. Headless
   refine errors out by design (no way to do interactive chat without a
   UI).

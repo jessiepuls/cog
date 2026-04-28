@@ -135,7 +135,7 @@ class DashboardView(Widget):
         widget.update("\n".join(lines))
 
     async def _safe_count(self, label: str) -> int:
-        items = await self._tracker.list_by_label(label, assignee="@me")
+        items = await self._tracker.list_by_label(label)
         return len(items)
 
     async def _refresh_cost_totals(self) -> None:

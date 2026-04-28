@@ -235,3 +235,25 @@ async def test_ralph_view_failure_marks_running_stages_failed(
         view._sink._stage_starts["build"] = 0.0
         view._sink.mark_running_stages_failed()
         assert view._sink.stages[0].status == "failed"
+
+
+async def test_ralph_view_renders_assignee_suffix(tmp_path: Path, xdg_state: Path) -> None:
+    item = Item(
+        tracker_id="gh",
+        item_id="7",
+        title="item 7",
+        body="",
+        labels=("agent-ready",),
+        comments=(),
+        state="open",
+        created_at=datetime(2026, 4, 20, tzinfo=UTC),
+        updated_at=datetime(2026, 4, 20, tzinfo=UTC),
+        url="",
+        assignees=("alice",),
+    )
+    tracker = _tracker_with([item])
+    async with _RalphApp(tmp_path, tracker).run_test(headless=True) as pilot:
+        await pilot.pause()
+        queue = pilot.app.query_one("#ralph-queue", ListView)
+        label_text = str(queue.children[0].query_one("Label").renderable)
+        assert "(@alice)" in label_text

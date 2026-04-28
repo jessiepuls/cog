@@ -11,7 +11,13 @@ from cog.core.errors import TrackerError
 from cog.core.item import Item
 from cog.core.tracker import IssueTracker
 from cog.state_paths import project_state_dir
-from cog.ui.picker import OtherInputScreen, PickerHistory, PickerScreen, load_picker_history
+from cog.ui.picker import (
+    OtherInputScreen,
+    PickerHistory,
+    PickerScreen,
+    _format_assignees,
+    load_picker_history,
+)
 from tests.fakes import make_item, make_needs_refinement_items
 
 
@@ -306,3 +312,15 @@ async def test_picker_screen_empty_row_is_disabled():
         empty_row = list_view.get_child_by_id("pick-empty")
         assert empty_row is not None
         assert empty_row.disabled is True
+
+
+@pytest.mark.parametrize(
+    "assignees, expected",
+    [
+        ((), ""),
+        (("alice",), " [dim](@alice)[/dim]"),
+        (("alice", "bob", "carol"), " [dim](@alice +2)[/dim]"),
+    ],
+)
+def test_format_assignees(assignees: tuple, expected: str) -> None:
+    assert _format_assignees(assignees) == expected
