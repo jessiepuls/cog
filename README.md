@@ -92,6 +92,7 @@ cog                      Launch the TUI
 cog ralph [options]      Autonomous agent (see docs/workflows/ralph.md)
 cog refine [options]     Interactive refinement (see docs/workflows/refine.md)
 cog doctor               Run preflight checks and exit
+cog auth refresh         Sync Claude Code credentials from macOS keychain
 ```
 
 ### `cog ralph`
@@ -121,6 +122,15 @@ Refine requires the TUI (no `--headless`).
 | `--project-dir PATH` | Directory to run checks from (default: cwd) |
 
 Exits non-zero if any error-level preflight check fails.
+
+### `cog auth refresh`
+
+Copies Claude Code credentials from the macOS keychain to
+`~/.claude/.credentials.json`. Useful when the sandbox can't reach the
+keychain directly.
+
+No flags. Exits non-zero if the `security` binary is absent or the
+keychain entry doesn't exist. A no-op when `ANTHROPIC_API_KEY` is set.
 
 ## Docs
 
