@@ -33,6 +33,53 @@ production-ready for unattended use elsewhere yet.
   (`claude` on `PATH`), authenticated — either via macOS keychain
   (default on macOS) or `ANTHROPIC_API_KEY`
 
+### macOS: silencing the Docker Desktop privacy prompt
+
+On macOS Sequoia (15+), Docker Desktop's credential helper triggers a
+"would like to access data from other apps" prompt on every container
+start, regardless of cog. Cog can't suppress this directly — the prompt
+fires from `docker-credential-desktop` before cog's argv runs. Cog's
+credential refresh (#135) is a different code path and unrelated.
+
+Three workarounds, cheapest first:
+
+1. **Grant the access once in System Settings.** System Settings →
+   Privacy & Security → Files and Folders → enable for
+   `docker-credential-desktop` (and/or your terminal). Persists across
+   runs.
+
+2. **Disable Docker's credential store for your user.** Edit
+   `~/.docker/config.json` and remove the `credsStore` key. Cog only
+   uses local images, so no registry credentials are needed.
+
+   Before:
+
+   ```json
+   {
+     "auths": {},
+     "credsStore": "desktop"
+   }
+   ```
+
+   After:
+
+   ```json
+   {
+     "auths": {}
+   }
+   ```
+
+   Side effect: any `docker login` workflows you have elsewhere stop
+   storing registry credentials in the keychain.
+
+3. **Switch to a different container runtime** that doesn't have
+   Docker Desktop's TCC integration — e.g.
+   [colima](https://github.com/abiosoft/colima),
+   [OrbStack](https://orbstack.dev/), or
+   [podman](https://podman.io/). All expose a Docker-compatible socket,
+   so cog runs unchanged. Bigger change, but addresses other Docker
+   Desktop friction at the same time.
+
 ## Install
 
 Machine-wide, via `uv tool install`:
