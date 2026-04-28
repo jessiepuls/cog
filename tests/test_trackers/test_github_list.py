@@ -142,8 +142,15 @@ async def test_list_by_label_state_lowercased(
     "raw_assignees, expected",
     [
         ([], ()),
-        ([{"login": "alice"}], ("alice",)),
-        ([{"login": "alice"}, {"login": "bob"}, {"login": "carol"}], ("alice", "bob", "carol")),
+        ([{"login": "alice", "name": "Alice Liddell"}], ("alice",)),
+        (
+            [
+                {"login": "alice", "name": "Alice Liddell"},
+                {"login": "bob", "name": "Robert Builder"},
+                {"login": "carol", "name": "Carol Singer"},
+            ],
+            ("alice", "bob", "carol"),
+        ),
     ],
 )
 async def test_to_item_populates_assignees(
