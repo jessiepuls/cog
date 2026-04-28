@@ -179,6 +179,30 @@ def test_extract_body_only_when_no_structured_sections_uses_full_message_as_body
     assert not sections
 
 
+def test_extract_body_preserves_nested_h3_subsections():
+    message = (
+        "### Title\nT\n\n"
+        "### Body\n"
+        "## Problem\nP\n\n"
+        "## Scope\n"
+        "### onDestroy placement\n"
+        "Add a second onDestroy block.\n\n"
+        "### Test approach\n"
+        "Use unmount() from render().\n"
+    )
+    sections = _extract_title_body(message)
+    assert sections["title"] == "T"
+    assert "### onDestroy placement" in sections["body"]
+    assert "Use unmount() from render()." in sections["body"]
+
+
+def test_extract_treats_repeat_title_or_body_h3_as_section_delimiter():
+    message = "### Title\nFirst title\n\n### Body\nFirst body content.\n\n### Title\nSecond title\n"
+    sections = _extract_title_body(message)
+    assert sections["title"] == "Second title"
+    assert sections["body"] == "First body content."
+
+
 # ---------------------------------------------------------------------------
 # stages()
 # ---------------------------------------------------------------------------
