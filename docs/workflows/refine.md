@@ -110,7 +110,9 @@ the picker.
 
 Within the shell, **Ctrl+2** opens the Refine view:
 
-- Idle: queue list. Enter to start.
+- Idle: queue list showing all `needs-refinement` items (team-wide,
+  not filtered to `@me`). Each row shows the item title and an
+  assignee suffix `(@login)` when assigned. Enter to start.
 - Running: chat pane. Interview streams inline; `Ctrl+I` toggles the
   issue body pane.
 - Review: original vs. proposed panes; `a / e / shift+q` as above.
