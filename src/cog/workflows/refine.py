@@ -28,7 +28,7 @@ _INTERVIEW_COMPLETE = "<<interview-complete>>"
 _SLUG_RE = re.compile(r"[^a-z0-9-]+")
 _COLLAPSE_RE = re.compile(r"-+")
 _SECTION_RE = re.compile(
-    r"^###\s+(Title|Body)\s*\n(.*?)(?=\n###\s|\Z)",
+    r"^###\s+(Title|Body)\s*\n(.*?)(?=\n###\s+(?:Title|Body)\b|\Z)",
     re.MULTILINE | re.DOTALL | re.IGNORECASE,
 )
 
