@@ -1,9 +1,11 @@
 import asyncio
 import importlib.resources
+import json
 import os
 import shutil
 import sys
 import tempfile
+import time
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
@@ -29,6 +31,48 @@ def _write_credentials(data: bytes) -> None:
     os.replace(tmp_path, dest)
 
 
+def _existing_credentials_still_valid() -> bool:
+    creds_file = Path.home() / ".claude" / ".credentials.json"
+    try:
+        data = json.loads(creds_file.read_bytes())
+        expires_at = data["claudeAiOauth"]["expiresAt"]
+        if not isinstance(expires_at, int):
+            raise TypeError("expiresAt is not an int")
+        now_ms = int(time.time() * 1000)
+        return expires_at > now_ms + 5 * 60 * 1000
+    except Exception:
+        return False
+
+
+async def ensure_credentials(force: bool = False) -> str:
+    """Sync keychain credentials to ~/.claude/.credentials.json unless already valid.
+
+    Returns a sentinel string: 'api_key_set', 'skipped', 'security_missing',
+    'keychain_missing', or 'refreshed'. Callers map these to appropriate messages.
+    """
+    if "ANTHROPIC_API_KEY" in os.environ:
+        return "api_key_set"
+    if not force and _existing_credentials_still_valid():
+        return "skipped"
+    if not shutil.which("security"):
+        return "security_missing"
+    print("refreshing Claude Code credentials from keychain", file=sys.stderr)
+    proc = await asyncio.create_subprocess_exec(
+        "security",
+        "find-generic-password",
+        "-s",
+        "Claude Code-credentials",
+        "-w",
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.DEVNULL,
+    )
+    stdout, _ = await proc.communicate()
+    if proc.returncode != 0:
+        return "keychain_missing"
+    _write_credentials(stdout)
+    return "refreshed"
+
+
 class DockerSandbox:
     def __init__(self, image: str = "cog:latest") -> None:
         self._image = image
@@ -40,7 +84,15 @@ class DockerSandbox:
         if not self._built:
             await self._ensure_image_built()
             self._built = True
-        await self._refresh_keychain_credentials()
+        result = await ensure_credentials()
+        if result == "security_missing":
+            print(
+                "warning: no ANTHROPIC_API_KEY and 'security' binary not found;"
+                " skipping keychain refresh",
+                file=sys.stderr,
+            )
+        elif result == "keychain_missing":
+            print("warning: Claude Code credentials not found in keychain", file=sys.stderr)
 
     def wrap_argv(self, argv: Sequence[str]) -> list[str]:
         return [
@@ -137,31 +189,6 @@ class DockerSandbox:
         await proc.wait()
         if proc.returncode != 0:
             raise DockerImageBuildError(f"docker build exited {proc.returncode}")
-
-    async def _refresh_keychain_credentials(self) -> None:
-        if "ANTHROPIC_API_KEY" in os.environ:
-            return
-        if not shutil.which("security"):
-            print(
-                "warning: no ANTHROPIC_API_KEY and 'security' binary not found;"
-                " skipping keychain refresh",
-                file=sys.stderr,
-            )
-            return
-        proc = await asyncio.create_subprocess_exec(
-            "security",
-            "find-generic-password",
-            "-s",
-            "Claude Code-credentials",
-            "-w",
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.DEVNULL,
-        )
-        stdout, _ = await proc.communicate()
-        if proc.returncode != 0:
-            print("warning: Claude Code credentials not found in keychain", file=sys.stderr)
-            return
-        _write_credentials(stdout)
 
     def _mount_args(self) -> list[str]:
         home = Path.home()
