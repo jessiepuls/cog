@@ -550,3 +550,134 @@ async def test_finalize_success_ci_timeout_writes_telemetry_with_cause_class_ci_
     record = tel.write.call_args.args[0]
     assert record.outcome == "ci-failed"
     assert record.cause_class == "CiTimeoutError"
+
+
+# ---------------------------------------------------------------------------
+# _wait_for_ci: empty PrChecks / no-checks-reported tolerance
+# ---------------------------------------------------------------------------
+
+_EMPTY_CHECKS = PrChecks(runs=())
+
+
+async def test_wait_polls_past_empty_checks_until_passed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("COG_CI_POLL_INTERVAL_SECONDS", "0.001")
+    monkeypatch.setenv("COG_CI_TIMEOUT_SECONDS", "10")
+    sequence = [_EMPTY_CHECKS, _EMPTY_CHECKS, _passed_checks("ci")]
+    host = _make_host(checks_sequence=sequence)
+    wf = _make_wf(host=host)
+    ctx = _make_ctx(tmp_path)
+
+    result = await wf._wait_for_ci(ctx, _make_pr())
+
+    assert result.all_passed is True
+    assert host.get_pr_checks.call_count == 3
+
+
+async def test_wait_flake_tolerance_empty_between_nonempty(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Empty response between non-empty responses must not break early."""
+    monkeypatch.setenv("COG_CI_POLL_INTERVAL_SECONDS", "0.001")
+    monkeypatch.setenv("COG_CI_TIMEOUT_SECONDS", "10")
+    sequence = [
+        _EMPTY_CHECKS,
+        _pending_checks("ci"),
+        _EMPTY_CHECKS,
+        _passed_checks("ci"),
+    ]
+    host = _make_host(checks_sequence=sequence)
+    wf = _make_wf(host=host)
+    ctx = _make_ctx(tmp_path)
+
+    result = await wf._wait_for_ci(ctx, _make_pr())
+
+    assert result.all_passed is True
+    assert host.get_pr_checks.call_count == 4
+
+
+async def test_wait_empty_checks_persisting_raises_ci_timeout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("COG_CI_POLL_INTERVAL_SECONDS", "0.001")
+    monkeypatch.setenv("COG_CI_TIMEOUT_SECONDS", "0.01")
+
+    async def always_empty(_: int) -> PrChecks:
+        await asyncio.sleep(0.001)
+        return _EMPTY_CHECKS
+
+    host = _make_host()
+    host.get_pr_checks.side_effect = always_empty
+    wf = _make_wf(host=host)
+    ctx = _make_ctx(tmp_path)
+
+    with pytest.raises(CiTimeoutError):
+        await wf._wait_for_ci(ctx, _make_pr())
+
+
+async def test_wait_heartbeat_empty_phase_message(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("COG_CI_POLL_INTERVAL_SECONDS", "0.001")
+    monkeypatch.setenv("COG_CI_TIMEOUT_SECONDS", "10")
+
+    async def fake_sleep(_: float) -> None:
+        pass
+
+    time_values = [0.0, 0.0, 61.0, 61.0, 61.0]
+    time_idx = [0]
+
+    def fake_monotonic() -> float:
+        val = time_values[min(time_idx[0], len(time_values) - 1)]
+        time_idx[0] += 1
+        return val
+
+    sequence = [_EMPTY_CHECKS, _EMPTY_CHECKS, _passed_checks("ci")]
+    host = _make_host(checks_sequence=sequence)
+    wf = _make_wf(host=host)
+    sink = RecordingEventSink()
+    ctx = _make_ctx(tmp_path, event_sink=sink)
+
+    with (
+        patch("asyncio.sleep", side_effect=fake_sleep),
+        patch("cog.workflows.ralph.time.monotonic", side_effect=fake_monotonic),
+    ):
+        await wf._wait_for_ci(ctx, _make_pr())
+
+    messages = [e.message for e in sink.events if isinstance(e, StatusEvent)]
+    assert any("waiting for checks to begin" in m for m in messages)
+
+
+async def test_wait_heartbeat_reverts_to_count_format_once_runs_appear(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("COG_CI_POLL_INTERVAL_SECONDS", "0.001")
+    monkeypatch.setenv("COG_CI_TIMEOUT_SECONDS", "10")
+
+    async def fake_sleep(_: float) -> None:
+        pass
+
+    # advance time past heartbeat interval twice: once for empty phase, once for runs phase
+    time_values = [0.0, 0.0, 61.0, 61.0, 122.0, 122.0, 122.0]
+    time_idx = [0]
+
+    def fake_monotonic() -> float:
+        val = time_values[min(time_idx[0], len(time_values) - 1)]
+        time_idx[0] += 1
+        return val
+
+    sequence = [_EMPTY_CHECKS, _pending_checks("ci"), _pending_checks("ci"), _passed_checks("ci")]
+    host = _make_host(checks_sequence=sequence)
+    wf = _make_wf(host=host)
+    sink = RecordingEventSink()
+    ctx = _make_ctx(tmp_path, event_sink=sink)
+
+    with (
+        patch("asyncio.sleep", side_effect=fake_sleep),
+        patch("cog.workflows.ralph.time.monotonic", side_effect=fake_monotonic),
+    ):
+        await wf._wait_for_ci(ctx, _make_pr())
+
+    messages = [e.message for e in sink.events if isinstance(e, StatusEvent)]
+    assert any("passed," in m and "pending" in m for m in messages)

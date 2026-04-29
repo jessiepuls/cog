@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from cog.core.errors import HostError
+from cog.core.host import PrChecks
 from cog.hosts.github import GitHubGitHost
 from tests.fakes import FakeSubprocessRegistry
 
@@ -128,6 +129,34 @@ async def test_get_pr_checks_raises_host_error_on_gh_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     registry.expect(_CHECKS_ARGV, returncode=1, stderr=b"gh: not found")
+    monkeypatch.setattr("asyncio.create_subprocess_exec", registry.create_subprocess_exec)
+    host = GitHubGitHost(project_dir)
+    with pytest.raises(HostError):
+        await host.get_pr_checks(42)
+
+
+# Literal from real gh output — if gh changes the wording this test breaks loudly.
+_NO_CHECKS_STDERR = b"no checks reported on the 'feature-branch' branch"
+
+
+async def test_get_pr_checks_swallows_no_checks_reported(
+    registry: FakeSubprocessRegistry,
+    project_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    registry.expect(_CHECKS_ARGV, returncode=1, stderr=_NO_CHECKS_STDERR, stdout=b"[]\n")
+    monkeypatch.setattr("asyncio.create_subprocess_exec", registry.create_subprocess_exec)
+    host = GitHubGitHost(project_dir)
+    checks = await host.get_pr_checks(42)
+    assert checks == PrChecks(runs=())
+
+
+async def test_get_pr_checks_reraises_other_exit1_failures(
+    registry: FakeSubprocessRegistry,
+    project_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    registry.expect(_CHECKS_ARGV, returncode=1, stderr=b"no pull requests found")
     monkeypatch.setattr("asyncio.create_subprocess_exec", registry.create_subprocess_exec)
     host = GitHubGitHost(project_dir)
     with pytest.raises(HostError):

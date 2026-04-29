@@ -354,24 +354,23 @@ class RalphWorkflow(Workflow):
             async with asyncio.timeout(ci_timeout):
                 while True:
                     checks = await self._host.get_pr_checks(pr.number)  # type: ignore[union-attr]
-                    if not checks.pending:
+                    if checks.runs and not checks.pending:
                         break
 
                     now = time.monotonic()
                     if now - last_heartbeat >= _HEARTBEAT_INTERVAL:
-                        passed = sum(1 for r in checks.runs if r.state == "passed")
-                        total = len(checks.runs)
-                        pending = sum(1 for r in checks.runs if r.state == "pending")
                         elapsed_m = int((now - started) / 60)
-                        await self._emit(
-                            ctx,
-                            StatusEvent(
-                                message=(
-                                    f"⏳ CI: {passed}/{total} passed, "
-                                    f"{pending} pending ({elapsed_m}m elapsed)"
-                                )
-                            ),
-                        )
+                        if not checks.runs:
+                            message = f"⏳ CI: waiting for checks to begin ({elapsed_m}m elapsed)"
+                        else:
+                            passed = sum(1 for r in checks.runs if r.state == "passed")
+                            total = len(checks.runs)
+                            pending = sum(1 for r in checks.runs if r.state == "pending")
+                            message = (
+                                f"⏳ CI: {passed}/{total} passed, "
+                                f"{pending} pending ({elapsed_m}m elapsed)"
+                            )
+                        await self._emit(ctx, StatusEvent(message=message))
                         last_heartbeat = now
 
                     await asyncio.sleep(poll_interval)
