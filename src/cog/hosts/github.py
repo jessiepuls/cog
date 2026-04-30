@@ -8,6 +8,8 @@ from cog.core.errors import HostError
 from cog.core.host import CheckRun, GitHost, PrChecks, PullRequest
 from cog.core.item import Item
 
+_NO_CHECKS_REPORTED_MARKER = "no checks reported"
+
 _GH_STATE_MAP: dict[str, Literal["pending", "passed", "failed", "skipped"]] = {
     "SUCCESS": "passed",
     "FAILURE": "failed",
@@ -67,9 +69,14 @@ class GitHubGitHost(GitHost):
         return data["body"] or ""
 
     async def get_pr_checks(self, number: int) -> PrChecks:
-        stdout = await self._gh_json(
-            ["pr", "checks", str(number), "--json", "name,state,link,description"]
-        )
+        try:
+            stdout = await self._gh_json(
+                ["pr", "checks", str(number), "--json", "name,state,link,description"]
+            )
+        except HostError as exc:
+            if _NO_CHECKS_REPORTED_MARKER in str(exc):
+                return PrChecks(runs=())
+            raise
         runs = tuple(
             CheckRun(
                 name=r["name"],
