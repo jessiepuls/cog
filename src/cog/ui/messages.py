@@ -21,3 +21,7 @@ class ViewAttention(Message):
         self.view_id = view_id
         self.reason = reason
         super().__init__()
+
+
+class QueueCountsStale(Message):
+    """Posted by views when queue counts may have changed; shell refreshes."""

@@ -23,6 +23,7 @@ import cog.git as git
 from cog.core.errors import GitError
 from cog.core.tracker import IssueTracker
 from cog.state_paths import project_state_dir
+from cog.ui.messages import QueueCountsStale
 from cog.ui.widgets.recent_runs import RecentRunsWidget
 from cog.workflows import WORKFLOWS
 
@@ -74,14 +75,20 @@ class DashboardView(Widget):
         yield RecentRunsWidget(self._project_dir)
 
     async def on_mount(self) -> None:
+        if hasattr(self.screen, "queue_counts"):
+            self.watch(self.screen, "queue_counts", self._render_queues)
         await self.refresh_all()
 
     async def on_show(self) -> None:
         # Textual fires Show when display toggles from False → True — i.e.
-        # when the user switches back to the dashboard tab. Refresh so the
-        # queue counts, cost totals, and recent runs reflect the latest
-        # state (workflow runs that happened while the dashboard was hidden).
-        await self.refresh_all()
+        # when the user switches back to the dashboard tab. Post stale signal
+        # so the shell refreshes queue counts; refresh non-queue data directly.
+        self.post_message(QueueCountsStale())
+        await asyncio.gather(
+            self._refresh_project_status(),
+            self._refresh_cost_totals(),
+            self._refresh_recent_runs(),
+        )
 
     async def refresh_all(self) -> None:
         await asyncio.gather(
@@ -120,19 +127,37 @@ class DashboardView(Widget):
         widget = self.query_one("#dashboard-status", Static)
         widget.update(f"branch: [bold]{branch}[/bold]  ·  {tree_line}")
 
+    def _render_queues(self, counts: dict[str, int | None]) -> None:
+        # Empty dict = shell hasn't run its initial fetch yet (the reactive's
+        # default fires through watch on mount). Distinct from "fetched but
+        # got None (error)" — only the latter renders a red ?.
+        if not counts:
+            return
+        lines: list[str] = []
+        for cls in WORKFLOWS:
+            count = counts.get(cls.name)
+            if count is None:
+                lines.append(f"  [red]?[/red] {cls.name}: error reading {cls.queue_label}")
+            else:
+                lines.append(f"  [bold]{count}[/bold] {cls.queue_label}  ([dim]{cls.name}[/dim])")
+        try:
+            widget = self.query_one("#dashboard-queues", Static)
+        except Exception:  # noqa: BLE001 — not yet mounted
+            return
+        widget.update("\n".join(lines))
+
     async def _refresh_queue_counts(self) -> None:
+        # Used when not inside CogShellScreen (e.g. standalone tests).
+        if hasattr(self.screen, "queue_counts"):
+            return
         results = await asyncio.gather(
             *(self._safe_count(w.queue_label) for w in WORKFLOWS),
             return_exceptions=True,
         )
-        lines: list[str] = []
-        for cls, count in zip(WORKFLOWS, results, strict=False):
-            if isinstance(count, BaseException):
-                lines.append(f"  [red]?[/red] {cls.name}: error reading {cls.queue_label}")
-            else:
-                lines.append(f"  [bold]{count}[/bold] {cls.queue_label}  ([dim]{cls.name}[/dim])")
-        widget = self.query_one("#dashboard-queues", Static)
-        widget.update("\n".join(lines))
+        counts: dict[str, int | None] = {}
+        for cls, result in zip(WORKFLOWS, results, strict=False):
+            counts[cls.name] = None if isinstance(result, BaseException) else result
+        self._render_queues(counts)
 
     async def _safe_count(self, label: str) -> int:
         items = await self._tracker.list_by_label(label)

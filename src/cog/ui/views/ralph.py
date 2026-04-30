@@ -36,7 +36,7 @@ from cog.git.worktree import discard_worktree, is_dirty
 from cog.state import JsonFileStateCache
 from cog.state_paths import project_state_dir
 from cog.telemetry import TelemetryWriter
-from cog.ui.messages import ViewAttention
+from cog.ui.messages import QueueCountsStale, ViewAttention
 from cog.ui.picker import (
     PickerHistory,
     _format_assignees,
@@ -434,6 +434,7 @@ class RalphView(Widget, can_focus=True):
         self.call_after_refresh(self.focus_content)
         if substate == "post_run":
             self.post_message(ViewAttention("ralph", reason="run complete"))
+            self.post_message(QueueCountsStale())
 
     def _set_status(self, text: str) -> None:
         self.query_one("#ralph-status", Static).update(text)
