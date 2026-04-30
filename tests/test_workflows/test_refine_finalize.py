@@ -249,6 +249,104 @@ async def test_finalize_noop_writes_report_with_body_after_placeholder(tmp_path,
     assert "body unchanged" in content
 
 
+# ---------------------------------------------------------------------------
+# Raw rewrite output section in report
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_finalize_success_report_contains_raw_rewrite_output(tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    tracker = AsyncMock()
+    item = make_item(item_id="20", title="T", body="B")
+    review = ReviewOutcome(decision=ReviewDecision.ACCEPT, final_body="B2", final_title="T")
+    wf = _make_wf_with_data("20", transcript=_sentinel_transcript(), review=review, tracker=tracker)
+    telemetry = AsyncMock()
+    ctx = _make_ctx(tmp_path, item=item, telemetry=telemetry)
+    raw = "### Title\nFoo\n### Body\nBar"
+    await wf.finalize_success(ctx, [make_stage_result("rewrite", final_message=raw)])
+    from cog.state_paths import project_state_dir
+
+    reports_dir = project_state_dir(tmp_path) / "reports"
+    content = list(reports_dir.glob("*-refine-*.md"))[0].read_text()
+    assert "## Raw rewrite output" in content
+    assert raw in content
+
+
+@pytest.mark.asyncio
+async def test_finalize_noop_report_contains_raw_rewrite_output(tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    tracker = AsyncMock()
+    item = make_item(item_id="21", title="T", body="B")
+    review = ReviewOutcome(decision=ReviewDecision.ABANDON, final_body="B", final_title="T")
+    wf = _make_wf_with_data("21", transcript=_sentinel_transcript(), review=review, tracker=tracker)
+    ctx = _make_ctx(tmp_path, item=item)
+    raw = "### Title\nFoo\n### Body\nBar"
+    await wf.finalize_noop(ctx, [make_stage_result("rewrite", final_message=raw)])
+    from cog.state_paths import project_state_dir
+
+    reports_dir = project_state_dir(tmp_path) / "reports"
+    content = list(reports_dir.glob("*-refine-*.md"))[0].read_text()
+    assert "## Raw rewrite output" in content
+    assert raw in content
+
+
+@pytest.mark.asyncio
+async def test_report_raw_rewrite_uses_quadruple_backtick_fence(tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    tracker = AsyncMock()
+    item = make_item(item_id="22", title="T", body="B")
+    review = ReviewOutcome(decision=ReviewDecision.ACCEPT, final_body="B2", final_title="T")
+    wf = _make_wf_with_data("22", transcript=_sentinel_transcript(), review=review, tracker=tracker)
+    telemetry = AsyncMock()
+    ctx = _make_ctx(tmp_path, item=item, telemetry=telemetry)
+    raw = "```title\nFoo\n```\n```body\nBar\n```"
+    await wf.finalize_success(ctx, [make_stage_result("rewrite", final_message=raw)])
+    from cog.state_paths import project_state_dir
+
+    reports_dir = project_state_dir(tmp_path) / "reports"
+    content = list(reports_dir.glob("*-refine-*.md"))[0].read_text()
+    assert "````\n" in content
+    assert raw in content
+
+
+@pytest.mark.asyncio
+async def test_report_raw_rewrite_section_ordering(tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    tracker = AsyncMock()
+    item = make_item(item_id="23", title="T", body="B")
+    review = ReviewOutcome(decision=ReviewDecision.ACCEPT, final_body="B2", final_title="T")
+    wf = _make_wf_with_data("23", transcript=_sentinel_transcript(), review=review, tracker=tracker)
+    telemetry = AsyncMock()
+    ctx = _make_ctx(tmp_path, item=item, telemetry=telemetry)
+    await wf.finalize_success(ctx, [make_stage_result("rewrite")])
+    from cog.state_paths import project_state_dir
+
+    reports_dir = project_state_dir(tmp_path) / "reports"
+    content = list(reports_dir.glob("*-refine-*.md"))[0].read_text()
+    body_after_pos = content.index("## Body after")
+    raw_pos = content.index("## Raw rewrite output")
+    transcript_pos = content.index("## Interview transcript")
+    assert body_after_pos < raw_pos < transcript_pos
+
+
+@pytest.mark.asyncio
+async def test_report_raw_rewrite_empty_when_no_rewrite_result(tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    tracker = AsyncMock()
+    item = make_item(item_id="24", title="T", body="B")
+    review = ReviewOutcome(decision=ReviewDecision.ABANDON, final_body="B", final_title="T")
+    wf = _make_wf_with_data("24", transcript=_sentinel_transcript(), review=review, tracker=tracker)
+    ctx = _make_ctx(tmp_path, item=item)
+    await wf.finalize_noop(ctx, [])  # no rewrite result
+    from cog.state_paths import project_state_dir
+
+    reports_dir = project_state_dir(tmp_path) / "reports"
+    content = list(reports_dir.glob("*-refine-*.md"))[0].read_text()
+    assert "## Raw rewrite output" in content
+    assert "````\n\n````" in content
+
+
 @pytest.mark.parametrize(
     "outcome",
     [ReviewDecision.ACCEPT, ReviewDecision.ABANDON],
