@@ -1,5 +1,8 @@
+from __future__ import annotations
+
 from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path
 
 from cog.core.context import ExecutionContext
 from cog.core.runner import AgentRunner
@@ -14,6 +17,8 @@ class Stage:
     interactive: bool = False
     # True → failures stored in StageResult.error; executor continues to next stage
     tolerate_failure: bool = False
+    # Host-absolute path to pass as working directory to the sandbox
+    cwd: Path | None = None
 
 
 def static_prompt(resource: str) -> Callable[[ExecutionContext], str]:

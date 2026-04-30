@@ -13,8 +13,8 @@ hands off (or retries fixes) based on the result.
 flowchart TD
     Select[Select next agent-ready item] --> Blockers{Open blockers?}
     Blockers -->|yes| Defer[Defer — outcome: deferred-by-blocker]
-    Blockers -->|no| Prep[Fetch origin, checkout default,<br/>merge --ff-only]
-    Prep --> Branch[Create or resume<br/>cog/N-slug branch]
+    Blockers -->|no| Prep[Fetch origin]
+    Prep --> Branch[Create worktree at<br/>.cog/worktrees/N-slug/<br/>on cog/N-slug branch from origin/default]
     Branch --> Stages[Stages:<br/>build → review → document]
     Stages --> Commits{Commits<br/>created?}
     Commits -->|no| Noop[Outcome: no-op<br/>add agent-abandoned]
@@ -80,13 +80,33 @@ If CI fails, ralph runs a fix-on-CI loop:
 Capped at `COG_CI_MAX_RETRIES` (default: 2). If all retries fail or CI
 times out, the outcome is `ci-failed` and the item gets `agent-failed`.
 
+## Worktrees
+
+Each iteration runs in an isolated git worktree under
+`.cog/worktrees/<id>-<slug>/` rather than the main checkout. This means
+ralph's file writes never touch your working tree.
+
+Worktree lifecycle:
+
+- **Created** at `iteration_start` via `git worktree add`. The main
+  checkout is never modified.
+- **Removed** at `iteration_end` once the branch is pushed (or is
+  already up-to-date with origin).
+- **Left in place** if the iteration ends with a dirty tree — the item
+  gets `agent-failed` and is skipped until the worktree is resolved
+  manually (or removed with `git worktree remove --force`).
+
+At startup ralph runs an orphan scan over `.cog/worktrees/` to recover
+worktrees from crashed runs: clean ones are pushed (if ahead) and
+removed; dirty ones surface as `agent-failed` comments on the item.
+
 ## Branch resume
 
-If ralph is interrupted (cancelled, error) while on `cog/N-<slug>`, the
-next run on that same item can resume the branch rather than recreating
-it. Ralph detects an existing branch with unpushed commits and resumes
-from there; otherwise it restarts from a fresh default branch. Pass
-`--restart` to force recreation.
+If ralph is interrupted while on `cog/N-<slug>`, the next run resumes
+the existing branch in a fresh worktree rather than recreating it from
+scratch. Ralph detects an existing local or remote branch with commits
+and resumes from there. Pass `--restart` to force recreation from the
+default branch.
 
 ## Commands
 

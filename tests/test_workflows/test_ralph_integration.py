@@ -73,10 +73,10 @@ async def test_runs_all_three_stages_end_to_end(tmp_path):
 
     # Short-circuit pre_stages; this test isolates stage-sequence behavior
     # from git-setup concerns (which are covered by test_end_to_end_with_real_git).
-    async def _noop_pre_stages(ctx):
+    async def _noop_iteration_start(ctx):
         return
 
-    wf.pre_stages = _noop_pre_stages  # type: ignore[method-assign]
+    wf.iteration_start = _noop_iteration_start  # type: ignore[method-assign]
 
     ctx = ExecutionContext(
         project_dir=tmp_path,
@@ -195,10 +195,10 @@ async def test_finalize_success_pr_body_with_structured_final_message(tmp_path: 
         host=host,
     )
 
-    async def _noop_pre_stages(ctx: ExecutionContext) -> None:
+    async def _noop_iteration_start(ctx: ExecutionContext) -> None:
         return
 
-    wf.pre_stages = _noop_pre_stages  # type: ignore[method-assign]
+    wf.iteration_start = _noop_iteration_start  # type: ignore[method-assign]
 
     ctx = ExecutionContext(
         project_dir=tmp_path,
@@ -245,10 +245,10 @@ async def test_finalize_success_pr_body_with_unstructured_final_message(tmp_path
         host=host,
     )
 
-    async def _noop_pre_stages(ctx: ExecutionContext) -> None:
+    async def _noop_iteration_start(ctx: ExecutionContext) -> None:
         return
 
-    wf.pre_stages = _noop_pre_stages  # type: ignore[method-assign]
+    wf.iteration_start = _noop_iteration_start  # type: ignore[method-assign]
 
     ctx = ExecutionContext(
         project_dir=tmp_path,

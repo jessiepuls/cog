@@ -20,7 +20,7 @@ from textual.worker import Worker
 
 from cog.core.context import ExecutionContext
 from cog.core.runner import RunEvent, StageEndEvent, StageStartEvent
-from cog.core.workflow import StageExecutor, Workflow
+from cog.core.workflow import IterationOutcome, StageExecutor, Workflow
 from cog.loop import LoopState, fresh_iteration_context
 
 
@@ -231,10 +231,22 @@ class RunScreen(Screen):
                     preserve_item=self._loop_state.iteration == 1
                     and self._base_ctx.item is not None,
                 )
-                results = await StageExecutor().run(self._workflow, ctx)
+                try:
+                    results = await StageExecutor().run(self._workflow, ctx)
+                except BaseException as exc:
+                    it_outcome = (
+                        IterationOutcome.exception
+                        if isinstance(exc, asyncio.CancelledError)
+                        else IterationOutcome.error
+                    )
+                    await self._workflow.iteration_end(ctx, it_outcome)
+                    raise
                 if not results:
                     self._loop_state.iteration -= 1  # empty-queue probe: don't count
                     break
+                commits = sum(r.commits_created for r in results)
+                it_outcome = IterationOutcome.success if commits > 0 else IterationOutcome.noop
+                await self._workflow.iteration_end(ctx, it_outcome)
                 self._refresh_footer()
         except asyncio.CancelledError:
             self._state = "cancelled"

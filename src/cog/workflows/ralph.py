@@ -9,6 +9,7 @@ import sys
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
+from enum import Enum
 from importlib.resources import files
 from pathlib import Path
 from typing import ClassVar, Literal
@@ -32,7 +33,17 @@ from cog.core.outcomes import Outcome, StageResult
 from cog.core.runner import AgentRunner, StatusEvent
 from cog.core.stage import Stage
 from cog.core.tracker import IssueTracker
-from cog.core.workflow import StageExecutor, Workflow
+from cog.core.workflow import IterationOutcome, StageExecutor, Workflow
+from cog.git.worktree import (
+    create_worktree,
+    discard_worktree,
+    is_ahead_of_origin,
+    is_dirty,
+    push_with_retry,
+    remote_branch_exists,
+    remove_worktree,
+    scan_orphans,
+)
 from cog.state_paths import project_slug, project_state_dir
 from cog.telemetry import TelemetryRecord
 from cog.ui.widgets.log_pane import LogPaneWidget
@@ -106,10 +117,26 @@ _PRIORITY_RE = re.compile(r"^p(\d+)$")
 _SLUG_RE = re.compile(r"[^a-z0-9-]+")
 _COLLAPSE_RE = re.compile(r"-+")
 _BLOCKER_RE = re.compile(r"\b(?:blocked by|depends on)\s+#(\d+)", re.IGNORECASE)
+_ITEM_ID_FROM_PATH_RE = re.compile(r"^(\d+)-")
 _SECTION_RE = re.compile(
     r"^###\s+(Summary|Key changes|Test plan)\s*\n(.*?)(?=\n###\s|\Z)",
     re.MULTILINE | re.DOTALL | re.IGNORECASE,
 )
+
+
+class _BranchCase(Enum):
+    RESTART = "restart"
+    RESUME_LOCAL = "resume_local"
+    RECREATE_STALE = "recreate_stale"
+    RESUME_REMOTE = "resume_remote"
+    FRESH_START = "fresh_start"
+
+
+class _TeardownAction(Enum):
+    REMOVE = "remove"
+    PUSH_THEN_REMOVE_OR_STUCK = "push_then_remove"
+    PUSH_BEST_EFFORT_THEN_STUCK = "push_then_stuck"
+    LEAVE_STUCK = "leave_stuck"
 
 
 def _priority_tier(item: Item) -> int:
@@ -178,8 +205,52 @@ class RalphWorkflow(Workflow):
         self._host = host
         self._restart = restart
         self._processed_this_loop: set[tuple[str, str]] = set()
-        self._resumed_this_iteration: dict[str, bool] = {}
         self._ci_retries: dict[str, int] = {}
+        # item_ids with known stuck (dirty/unregistered) worktrees — skipped during pick
+        self._stuck_worktree_item_ids: set[str] = set()
+
+    async def _apply_orphan_scan(self, project_dir: Path) -> None:
+        """Run orphan scan, label stuck items, and populate _stuck_worktree_item_ids."""
+        try:
+            result = await scan_orphans(project_dir)
+        except Exception as e:
+            sys.stderr.write(f"warning: orphan scan failed: {e}\n")
+            return
+
+        if result.cleaned or result.pushed:
+            cleaned = len(result.cleaned)
+            pushed = len(result.pushed)
+            sys.stderr.write(
+                f"-- Cleaned {cleaned} orphan worktree(s), pushed {pushed} commit set(s)\n"
+            )
+
+        for stuck in result.dirty:
+            if stuck.item_id is not None:
+                item_id = str(stuck.item_id)
+                self._stuck_worktree_item_ids.add(item_id)
+                try:
+                    item = await self._tracker.get(item_id)
+                    await self._tracker.ensure_label(
+                        "agent-failed",
+                        color="d93f0b",
+                        description="Cog attempted this and hit an error; retry is still eligible",
+                    )
+                    await self._tracker.add_label(item, "agent-failed")
+                    await self._tracker.comment(
+                        item,
+                        f"🤖 Cog found a stuck worktree from a previous run:\n"
+                        f"- Path: `{stuck.path}`\n"
+                        f"- Branch: `{stuck.branch}`\n"
+                        f"- Reason: {stuck.reason}\n\n"
+                        f"Resolve the worktree manually to re-queue this item.",
+                    )
+                except Exception as e:
+                    sys.stderr.write(f"warning: could not label stuck item #{stuck.item_id}: {e}\n")
+
+        for path in result.unregistered:
+            item_id_str = _ITEM_ID_FROM_PATH_RE.match(path.name)
+            if item_id_str:
+                self._stuck_worktree_item_ids.add(item_id_str.group(1))
 
     async def select_item(self, ctx: ExecutionContext) -> Item | None:
         items = await self._tracker.list_by_label("agent-ready", assignee="@me")
@@ -190,6 +261,7 @@ class RalphWorkflow(Workflow):
             for item in items
             if (item.tracker_id, item.item_id) not in self._processed_this_loop
             and not ctx.state_cache.is_processed(item)
+            and not self._has_stuck_worktree(ctx, item)
         ]
         eligible.sort(key=lambda i: (_priority_tier(i), i.created_at))
 
@@ -247,30 +319,152 @@ class RalphWorkflow(Workflow):
         )
         await ctx.telemetry.write(record)
 
-    async def pre_stages(self, ctx: ExecutionContext) -> None:
-        assert ctx.item is not None, "RalphWorkflow.pre_stages requires ctx.item"
+    def _has_stuck_worktree(self, ctx: ExecutionContext, item: Item) -> bool:
+        """True if a dirty/unregistered worktree exists for this item on disk.
+
+        Re-checks disk each pick so externally resolving the worktree (deleting
+        the dir, finishing a manual cleanup) re-eligibles the item without
+        restarting cog.
+        """
+        slug = _slugify(item.title)
+        wt_path = ctx.project_dir / ".cog" / "worktrees" / f"{item.item_id}-{slug}"
+        if not wt_path.exists():
+            self._stuck_worktree_item_ids.discard(item.item_id)
+            return False
+        return True
+
+    async def _classify_branch(
+        self, ctx: ExecutionContext, branch: str, default: str
+    ) -> _BranchCase:
+        if self._restart:
+            return _BranchCase.RESTART
+        if await git.branch_exists(ctx.project_dir, branch):
+            ahead = await git.commits_between(ctx.project_dir, f"origin/{default}", branch)
+            return _BranchCase.RESUME_LOCAL if ahead > 0 else _BranchCase.RECREATE_STALE
+        if await remote_branch_exists(ctx.project_dir, branch):
+            return _BranchCase.RESUME_REMOTE
+        return _BranchCase.FRESH_START
+
+    async def iteration_start(self, ctx: ExecutionContext) -> None:
+        assert ctx.item is not None, "RalphWorkflow.iteration_start requires ctx.item"
+        item = ctx.item
         default = await git.default_branch(ctx.project_dir)
-        await git.checkout_branch(ctx.project_dir, default)
         await git.fetch_origin(ctx.project_dir)
-        await git.merge_ff_only(ctx.project_dir, f"origin/{default}")
-        work_branch = f"cog/{ctx.item.item_id}-{_slugify(ctx.item.title)}"
 
-        resumed = False
-        if await git.branch_exists(ctx.project_dir, work_branch):
-            ahead = await git.commits_between(ctx.project_dir, default, work_branch)
-            if ahead == 0 or self._restart:
+        slug = _slugify(item.title)
+        work_branch = f"cog/{item.item_id}-{slug}"
+        wt_path = ctx.project_dir / ".cog" / "worktrees" / f"{item.item_id}-{slug}"
+
+        case = await self._classify_branch(ctx, work_branch, default)
+        match case:
+            case _BranchCase.RESTART:
+                await self._cleanup_for_restart(ctx, wt_path, work_branch)
+                await self._create_fresh_worktree(ctx, wt_path, work_branch, default)
+            case _BranchCase.RESUME_LOCAL:
+                await create_worktree(
+                    ctx.project_dir,
+                    wt_path,
+                    work_branch,
+                    start_point=work_branch,
+                    create_branch=False,
+                )
+            case _BranchCase.RECREATE_STALE:
                 await git.delete_branch(ctx.project_dir, work_branch)
-                await git.create_branch(ctx.project_dir, work_branch, start_point="HEAD")
-            else:
-                await git.checkout_branch(ctx.project_dir, work_branch)
-                resumed = True
-        else:
-            await git.create_branch(ctx.project_dir, work_branch, start_point="HEAD")
+                await self._create_fresh_worktree(ctx, wt_path, work_branch, default)
+            case _BranchCase.RESUME_REMOTE:
+                await create_worktree(
+                    ctx.project_dir,
+                    wt_path,
+                    work_branch,
+                    start_point=f"origin/{work_branch}",
+                    create_branch=True,
+                )
+            case _BranchCase.FRESH_START:
+                await self._create_fresh_worktree(ctx, wt_path, work_branch, default)
 
+        ctx.resumed = case in (_BranchCase.RESUME_LOCAL, _BranchCase.RESUME_REMOTE)
         ctx.work_branch = work_branch
-        self._resumed_this_iteration[ctx.item.item_id] = resumed
+        ctx.worktree_path = wt_path
+        self._stuck_worktree_item_ids.discard(item.item_id)
+
+    async def _create_fresh_worktree(
+        self, ctx: ExecutionContext, wt_path: Path, branch: str, default: str
+    ) -> None:
+        await create_worktree(
+            ctx.project_dir,
+            wt_path,
+            branch,
+            start_point=f"origin/{default}",
+            create_branch=True,
+        )
+
+    async def _cleanup_for_restart(self, ctx: ExecutionContext, wt_path: Path, branch: str) -> None:
+        if wt_path.exists():
+            await discard_worktree(ctx.project_dir, wt_path)
+        if await git.branch_exists(ctx.project_dir, branch):
+            await git.delete_branch(ctx.project_dir, branch)
+
+    async def _teardown_action(
+        self, wt_path: Path, branch: str, outcome: IterationOutcome
+    ) -> _TeardownAction:
+        dirty = await is_dirty(wt_path)
+        ahead = await is_ahead_of_origin(wt_path, branch)
+        if outcome is IterationOutcome.success:
+            return _TeardownAction.LEAVE_STUCK if dirty else _TeardownAction.REMOVE
+        if dirty:
+            if ahead and outcome is not IterationOutcome.noop:
+                return _TeardownAction.PUSH_BEST_EFFORT_THEN_STUCK
+            return _TeardownAction.LEAVE_STUCK
+        return _TeardownAction.PUSH_THEN_REMOVE_OR_STUCK if ahead else _TeardownAction.REMOVE
+
+    async def iteration_end(self, ctx: ExecutionContext, outcome: IterationOutcome) -> None:
+        wt_path, branch = ctx.worktree_path, ctx.work_branch
+        if wt_path is None or not wt_path.exists() or branch is None:
+            return
+
+        action = await self._teardown_action(wt_path, branch, outcome)
+        match action:
+            case _TeardownAction.REMOVE:
+                await self._remove_worktree_safe(ctx.project_dir, wt_path)
+            case _TeardownAction.PUSH_THEN_REMOVE_OR_STUCK:
+                if await self._push_worktree_safe(ctx, wt_path, branch):
+                    await self._remove_worktree_safe(ctx.project_dir, wt_path)
+                else:
+                    self._mark_stuck(ctx)
+            case _TeardownAction.PUSH_BEST_EFFORT_THEN_STUCK:
+                await self._push_worktree_safe(ctx, wt_path, branch)
+                self._mark_stuck(ctx)
+            case _TeardownAction.LEAVE_STUCK:
+                if outcome is IterationOutcome.success:
+                    await self._emit(
+                        ctx,
+                        StatusEvent(
+                            message=f"⚠ worktree {wt_path} is dirty after success; leaving in place"
+                        ),
+                    )
+                self._mark_stuck(ctx)
+
+    def _mark_stuck(self, ctx: ExecutionContext) -> None:
+        if ctx.item is not None:
+            self._stuck_worktree_item_ids.add(ctx.item.item_id)
+
+    async def _push_worktree_safe(self, ctx: ExecutionContext, wt_path: Path, branch: str) -> bool:
+        """Push branch from worktree; returns True on success."""
+        try:
+            await push_with_retry(wt_path, branch)
+            return True
+        except GitError as e:
+            sys.stderr.write(f"warning: push failed for {branch}: {e}\n")
+            return False
+
+    async def _remove_worktree_safe(self, project_dir: Path, wt_path: Path) -> None:
+        try:
+            await remove_worktree(project_dir, wt_path)
+        except GitError as e:
+            sys.stderr.write(f"warning: could not remove worktree {wt_path}: {e}\n")
 
     def stages(self, ctx: ExecutionContext) -> list[Stage]:
+        cwd = ctx.worktree_path
         return [
             Stage(
                 name="build",
@@ -278,6 +472,7 @@ class RalphWorkflow(Workflow):
                 model=os.environ.get("COG_RALPH_BUILD_MODEL", "claude-sonnet-4-6"),
                 runner=self._runner,
                 tolerate_failure=False,
+                cwd=cwd,
             ),
             Stage(
                 name="review",
@@ -285,6 +480,7 @@ class RalphWorkflow(Workflow):
                 model=os.environ.get("COG_RALPH_REVIEW_MODEL", "claude-opus-4-7"),
                 runner=self._runner,
                 tolerate_failure=False,
+                cwd=cwd,
             ),
             Stage(
                 name="document",
@@ -293,6 +489,7 @@ class RalphWorkflow(Workflow):
                 runner=self._runner,
                 # document failures flagged for PR footer by #14; don't abort
                 tolerate_failure=True,
+                cwd=cwd,
             ),
         ]
 
@@ -504,6 +701,7 @@ class RalphWorkflow(Workflow):
             model=os.environ.get("COG_RALPH_BUILD_MODEL", "claude-sonnet-4-6"),
             runner=self._runner,
             tolerate_failure=False,
+            cwd=ctx.worktree_path,
         )
         return await StageExecutor()._run_stage(stage, ctx)
 
@@ -711,9 +909,10 @@ class RalphWorkflow(Workflow):
 
         if ctx.work_branch:
             try:
+                git_dir = ctx.worktree_path or ctx.project_dir
                 default = await git.default_branch(ctx.project_dir)
                 shas = await git.log_short_shas(
-                    ctx.project_dir,
+                    git_dir,
                     f"origin/{default}..HEAD",
                 )
                 if shas:
@@ -754,6 +953,7 @@ class RalphWorkflow(Workflow):
 
     async def _rebase_before_push(self, ctx: ExecutionContext) -> RebaseOutcome:
         assert ctx.work_branch is not None
+        git_dir = ctx.worktree_path or ctx.project_dir
         default = await git.default_branch(ctx.project_dir)
         await git.fetch_origin(ctx.project_dir)
 
@@ -761,9 +961,7 @@ class RalphWorkflow(Workflow):
         # contains everything from origin/<default>. Common no-op on quiet
         # iterations; saves ~$0.05-0.10 per iteration.
         try:
-            behind = await git.commits_between(
-                ctx.project_dir, ctx.work_branch, f"origin/{default}"
-            )
+            behind = await git.commits_between(git_dir, ctx.work_branch, f"origin/{default}")
         except GitError:
             # Transient git error — assume rebase is needed, fall through.
             behind = 1
@@ -777,12 +975,13 @@ class RalphWorkflow(Workflow):
             model=os.environ.get("COG_RALPH_BUILD_MODEL", "claude-sonnet-4-6"),
             runner=self._runner,
             tolerate_failure=False,
+            cwd=ctx.worktree_path,
         )
         result = await StageExecutor()._run_stage(stage, ctx)
 
-        if await git.rebase_in_progress(ctx.project_dir):
+        if await git.rebase_in_progress(git_dir):
             # Claude exited mid-rebase — safety net abort.
-            await git.rebase_abort(ctx.project_dir)
+            await git.rebase_abort(git_dir)
             return RebaseOutcome(status="conflict", final_message=result.final_message)
 
         return RebaseOutcome(status="clean")
@@ -884,7 +1083,6 @@ class RalphWorkflow(Workflow):
                 resolved_cause_class = type(error.cause).__name__
         if ctx.telemetry is None:
             return
-        resumed = self._resumed_this_iteration.get(ctx.item.item_id, False)  # type: ignore[union-attr]
         record = TelemetryRecord.build(
             project=project_slug(ctx.project_dir),
             workflow=self.name,
@@ -896,7 +1094,7 @@ class RalphWorkflow(Workflow):
             duration_seconds=sum(r.duration_seconds for r in results),
             error=error_str,
             cause_class=resolved_cause_class,
-            resumed=resumed,
+            resumed=ctx.resumed,
             retry_count=retry_count,
             ci_failed_checks=ci_failed_checks,
         )

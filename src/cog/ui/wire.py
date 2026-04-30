@@ -34,7 +34,7 @@ async def build_run_screen(
 
     Does NOT run preflight — caller handles that separately.
     """
-    sandbox = DockerSandbox()
+    sandbox = DockerSandbox(project_dir=project_dir)
     runner = ClaudeCliRunner(sandbox)
     tracker = GitHubIssueTracker(project_dir)
     state_dir = project_state_dir(project_dir)
@@ -92,7 +92,7 @@ async def build_and_run(
         return 2
 
     # 3. Assemble dependencies
-    sandbox = DockerSandbox()
+    sandbox = DockerSandbox(project_dir=project_dir)
     runner = ClaudeCliRunner(sandbox)
     tracker = GitHubIssueTracker(project_dir)
     state_dir = project_state_dir(project_dir)
@@ -124,6 +124,9 @@ async def build_and_run(
             return 1
 
     if headless:
+        # Scan for orphaned worktrees from prior crashes before iterating
+        if hasattr(workflow, "_apply_orphan_scan"):
+            await workflow._apply_orphan_scan(project_dir)
         return await run_headless(workflow, ctx, loop=loop, max_iterations=max_iterations)
 
     from cog.ui.app import run_textual

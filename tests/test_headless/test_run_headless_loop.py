@@ -69,7 +69,9 @@ class _CostRunner(AgentRunner):
     def __init__(self, cost: float) -> None:
         self._cost = cost
 
-    async def stream(self, prompt: str, *, model: str) -> AsyncIterator[RunEvent]:
+    async def stream(
+        self, prompt: str, *, model: str, cwd: Path | None = None
+    ) -> AsyncIterator[RunEvent]:
         yield ResultEvent(
             result=RunResult(
                 final_message="ok",
@@ -138,7 +140,9 @@ async def test_loop_stage_error_aborts_loop_with_exit_1(tmp_path: Path, capsys) 
     from cog.core.runner import AgentRunner, RunEvent
 
     class _FailRunner(AgentRunner):
-        async def stream(self, prompt: str, *, model: str) -> AsyncIterator[RunEvent]:
+        async def stream(
+            self, prompt: str, *, model: str, cwd: Path | None = None
+        ) -> AsyncIterator[RunEvent]:
             yield ResultEvent(
                 result=RunResult(
                     final_message="failed",

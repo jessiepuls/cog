@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator, Mapping
 from dataclasses import dataclass
@@ -53,7 +55,7 @@ class StatusEvent:
 
 @dataclass(frozen=True)
 class ItemSelectedEvent:
-    item: "Item"
+    item: Item
 
 
 RunEvent = (
@@ -69,12 +71,14 @@ RunEvent = (
 
 class AgentRunner(ABC):
     @abstractmethod
-    def stream(self, prompt: str, *, model: str) -> AsyncIterator[RunEvent]: ...
+    def stream(
+        self, prompt: str, *, model: str, cwd: Path | None = None
+    ) -> AsyncIterator[RunEvent]: ...
 
-    async def run(self, prompt: str, *, model: str) -> RunResult:
+    async def run(self, prompt: str, *, model: str, cwd: Path | None = None) -> RunResult:
         """Default impl — drain stream() and return the final RunResult."""
         result: RunResult | None = None
-        async for event in self.stream(prompt, model=model):
+        async for event in self.stream(prompt, model=model, cwd=cwd):
             if isinstance(event, ResultEvent):
                 result = event.result
         assert result is not None, "runner must emit a ResultEvent before finishing"

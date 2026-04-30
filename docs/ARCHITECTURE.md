@@ -40,7 +40,9 @@ src/cog/
 ├── telemetry.py            TelemetryRecord + TelemetryWriter (runs.jsonl)
 ├── headless.py             Non-TUI event sink + iteration driver
 ├── loop.py                 Cross-iteration primitives
-└── git.py                  Async git subprocess helpers
+└── git/                    Async git subprocess helpers
+    ├── __init__.py         Branch, status, fetch, merge helpers
+    └── worktree.py         git worktree lifecycle (create/remove/prune/scan_orphans)
 ```
 
 **Two separate abstractions — don't conflate**: `IssueTracker` (reads /
@@ -92,6 +94,12 @@ ctx)` per iteration with a fresh `ExecutionContext`.
   `Status`) flow through `ctx.event_sink` to whichever widget is
   mounted. Adding a new UI signal means adding an event type in
   `core/runner.py` and a handler in the widget's `emit()`.
+- **Each ralph iteration runs in an isolated git worktree.** Ralph creates
+  `.cog/worktrees/<id>-<slug>/` per iteration via `git worktree add`
+  (`git/worktree.py`). The main checkout is never touched during a run.
+  On success the worktree is removed; on failure it is pushed if ahead of
+  origin, then removed. Orphaned worktrees from crashed runs are recovered
+  by `scan_orphans()` at startup.
 - **Ralph failures are additive, not destructive.** On error, ralph
   keeps `agent-ready`, adds `agent-failed`. `agent-failed` is a
   *signal*, not a terminal state — it clears on the next success.
@@ -151,6 +159,12 @@ directory name with non-alphanumerics replaced by `-`.
 | `state.json` | Processed / deferred item tracking. Processed entries are revived if the issue is edited after the record (`updated_at > ts`). |
 | `runs.jsonl` | One JSON line per workflow run — telemetry record. Append-only with fcntl locking. |
 | `reports/<ts>-<workflow>-<item-slug>.md` | Human-readable run report. Refine reports include the original body, proposed body, full interview transcript, and per-stage cost table. |
+
+Ralph also writes worktrees inside the **project directory** (not the state dir):
+
+| Path | Contents |
+|------|----------|
+| `.cog/worktrees/<id>-<slug>/` | Isolated git worktree per iteration. Created at `iteration_start`, removed after push. Survivors indicate a stuck run; see [ralph.md](workflows/ralph.md#worktrees). |
 
 ## Telemetry (runs.jsonl)
 
@@ -239,6 +253,10 @@ end with a `ResultEvent`. See `ClaudeCliRunner` for the reference.
 
 1. Subclass `Workflow` (`src/cog/core/workflow.py`).
 2. Implement `select_item` / `stages` / `classify_outcome` at minimum.
-3. Register in `src/cog/workflows/__init__.py::WORKFLOWS`.
-4. For a TUI presence, create a view widget under `src/cog/ui/views/`
+3. Override `iteration_start` / `iteration_end` if you need per-iteration
+   setup or teardown (e.g. creating an isolated worktree). Both default to
+   no-op. `iteration_end` receives the `IterationOutcome` and is called
+   even on Ctrl+C / exception.
+4. Register in `src/cog/workflows/__init__.py::WORKFLOWS`.
+5. For a TUI presence, create a view widget under `src/cog/ui/views/`
    and add it to `CogShellScreen`'s compose.

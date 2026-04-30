@@ -64,7 +64,9 @@ class _EmptyQueueWorkflow(_SimpleWorkflow):
 
 
 class _FailRunner(AgentRunner):
-    async def stream(self, prompt: str, *, model: str) -> AsyncIterator[RunEvent]:
+    async def stream(
+        self, prompt: str, *, model: str, cwd: Path | None = None
+    ) -> AsyncIterator[RunEvent]:
         yield ResultEvent(
             result=RunResult(
                 final_message="failed",

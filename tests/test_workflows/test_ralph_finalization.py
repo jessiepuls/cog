@@ -32,6 +32,16 @@ def _clean_rebase(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(RalphWorkflow, "_rebase_before_push", _noop)
 
 
+@pytest.fixture(autouse=True)
+def _clean_iteration_start(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Patch iteration_start to noop so end-to-end tests don't hit real git."""
+
+    async def _noop(self: object, ctx: object) -> None:
+        return
+
+    monkeypatch.setattr(RalphWorkflow, "iteration_start", _noop)
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -809,7 +819,7 @@ async def test_full_iteration_end_to_end_success(tmp_path: Path) -> None:
 
     wf = RalphWorkflow(runner=EchoRunner(), tracker=tracker, host=host)
 
-    async def _pre(ctx: ExecutionContext) -> None:
+    async def _iteration_start(ctx: ExecutionContext) -> None:
         ctx.work_branch = "cog/42-fix"
 
     def _stages(ctx: ExecutionContext) -> list[Stage]:
@@ -826,7 +836,7 @@ async def test_full_iteration_end_to_end_success(tmp_path: Path) -> None:
     async def _classify(ctx: ExecutionContext, results: list) -> str:
         return "success"
 
-    wf.pre_stages = _pre  # type: ignore[method-assign]
+    wf.iteration_start = _iteration_start  # type: ignore[method-assign]
     wf.stages = _stages  # type: ignore[method-assign]
     wf.classify_outcome = _classify  # type: ignore[method-assign]
 
@@ -865,7 +875,7 @@ async def test_full_iteration_end_to_end_noop(tmp_path: Path) -> None:
 
     wf = RalphWorkflow(runner=EchoRunner(), tracker=tracker, host=host)
 
-    async def _pre(ctx: ExecutionContext) -> None:
+    async def _iteration_start(ctx: ExecutionContext) -> None:
         ctx.work_branch = "cog/42-fix"
 
     def _stages(ctx: ExecutionContext) -> list[Stage]:
@@ -882,7 +892,7 @@ async def test_full_iteration_end_to_end_noop(tmp_path: Path) -> None:
     async def _classify(ctx: ExecutionContext, results: list) -> str:
         return "noop"
 
-    wf.pre_stages = _pre  # type: ignore[method-assign]
+    wf.iteration_start = _iteration_start  # type: ignore[method-assign]
     wf.stages = _stages  # type: ignore[method-assign]
     wf.classify_outcome = _classify  # type: ignore[method-assign]
     wf.write_report = AsyncMock()  # type: ignore[method-assign]

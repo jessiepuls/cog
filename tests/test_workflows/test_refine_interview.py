@@ -356,7 +356,9 @@ async def test_interview_no_result_event_emitted_raises(tmp_path):
     from cog.core.runner import AgentRunner, RunEvent
 
     class NoResultRunner(AgentRunner):
-        async def stream(self, prompt: str, *, model: str) -> AsyncIterator[RunEvent]:
+        async def stream(
+            self, prompt: str, *, model: str, cwd: Path | None = None
+        ) -> AsyncIterator[RunEvent]:
             # yields nothing (no ResultEvent → final_message stays "")
             return
             yield  # type: ignore[misc]
