@@ -90,8 +90,10 @@ Exiting without saving returns to the review prompt — **not** abandon.
 
 After each iteration (accept or abandon) a markdown report is written
 to `~/.local/state/cog/<slug>/reports/<ts>-refine-<item-slug>.md`. It
-contains the full original body, the proposed/applied body, the complete
-interview transcript, and a per-stage cost table.
+contains the full original body, the proposed/applied body, the raw rewrite
+output (verbatim from the rewrite stage, useful for forensics when the
+parsed title/body differs from what was generated), the complete interview
+transcript, and a per-stage cost table.
 
 ## Commands
 
