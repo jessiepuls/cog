@@ -11,7 +11,7 @@ from pathlib import Path
 
 from cog.core.errors import DockerImageBuildError, DockerUnavailableError, SandboxError
 
-_EXPECTED_IMAGE_VERSION = "2"
+_EXPECTED_IMAGE_VERSION = "3"
 
 
 def _read_bundled_dockerfile() -> bytes:

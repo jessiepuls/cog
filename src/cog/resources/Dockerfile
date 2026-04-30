@@ -1,7 +1,7 @@
 FROM python:3.12-slim-bookworm
 
 LABEL cog.fat-image="true"
-LABEL cog.image-version="2"
+LABEL cog.image-version="3"
 
 # Core system packages
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -44,3 +44,11 @@ RUN curl -LsSf https://astral.sh/uv/install.sh | sh \
 # Writable HOME for --user $UID:$GID support
 RUN mkdir -p /tmp/cog-home && chmod 1777 /tmp/cog-home
 ENV HOME=/tmp/cog-home
+
+# Pre-mark /work as a safe git directory at the system level so claude doesn't
+# need to run `git config --add safe.directory /work` itself. /etc/gitconfig is
+# container-local; without this, claude's per-repo `git config` write leaks
+# into the host's bind-mounted .git/config and makes /work appear in the host
+# repo's safe.directory list — which then breaks every host-side git/gh call
+# with `fatal: Invalid path '/work': No such file or directory`.
+RUN git config --system --add safe.directory /work
