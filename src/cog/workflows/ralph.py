@@ -304,12 +304,18 @@ class RalphWorkflow(Workflow):
         await ctx.telemetry.write(record)
 
     def _has_stuck_worktree(self, ctx: ExecutionContext, item: Item) -> bool:
-        """True if a dirty/unregistered worktree exists for this item on disk."""
-        if item.item_id in self._stuck_worktree_item_ids:
-            return True
+        """True if a dirty/unregistered worktree exists for this item on disk.
+
+        Re-checks disk each pick so externally resolving the worktree (deleting
+        the dir, finishing a manual cleanup) re-eligibles the item without
+        restarting cog.
+        """
         slug = _slugify(item.title)
         wt_path = ctx.project_dir / ".cog" / "worktrees" / f"{item.item_id}-{slug}"
-        return wt_path.exists()
+        if not wt_path.exists():
+            self._stuck_worktree_item_ids.discard(item.item_id)
+            return False
+        return True
 
     async def iteration_start(self, ctx: ExecutionContext) -> None:
         assert ctx.item is not None, "RalphWorkflow.iteration_start requires ctx.item"
@@ -336,7 +342,9 @@ class RalphWorkflow(Workflow):
             )
             ctx.resumed = False
         elif await git.branch_exists(ctx.project_dir, work_branch):
-            ahead = await git.commits_between(ctx.project_dir, default, work_branch)
+            ahead = await git.commits_between(
+                ctx.project_dir, f"origin/{default}", work_branch
+            )
             if ahead > 0:
                 # (a) local branch with commits — resume it
                 await create_worktree(
