@@ -408,7 +408,15 @@ class RalphWorkflow(Workflow):
         self, wt_path: Path, branch: str, outcome: IterationOutcome
     ) -> _TeardownAction:
         dirty = await is_dirty(wt_path)
-        ahead = await is_ahead_of_origin(wt_path, branch)
+        try:
+            ahead = await is_ahead_of_origin(wt_path, branch)
+        except GitError as e:
+            # Ahead-state is unknown; refuse to guess whether to push.
+            sys.stderr.write(
+                f"warning: could not determine ahead-of-origin for {branch}: {e}; "
+                f"leaving worktree stuck\n"
+            )
+            return _TeardownAction.LEAVE_STUCK
         if outcome is IterationOutcome.success:
             return _TeardownAction.LEAVE_STUCK if dirty else _TeardownAction.REMOVE
         if dirty:

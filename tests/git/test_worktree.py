@@ -338,6 +338,36 @@ def test_scan_orphans_cleans_registered_clean_worktree(temp_git_repo: Path) -> N
     _run(body())
 
 
+def test_scan_orphans_marks_stuck_when_ahead_check_raises(temp_git_repo: Path) -> None:
+    """A propagated GitError from is_ahead_of_origin must mark the worktree stuck,
+    not abort the whole scan or attempt a blind push."""
+    default = _default_branch(temp_git_repo)
+    wt_dir = temp_git_repo / ".cog" / "worktrees"
+    wt_dir.mkdir(parents=True)
+    wt_path = wt_dir / "44-ahead-fails"
+
+    async def body() -> None:
+        await create_worktree(
+            temp_git_repo,
+            wt_path,
+            "cog/44-ahead-fails",
+            start_point=f"origin/{default}",
+            create_branch=True,
+        )
+        with patch(
+            "cog.git.worktree.is_ahead_of_origin",
+            AsyncMock(side_effect=GitError("transient")),
+        ):
+            result = await scan_orphans(temp_git_repo)
+        stuck = [s for s in result.dirty if s.path == wt_path]
+        assert len(stuck) == 1
+        assert "ahead check failed" in stuck[0].reason
+        assert result.pushed == []
+        await discard_worktree(temp_git_repo, wt_path)
+
+    _run(body())
+
+
 def test_scan_orphans_marks_dirty_worktree_as_stuck(temp_git_repo: Path) -> None:
     default = _default_branch(temp_git_repo)
     wt_dir = temp_git_repo / ".cog" / "worktrees"
