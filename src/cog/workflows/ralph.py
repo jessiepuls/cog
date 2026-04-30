@@ -30,7 +30,15 @@ from cog.core.errors import (
 from cog.core.host import GitHost, PrChecks, PullRequest
 from cog.core.item import Item
 from cog.core.outcomes import Outcome, StageResult
-from cog.core.runner import AgentRunner, StatusEvent
+from cog.core.runner import (
+    AgentRunner,
+    AssistantTextEvent,
+    RunEvent,
+    StageEndEvent,
+    StageStartEvent,
+    StatusEvent,
+)
+from cog.core.sinks import RunEventSink
 from cog.core.stage import Stage
 from cog.core.tracker import IssueTracker
 from cog.core.workflow import IterationOutcome, StageExecutor, Workflow
@@ -183,6 +191,49 @@ def _split_final_message(message: str) -> dict[str, str]:
     return sections
 
 
+_HEADING_DEMOTE_RE = re.compile(r"^(#+)(\s)", re.MULTILINE)
+
+
+def _demote_headings(text: str) -> str:
+    return _HEADING_DEMOTE_RE.sub(r"#\1\2", text)
+
+
+class CommentaryCapture:
+    """Wraps a RunEventSink and accumulates per-stage assistant-text turns."""
+
+    def __init__(self, inner: RunEventSink | None) -> None:
+        self._inner = inner
+        self._current_stage: str | None = None
+        self._turns: list[tuple[str, str]] = []  # (stage_name, text)
+
+    async def emit(self, event: RunEvent) -> None:
+        match event:
+            case StageStartEvent(stage_name=name):
+                self._current_stage = name
+            case StageEndEvent():
+                self._current_stage = None
+            case AssistantTextEvent(text=text):
+                if self._current_stage is not None and text.strip():
+                    self._turns.append((self._current_stage, text))
+        if self._inner is not None:
+            await self._inner.emit(event)
+
+    def render(self) -> str:
+        if not self._turns:
+            return ""
+        stages: list[str] = list(dict.fromkeys(stage for stage, _ in self._turns))
+        parts: list[str] = []
+        for stage in stages:
+            stage_turns = [t for s, t in self._turns if s == stage]
+            if not stage_turns:
+                continue
+            parts.append(f"### {stage}")
+            parts.append("")
+            parts.append("\n\n".join(_demote_headings(t) for t in stage_turns))
+            parts.append("")
+        return "\n".join(parts)
+
+
 class RalphWorkflow(Workflow):
     """Autonomous agent workflow."""
 
@@ -208,6 +259,7 @@ class RalphWorkflow(Workflow):
         self._ci_retries: dict[str, int] = {}
         # item_ids with known stuck (dirty/unregistered) worktrees — skipped during pick
         self._stuck_worktree_item_ids: set[str] = set()
+        self._commentary: CommentaryCapture | None = None
 
     async def _apply_orphan_scan(self, project_dir: Path) -> None:
         """Run orphan scan, label stuck items, and populate _stuck_worktree_item_ids."""
@@ -386,6 +438,8 @@ class RalphWorkflow(Workflow):
         ctx.work_branch = work_branch
         ctx.worktree_path = wt_path
         self._stuck_worktree_item_ids.discard(item.item_id)
+        self._commentary = CommentaryCapture(inner=ctx.event_sink)
+        ctx.event_sink = self._commentary
 
     async def _create_fresh_worktree(
         self, ctx: ExecutionContext, wt_path: Path, branch: str, default: str
@@ -426,6 +480,7 @@ class RalphWorkflow(Workflow):
         return _TeardownAction.PUSH_THEN_REMOVE_OR_STUCK if ahead else _TeardownAction.REMOVE
 
     async def iteration_end(self, ctx: ExecutionContext, outcome: IterationOutcome) -> None:
+        self._commentary = None
         wt_path, branch = ctx.worktree_path, ctx.work_branch
         if wt_path is None or not wt_path.exists() or branch is None:
             return
@@ -929,6 +984,12 @@ class RalphWorkflow(Workflow):
                     lines.append("")
             except Exception:
                 pass
+
+        if self._commentary is not None:
+            commentary_text = self._commentary.render()
+            if commentary_text:
+                lines.append("## Iteration commentary\n")
+                lines.append(commentary_text)
 
         lines.append(f"## Outcome\n\n**{outcome}**")
         if error:
