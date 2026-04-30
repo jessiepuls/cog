@@ -9,7 +9,7 @@ import pytest
 
 from cog.core.context import ExecutionContext
 from cog.core.errors import HostError, TrackerError
-from cog.core.host import GitHost, PrChecks, PullRequest
+from cog.core.host import CheckRun, GitHost, PrChecks, PullRequest
 from cog.core.tracker import IssueTracker
 from cog.workflows.ralph import RalphWorkflow
 from tests.fakes import InMemoryStateCache, RecordingEventSink, make_item, make_stage_result
@@ -60,7 +60,11 @@ def _make_host(*, pr: PullRequest | None = None) -> AsyncMock:
     )
     host.update_pr.return_value = None
     host.comment_on_pr.return_value = None
-    host.get_pr_checks.return_value = PrChecks(runs=())
+    # One passed check so _wait_for_ci resolves immediately. Empty runs would
+    # poll forever since the #144 race fix.
+    host.get_pr_checks.return_value = PrChecks(
+        runs=(CheckRun(name="ci", state="passed", link="https://ci.example/ci"),)
+    )
     return host
 
 

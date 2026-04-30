@@ -9,7 +9,7 @@ import pytest
 
 from cog.core.context import ExecutionContext
 from cog.core.errors import HostError, StageError
-from cog.core.host import GitHost, PrChecks, PullRequest
+from cog.core.host import CheckRun, GitHost, PrChecks, PullRequest
 from cog.core.tracker import IssueTracker
 from cog.workflows.ralph import RalphWorkflow, _split_final_message
 from tests.fakes import InMemoryStateCache, RecordingEventSink, make_item, make_stage_result
@@ -57,8 +57,12 @@ def _make_host(*, pr: PullRequest | None = None, push_error: HostError | None = 
     host.create_pr.return_value = _make_pr()
     host.update_pr.return_value = None
     host.comment_on_pr.return_value = None
-    # Default: all checks pass so CI wait resolves immediately
-    host.get_pr_checks.return_value = PrChecks(runs=())
+    # Default: one passed check so CI wait resolves immediately. Empty runs
+    # would now poll forever — _wait_for_ci treats no-runs-yet as "still
+    # waiting for CI to start" since the #144 race fix.
+    host.get_pr_checks.return_value = PrChecks(
+        runs=(CheckRun(name="ci", state="passed", link="https://ci.example/ci"),)
+    )
     return host
 
 
