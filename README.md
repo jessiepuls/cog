@@ -130,7 +130,9 @@ Running `cog` with no args launches a Textual shell with four views:
 Workers persist across view switches — start a ralph run, flip to
 refine mid-work, come back and the log is caught up. A yellow `●` on
 a sidebar row indicates that view needs attention (interview awaiting
-reply, run complete, etc.).
+reply, run complete, etc.). Refine and Ralph rows also show a dim
+right-aligned queue count (items in their respective queues) so you
+can see queue depth without opening the Dashboard.
 
 ## Commands
 
