@@ -163,19 +163,23 @@ async def remote_branch_exists(repo: Path, branch: str) -> bool:
 async def is_ahead_of_origin(path: Path, branch: str) -> bool:
     """True if `branch` has commits not on `origin/<branch>` (or origin lacks it)."""
     repo = _find_repo_root(path)
-    try:
-        count_str = await _run(
-            ["git", "rev-list", "--count", f"origin/{branch}..{branch}"],
-            repo,
-        )
-        return int(count_str) > 0
-    except GitError:
-        # origin/branch doesn't exist — we're ahead by definition
+    if not await remote_branch_exists(repo, branch):
         return True
+    count_str = await _run(
+        ["git", "rev-list", "--count", f"origin/{branch}..{branch}"],
+        repo,
+    )
+    return int(count_str) > 0
 
 
 def _find_repo_root(path: Path) -> Path:
-    """Walk up from path to find the repo root (where .git lives)."""
+    """Walk up from path to find the first directory containing `.git`.
+
+    Inside a worktree, `.git` is a pointer file (not a directory) referencing
+    the gitdir under the main repo's `.git/worktrees/<name>/`. Git resolves
+    refs through that pointer, so this is sufficient as a `cwd` for git
+    commands run against the worktree.
+    """
     current = path if path.is_dir() else path.parent
     while True:
         git_path = current / ".git"
@@ -270,20 +274,33 @@ async def scan_orphans(project_dir: Path) -> OrphanScanResult:
             )
             continue
 
-        if branch and await is_ahead_of_origin(entry, branch):
+        if branch:
             try:
-                await push_with_retry(entry, branch)
-                result.pushed.append((entry, branch))
+                ahead = await is_ahead_of_origin(entry, branch)
             except GitError as e:
                 result.dirty.append(
                     StuckWorktree(
                         path=entry,
                         branch=branch,
                         item_id=item_id,
-                        reason=f"push failed: {e}",
+                        reason=f"ahead check failed: {e}",
                     )
                 )
                 continue
+            if ahead:
+                try:
+                    await push_with_retry(entry, branch)
+                    result.pushed.append((entry, branch))
+                except GitError as e:
+                    result.dirty.append(
+                        StuckWorktree(
+                            path=entry,
+                            branch=branch,
+                            item_id=item_id,
+                            reason=f"push failed: {e}",
+                        )
+                    )
+                    continue
 
         try:
             await remove_worktree(project_dir, entry)

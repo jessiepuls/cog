@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import subprocess
 from pathlib import Path
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -241,6 +242,20 @@ def test_is_ahead_of_origin_true_when_remote_lacks_branch(temp_git_repo: Path) -
     assert _run(body()) is True
 
 
+@pytest.mark.asyncio
+async def test_is_ahead_of_origin_propagates_git_error(tmp_path: Path) -> None:
+    """GitError from rev-list must propagate, not be swallowed as 'ahead'."""
+    with (
+        patch("cog.git.worktree.remote_branch_exists", AsyncMock(return_value=True)),
+        patch(
+            "cog.git.worktree._run",
+            AsyncMock(side_effect=GitError("corrupt object store")),
+        ),
+    ):
+        with pytest.raises(GitError, match="corrupt object store"):
+            await is_ahead_of_origin(tmp_path, "some-branch")
+
+
 # ---------------------------------------------------------------------------
 # push_branch
 # ---------------------------------------------------------------------------
@@ -319,6 +334,36 @@ def test_scan_orphans_cleans_registered_clean_worktree(temp_git_repo: Path) -> N
         result = await scan_orphans(temp_git_repo)
         assert wt_path in result.cleaned
         assert not wt_path.exists()
+
+    _run(body())
+
+
+def test_scan_orphans_marks_stuck_when_ahead_check_raises(temp_git_repo: Path) -> None:
+    """A propagated GitError from is_ahead_of_origin must mark the worktree stuck,
+    not abort the whole scan or attempt a blind push."""
+    default = _default_branch(temp_git_repo)
+    wt_dir = temp_git_repo / ".cog" / "worktrees"
+    wt_dir.mkdir(parents=True)
+    wt_path = wt_dir / "44-ahead-fails"
+
+    async def body() -> None:
+        await create_worktree(
+            temp_git_repo,
+            wt_path,
+            "cog/44-ahead-fails",
+            start_point=f"origin/{default}",
+            create_branch=True,
+        )
+        with patch(
+            "cog.git.worktree.is_ahead_of_origin",
+            AsyncMock(side_effect=GitError("transient")),
+        ):
+            result = await scan_orphans(temp_git_repo)
+        stuck = [s for s in result.dirty if s.path == wt_path]
+        assert len(stuck) == 1
+        assert "ahead check failed" in stuck[0].reason
+        assert result.pushed == []
+        await discard_worktree(temp_git_repo, wt_path)
 
     _run(body())
 

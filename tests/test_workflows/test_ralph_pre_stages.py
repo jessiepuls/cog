@@ -353,3 +353,24 @@ async def test_teardown_action_matrix(
     ):
         result = await wf._teardown_action(tmp_path, "cog/1-t", outcome)
     assert result is expected
+
+
+@pytest.mark.parametrize(
+    "outcome",
+    [IterationOutcome.success, IterationOutcome.noop, IterationOutcome.error],
+)
+async def test_teardown_action_leaves_stuck_when_ahead_check_raises(
+    outcome: IterationOutcome,
+    tmp_path: Path,
+) -> None:
+    """If `is_ahead_of_origin` raises, we don't know whether to push — leave stuck."""
+    wf = _make_workflow()
+    with (
+        patch("cog.workflows.ralph.is_dirty", AsyncMock(return_value=False)),
+        patch(
+            "cog.workflows.ralph.is_ahead_of_origin",
+            AsyncMock(side_effect=GitError("transient failure")),
+        ),
+    ):
+        result = await wf._teardown_action(tmp_path, "cog/1-t", outcome)
+    assert result is _TeardownAction.LEAVE_STUCK
