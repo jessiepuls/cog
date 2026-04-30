@@ -50,9 +50,9 @@ Uses `COG_REFINE_REWRITE_MODEL` (default: `claude-opus-4-7`).
 
 ### 3. Review
 
-`ReviewScreen` (modal in the CLI path, inline pane in the shell TUI)
-shows original vs. proposed body side-by-side. You accept, edit, or
-abandon.
+Original and proposed bodies shown side-by-side in the split pane. The
+chat pane is hidden (but preserved — scrollback survives) while the
+proposed body occupies the right side. You accept, edit, or abandon.
 
 ## Keybindings
 
@@ -63,8 +63,14 @@ abandon.
 | `Enter` | Submit reply (empty is a valid reply) |
 | `Shift+Enter` | Insert newline |
 | `Escape` / `Ctrl+D` | End interview early |
-| `Ctrl+I` | Show / hide the full item body |
 | `Ctrl+C` | Cancel the whole workflow |
+
+### Split pane (running and review)
+
+| Key | Action |
+|-----|--------|
+| `Ctrl+,` | Narrow the issue pane (min 20%) |
+| `Ctrl+.` | Widen the issue pane (max 80%) |
 
 ### Review
 
@@ -72,7 +78,7 @@ abandon.
 |-----|--------|
 | `a` | Accept — apply body + title, swap `needs-refinement` → `agent-ready` |
 | `e` | Open `$EDITOR` on the proposed body; resume on exit |
-| `q` / `Escape` | Abandon — no body change, `needs-refinement` stays |
+| `Shift+Q` | Abandon — no body change, `needs-refinement` stays |
 
 Pressing `e` drops into `$EDITOR` (falls back to `nano`, then `vi`).
 Exiting without saving returns to the review prompt — **not** abandon.
@@ -113,9 +119,12 @@ Within the shell, **Ctrl+2** opens the Refine view:
 - Idle: queue list showing all `needs-refinement` items (team-wide,
   not filtered to `@me`). Each row shows the item title and an
   assignee suffix `(@login)` when assigned. Enter to start.
-- Running: chat pane. Interview streams inline; `Ctrl+I` toggles the
-  issue body pane.
-- Review: original vs. proposed panes; `a / e / shift+q` as above.
+- Running: split pane — issue body + comments (left) / chat (right).
+  Resize with `Ctrl+,` / `Ctrl+.`. Panes stack vertically on narrow
+  terminals (< 100 columns).
+- Review: left pane keeps the original body; right pane switches to the
+  proposed body. A title strip above shows old → new title.
+  `a / e / Shift+Q` as above.
 
 Worker persists across view switches — flip to Ralph (Ctrl+3) or the
 dashboard (Ctrl+1) mid-interview and the chat scrollback + pending
