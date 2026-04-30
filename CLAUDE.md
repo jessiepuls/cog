@@ -42,7 +42,10 @@ src/cog/
 ├── state_paths.py    XDG-compliant state directory resolution
 ├── checks.py         Preflight checks + RALPH_CHECKS / REFINE_CHECKS bundles
 ├── telemetry.py      TelemetryRecord + TelemetryWriter (runs.jsonl)
-└── loop.py           Cross-iteration state primitives
+├── loop.py           Cross-iteration state primitives
+└── git/              Async git subprocess helpers
+    ├── __init__.py   Branch, status, fetch, merge helpers
+    └── worktree.py   git worktree lifecycle (create/remove/prune/scan_orphans)
 ```
 
 Two separate abstractions — don't conflate: **IssueTracker** (reads/writes
