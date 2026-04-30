@@ -216,7 +216,11 @@ class RefineWorkflow(Workflow):
             ),
         )
         await ctx.telemetry.write(record)
-        await self._write_report(ctx, results, transcript, review, outcome="success")
+        rewrite_result = next((r for r in results if r.stage.name == "rewrite"), None)
+        raw = rewrite_result.final_message if rewrite_result is not None else ""
+        await self._write_report(
+            ctx, results, transcript, review, outcome="success", raw_rewrite_output=raw
+        )
         self._cleanup_transcript_file(ctx.project_dir, ctx.item.item_id)
 
     async def finalize_noop(self, ctx: ExecutionContext, results: list[StageResult]) -> None:
@@ -249,7 +253,11 @@ class RefineWorkflow(Workflow):
             await ctx.telemetry.write(record)
 
         if review is not None:
-            await self._write_report(ctx, results, transcript, review, outcome="noop")
+            rewrite_result = next((r for r in results if r.stage.name == "rewrite"), None)
+            raw = rewrite_result.final_message if rewrite_result is not None else ""
+            await self._write_report(
+                ctx, results, transcript, review, outcome="noop", raw_rewrite_output=raw
+            )
         self._cleanup_transcript_file(ctx.project_dir, ctx.item.item_id)
 
     async def finalize_error(
@@ -286,6 +294,7 @@ class RefineWorkflow(Workflow):
         transcript: list[InterviewTurn],
         review: ReviewOutcome,
         outcome: Literal["success", "noop"],
+        raw_rewrite_output: str = "",
     ) -> None:
         assert ctx.item is not None
         ts = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
@@ -319,6 +328,9 @@ class RefineWorkflow(Workflow):
             lines.append("```\n(Abandoned; body unchanged)\n```\n")
         else:
             lines.append(f"```\n{review.final_body}\n```\n")
+
+        lines.append("## Raw rewrite output\n")
+        lines.append(f"````\n{raw_rewrite_output}\n````\n")
 
         lines.append("## Interview transcript\n")
         n = len(transcript)
