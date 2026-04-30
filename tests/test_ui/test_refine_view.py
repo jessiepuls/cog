@@ -182,6 +182,52 @@ async def test_refine_view_review_panes_populated_with_bodies(
         await task
 
 
+async def test_refine_view_chat_pane_instance_preserved_across_review_swap(
+    tmp_path: Path, xdg_state: Path
+) -> None:
+    """Regression: detaching/remounting ChatPaneWidget rebuilds its children
+    (Textual reruns compose() on remount), which clears RichLog scrollback.
+    Hide via display=False instead so the chat instance and its children
+    survive the swap."""
+    from textual.containers import Container
+    from textual.widgets import RichLog
+
+    from cog.ui.widgets.chat_pane import ChatPaneWidget
+
+    tracker = _tracker_with([])
+    async with _RefineApp(tmp_path, tracker).run_test(headless=True) as pilot:
+        await pilot.pause()
+        view = pilot.app.query_one(RefineView)
+
+        right = view.query_one("#refine-right", Container)
+        chat = ChatPaneWidget()
+        view._chat_pane = chat
+        await right.mount(chat)
+        await pilot.pause()
+        view._substate = "running"
+        log_id = id(chat.query_one("#scrollback", RichLog))
+
+        async def _accept_later() -> None:
+            await asyncio.sleep(0.05)
+            view.action_review_accept()
+
+        pilot.app.run_worker(_accept_later())
+        await view.review(
+            original_title="orig",
+            original_body="o",
+            proposed_title="new",
+            proposed_body="p",
+            tmp_dir=tmp_path,
+        )
+        await pilot.pause()
+
+        # Same chat instance still mounted, same RichLog inside
+        children = list(right.children)
+        assert chat in children
+        assert chat.display is True
+        assert id(chat.query_one("#scrollback", RichLog)) == log_id
+
+
 async def test_refine_view_check_action_hides_review_bindings_outside_review(
     tmp_path: Path, xdg_state: Path
 ) -> None:

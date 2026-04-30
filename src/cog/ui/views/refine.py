@@ -326,9 +326,12 @@ class RefineView(Widget, can_focus=True):
             "tmp_dir": tmp_dir,
         }
 
-        # Swap right pane: detach chat, mount proposed body
+        # Hide the chat pane (don't detach it — Textual rebuilds children
+        # on remount, which would clear RichLog scrollback) and mount the
+        # proposed body alongside it.
         right = self.query_one("#refine-right", Container)
-        await right.remove_children()
+        if self._chat_pane is not None:
+            self._chat_pane.display = False
         proposed = Static("", id="review-proposed-body")
         await right.mount(proposed)
         proposed.update(Markdown(str(proposed_body) or "*(empty)*"))
@@ -343,10 +346,13 @@ class RefineView(Widget, can_focus=True):
             outcome = await self._review_future
         finally:
             self._review_future = None
-            # Swap right pane back: proposed body → chat
-            await right.remove_children()
+            # Restore: remove proposed body, unhide chat pane (instance preserved).
+            try:
+                await self.query_one("#review-proposed-body", Static).remove()
+            except Exception:  # noqa: BLE001
+                pass
             if self._chat_pane is not None:
-                await right.mount(self._chat_pane)
+                self._chat_pane.display = True
             self._switch_to("running")
             if self._active_item is not None:
                 self._set_status(self._format_status("Refining", item=self._active_item))
