@@ -391,13 +391,14 @@ class RalphWorkflow(Workflow):
         self, ctx: ExecutionContext, wt_path: Path, branch: str, default: str
     ) -> None:
         await create_worktree(
-            ctx.project_dir, wt_path, branch,
-            start_point=f"origin/{default}", create_branch=True,
+            ctx.project_dir,
+            wt_path,
+            branch,
+            start_point=f"origin/{default}",
+            create_branch=True,
         )
 
-    async def _cleanup_for_restart(
-        self, ctx: ExecutionContext, wt_path: Path, branch: str
-    ) -> None:
+    async def _cleanup_for_restart(self, ctx: ExecutionContext, wt_path: Path, branch: str) -> None:
         if wt_path.exists():
             await discard_worktree(ctx.project_dir, wt_path)
         if await git.branch_exists(ctx.project_dir, branch):
