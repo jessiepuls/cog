@@ -9,6 +9,7 @@ import sys
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
+from enum import Enum
 from importlib.resources import files
 from pathlib import Path
 from typing import ClassVar, Literal
@@ -121,6 +122,21 @@ _SECTION_RE = re.compile(
     r"^###\s+(Summary|Key changes|Test plan)\s*\n(.*?)(?=\n###\s|\Z)",
     re.MULTILINE | re.DOTALL | re.IGNORECASE,
 )
+
+
+class _BranchCase(Enum):
+    RESTART = "restart"
+    RESUME_LOCAL = "resume_local"
+    RECREATE_STALE = "recreate_stale"
+    RESUME_REMOTE = "resume_remote"
+    FRESH_START = "fresh_start"
+
+
+class _TeardownAction(Enum):
+    REMOVE = "remove"
+    PUSH_THEN_REMOVE_OR_STUCK = "push_then_remove"
+    PUSH_BEST_EFFORT_THEN_STUCK = "push_then_stuck"
+    LEAVE_STUCK = "leave_stuck"
 
 
 def _priority_tier(item: Item) -> int:
@@ -317,6 +333,18 @@ class RalphWorkflow(Workflow):
             return False
         return True
 
+    async def _classify_branch(
+        self, ctx: ExecutionContext, branch: str, default: str
+    ) -> _BranchCase:
+        if self._restart:
+            return _BranchCase.RESTART
+        if await git.branch_exists(ctx.project_dir, branch):
+            ahead = await git.commits_between(ctx.project_dir, f"origin/{default}", branch)
+            return _BranchCase.RESUME_LOCAL if ahead > 0 else _BranchCase.RECREATE_STALE
+        if await remote_branch_exists(ctx.project_dir, branch):
+            return _BranchCase.RESUME_REMOTE
+        return _BranchCase.FRESH_START
+
     async def iteration_start(self, ctx: ExecutionContext) -> None:
         assert ctx.item is not None, "RalphWorkflow.iteration_start requires ctx.item"
         item = ctx.item
@@ -327,24 +355,21 @@ class RalphWorkflow(Workflow):
         work_branch = f"cog/{item.item_id}-{slug}"
         wt_path = ctx.project_dir / ".cog" / "worktrees" / f"{item.item_id}-{slug}"
 
-        if self._restart:
-            # Force-remove any existing worktree and local branch
-            if wt_path.exists():
-                await discard_worktree(ctx.project_dir, wt_path)
-            if await git.branch_exists(ctx.project_dir, work_branch):
-                await git.delete_branch(ctx.project_dir, work_branch)
-            await create_worktree(
-                ctx.project_dir,
-                wt_path,
-                work_branch,
-                start_point=f"origin/{default}",
-                create_branch=True,
-            )
-            ctx.resumed = False
-        elif await git.branch_exists(ctx.project_dir, work_branch):
-            ahead = await git.commits_between(ctx.project_dir, f"origin/{default}", work_branch)
-            if ahead > 0:
-                # (a) local branch with commits — resume it
+        case = await self._classify_branch(ctx, work_branch, default)
+        match case:
+            case _BranchCase.RESTART:
+                if wt_path.exists():
+                    await discard_worktree(ctx.project_dir, wt_path)
+                if await git.branch_exists(ctx.project_dir, work_branch):
+                    await git.delete_branch(ctx.project_dir, work_branch)
+                await create_worktree(
+                    ctx.project_dir,
+                    wt_path,
+                    work_branch,
+                    start_point=f"origin/{default}",
+                    create_branch=True,
+                )
+            case _BranchCase.RESUME_LOCAL:
                 await create_worktree(
                     ctx.project_dir,
                     wt_path,
@@ -352,9 +377,7 @@ class RalphWorkflow(Workflow):
                     start_point=work_branch,
                     create_branch=False,
                 )
-                ctx.resumed = True
-            else:
-                # (c) stale empty branch — delete and recreate
+            case _BranchCase.RECREATE_STALE:
                 await git.delete_branch(ctx.project_dir, work_branch)
                 await create_worktree(
                     ctx.project_dir,
@@ -363,67 +386,67 @@ class RalphWorkflow(Workflow):
                     start_point=f"origin/{default}",
                     create_branch=True,
                 )
-                ctx.resumed = False
-        elif await remote_branch_exists(ctx.project_dir, work_branch):
-            # (b) branch on origin only — resume from remote
-            await create_worktree(
-                ctx.project_dir,
-                wt_path,
-                work_branch,
-                start_point=f"origin/{work_branch}",
-                create_branch=True,
-            )
-            ctx.resumed = True
-        else:
-            # (d) fresh start
-            await create_worktree(
-                ctx.project_dir,
-                wt_path,
-                work_branch,
-                start_point=f"origin/{default}",
-                create_branch=True,
-            )
-            ctx.resumed = False
+            case _BranchCase.RESUME_REMOTE:
+                await create_worktree(
+                    ctx.project_dir,
+                    wt_path,
+                    work_branch,
+                    start_point=f"origin/{work_branch}",
+                    create_branch=True,
+                )
+            case _BranchCase.FRESH_START:
+                await create_worktree(
+                    ctx.project_dir,
+                    wt_path,
+                    work_branch,
+                    start_point=f"origin/{default}",
+                    create_branch=True,
+                )
 
+        ctx.resumed = case in (_BranchCase.RESUME_LOCAL, _BranchCase.RESUME_REMOTE)
         ctx.work_branch = work_branch
         ctx.worktree_path = wt_path
-        # Clear stuck-worktree marker now that we have a live worktree
         self._stuck_worktree_item_ids.discard(item.item_id)
 
-    async def iteration_end(self, ctx: ExecutionContext, outcome: IterationOutcome) -> None:
-        wt_path = ctx.worktree_path
-        if wt_path is None or not wt_path.exists():
-            return
-        branch = ctx.work_branch
-        if branch is None:
-            return
-
+    async def _teardown_action(
+        self, wt_path: Path, branch: str, outcome: IterationOutcome
+    ) -> _TeardownAction:
         dirty = await is_dirty(wt_path)
         ahead = await is_ahead_of_origin(wt_path, branch)
+        if outcome is IterationOutcome.success:
+            return _TeardownAction.LEAVE_STUCK if dirty else _TeardownAction.REMOVE
+        if dirty:
+            if ahead and outcome is not IterationOutcome.noop:
+                return _TeardownAction.PUSH_BEST_EFFORT_THEN_STUCK
+            return _TeardownAction.LEAVE_STUCK
+        return _TeardownAction.PUSH_THEN_REMOVE_OR_STUCK if ahead else _TeardownAction.REMOVE
 
-        if outcome == IterationOutcome.success:
-            if dirty:
-                sys.stderr.write(
-                    f"warning: worktree {wt_path} is dirty after success; leaving in place\n"
-                )
-                self._mark_stuck(ctx)
-            else:
+    async def iteration_end(self, ctx: ExecutionContext, outcome: IterationOutcome) -> None:
+        wt_path, branch = ctx.worktree_path, ctx.work_branch
+        if wt_path is None or not wt_path.exists() or branch is None:
+            return
+
+        action = await self._teardown_action(wt_path, branch, outcome)
+        match action:
+            case _TeardownAction.REMOVE:
                 await self._remove_worktree_safe(ctx.project_dir, wt_path)
-        elif outcome in (IterationOutcome.noop, IterationOutcome.error, IterationOutcome.exception):
-            if dirty:
-                if outcome != IterationOutcome.noop:
-                    # Best-effort push any prior commits before giving up
-                    if ahead:
-                        await self._push_worktree_safe(ctx, wt_path, branch)
-                self._mark_stuck(ctx)
-            elif ahead:
-                pushed = await self._push_worktree_safe(ctx, wt_path, branch)
-                if pushed:
+            case _TeardownAction.PUSH_THEN_REMOVE_OR_STUCK:
+                if await self._push_worktree_safe(ctx, wt_path, branch):
                     await self._remove_worktree_safe(ctx.project_dir, wt_path)
                 else:
                     self._mark_stuck(ctx)
-            else:
-                await self._remove_worktree_safe(ctx.project_dir, wt_path)
+            case _TeardownAction.PUSH_BEST_EFFORT_THEN_STUCK:
+                await self._push_worktree_safe(ctx, wt_path, branch)
+                self._mark_stuck(ctx)
+            case _TeardownAction.LEAVE_STUCK:
+                if outcome is IterationOutcome.success:
+                    await self._emit(
+                        ctx,
+                        StatusEvent(
+                            message=f"⚠ worktree {wt_path} is dirty after success; leaving in place"
+                        ),
+                    )
+                self._mark_stuck(ctx)
 
     def _mark_stuck(self, ctx: ExecutionContext) -> None:
         if ctx.item is not None:
