@@ -23,7 +23,9 @@ class _ResultThenRaisingRunner(AgentRunner):
     def __init__(self, cost: float = 0.42) -> None:
         self._cost = cost
 
-    async def stream(self, prompt: str, *, model: str) -> AsyncIterator[RunEvent]:
+    async def stream(
+        self, prompt: str, *, model: str, cwd: Path | None = None
+    ) -> AsyncIterator[RunEvent]:
         yield ResultEvent(
             result=RunResult(
                 final_message="partial",
@@ -97,7 +99,9 @@ class _EmptyQueueWorkflow(_SimpleWorkflow):
 
 
 class _FailRunner(AgentRunner):
-    async def stream(self, prompt: str, *, model: str) -> AsyncIterator[RunEvent]:
+    async def stream(
+        self, prompt: str, *, model: str, cwd: Path | None = None
+    ) -> AsyncIterator[RunEvent]:
         yield ResultEvent(
             result=RunResult(
                 final_message="failed",
@@ -110,7 +114,9 @@ class _FailRunner(AgentRunner):
 
 
 class _RaisingRunner(AgentRunner):
-    async def stream(self, prompt: str, *, model: str) -> AsyncIterator[RunEvent]:
+    async def stream(
+        self, prompt: str, *, model: str, cwd: Path | None = None
+    ) -> AsyncIterator[RunEvent]:
         raise RuntimeError("runner exploded")
         yield  # type: ignore[misc]
 
@@ -304,7 +310,9 @@ async def test_stage_executor_wraps_runner_stalled_in_stage_error(ctx_factory):
     stalled = RunnerStalledError(inactivity_seconds=120, last_event_summary="Bash: echo hi")
 
     class _StalledRunner(AgentRunner):
-        async def stream(self, prompt: str, *, model: str) -> AsyncIterator[RunEvent]:
+        async def stream(
+            self, prompt: str, *, model: str, cwd: Path | None = None
+        ) -> AsyncIterator[RunEvent]:
             raise stalled
             yield  # type: ignore[misc]
 
@@ -319,7 +327,9 @@ async def test_stalled_error_cause_preserved_through_stage_error(ctx_factory):
     original = RunnerStalledError(inactivity_seconds=60, last_event_summary="Read: /tmp/x")
 
     class _StalledRunner(AgentRunner):
-        async def stream(self, prompt: str, *, model: str) -> AsyncIterator[RunEvent]:
+        async def stream(
+            self, prompt: str, *, model: str, cwd: Path | None = None
+        ) -> AsyncIterator[RunEvent]:
             raise original
             yield  # type: ignore[misc]
 
@@ -333,7 +343,9 @@ async def test_stage_executor_stalled_path_has_exit_minus_one_and_error(ctx_fact
     stalled = RunnerStalledError(inactivity_seconds=120)
 
     class _StalledRunner(AgentRunner):
-        async def stream(self, prompt: str, *, model: str) -> AsyncIterator[RunEvent]:
+        async def stream(
+            self, prompt: str, *, model: str, cwd: Path | None = None
+        ) -> AsyncIterator[RunEvent]:
             raise stalled
             yield  # type: ignore[misc]
 

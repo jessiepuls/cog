@@ -9,7 +9,7 @@ import pytest
 
 from cog.core.context import ExecutionContext
 from cog.core.errors import HostError, StageError
-from cog.core.host import GitHost, PrChecks, PullRequest
+from cog.core.host import CheckRun, GitHost, PrChecks, PullRequest
 from cog.core.tracker import IssueTracker
 from cog.workflows.ralph import RalphWorkflow, _split_final_message
 from tests.fakes import InMemoryStateCache, RecordingEventSink, make_item, make_stage_result
@@ -30,6 +30,16 @@ def _clean_rebase(monkeypatch: pytest.MonkeyPatch) -> None:
         return RebaseOutcome(status="clean")
 
     monkeypatch.setattr(RalphWorkflow, "_rebase_before_push", _noop)
+
+
+@pytest.fixture(autouse=True)
+def _clean_iteration_start(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Patch iteration_start to noop so end-to-end tests don't hit real git."""
+
+    async def _noop(self: object, ctx: object) -> None:
+        return
+
+    monkeypatch.setattr(RalphWorkflow, "iteration_start", _noop)
 
 
 # ---------------------------------------------------------------------------
@@ -57,8 +67,12 @@ def _make_host(*, pr: PullRequest | None = None, push_error: HostError | None = 
     host.create_pr.return_value = _make_pr()
     host.update_pr.return_value = None
     host.comment_on_pr.return_value = None
-    # Default: all checks pass so CI wait resolves immediately
-    host.get_pr_checks.return_value = PrChecks(runs=())
+    # Default: one passed check so CI wait resolves immediately. Empty runs
+    # would now poll forever — _wait_for_ci treats no-runs-yet as "still
+    # waiting for CI to start" since the #144 race fix.
+    host.get_pr_checks.return_value = PrChecks(
+        runs=(CheckRun(name="ci", state="passed", link="https://ci.example/ci"),)
+    )
     return host
 
 
@@ -805,7 +819,7 @@ async def test_full_iteration_end_to_end_success(tmp_path: Path) -> None:
 
     wf = RalphWorkflow(runner=EchoRunner(), tracker=tracker, host=host)
 
-    async def _pre(ctx: ExecutionContext) -> None:
+    async def _iteration_start(ctx: ExecutionContext) -> None:
         ctx.work_branch = "cog/42-fix"
 
     def _stages(ctx: ExecutionContext) -> list[Stage]:
@@ -822,7 +836,7 @@ async def test_full_iteration_end_to_end_success(tmp_path: Path) -> None:
     async def _classify(ctx: ExecutionContext, results: list) -> str:
         return "success"
 
-    wf.pre_stages = _pre  # type: ignore[method-assign]
+    wf.iteration_start = _iteration_start  # type: ignore[method-assign]
     wf.stages = _stages  # type: ignore[method-assign]
     wf.classify_outcome = _classify  # type: ignore[method-assign]
 
@@ -861,7 +875,7 @@ async def test_full_iteration_end_to_end_noop(tmp_path: Path) -> None:
 
     wf = RalphWorkflow(runner=EchoRunner(), tracker=tracker, host=host)
 
-    async def _pre(ctx: ExecutionContext) -> None:
+    async def _iteration_start(ctx: ExecutionContext) -> None:
         ctx.work_branch = "cog/42-fix"
 
     def _stages(ctx: ExecutionContext) -> list[Stage]:
@@ -878,7 +892,7 @@ async def test_full_iteration_end_to_end_noop(tmp_path: Path) -> None:
     async def _classify(ctx: ExecutionContext, results: list) -> str:
         return "noop"
 
-    wf.pre_stages = _pre  # type: ignore[method-assign]
+    wf.iteration_start = _iteration_start  # type: ignore[method-assign]
     wf.stages = _stages  # type: ignore[method-assign]
     wf.classify_outcome = _classify  # type: ignore[method-assign]
     wf.write_report = AsyncMock()  # type: ignore[method-assign]

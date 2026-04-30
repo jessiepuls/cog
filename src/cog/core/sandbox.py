@@ -1,4 +1,5 @@
 from collections.abc import Mapping, Sequence
+from pathlib import Path
 from typing import Protocol
 
 
@@ -10,9 +11,12 @@ class Sandbox(Protocol):
         Called before each wrap_* cycle. Implementations may cache internally."""
         ...
 
-    def wrap_argv(self, argv: Sequence[str]) -> list[str]:
+    def wrap_argv(self, argv: Sequence[str], cwd: Path | None = None) -> list[str]:
         """Transform claude's argv into the argv actually passed to create_subprocess_exec.
-        DockerSandbox wraps with docker run args; NullSandbox returns list(argv)."""
+
+        `cwd` is the host-absolute working directory for the subprocess (the active
+        worktree path for ralph stages). DockerSandbox maps it to a container path
+        via `--workdir`; NullSandbox ignores it."""
         ...
 
     def wrap_env(self, env: Mapping[str, str]) -> dict[str, str]:

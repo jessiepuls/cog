@@ -97,7 +97,9 @@ class RecordingEventSink:
 class EchoRunner(AgentRunner):
     """Returns the prompt as the final_message. Zero cost, zero duration."""
 
-    async def stream(self, prompt: str, *, model: str) -> AsyncIterator[RunEvent]:
+    async def stream(
+        self, prompt: str, *, model: str, cwd: Path | None = None
+    ) -> AsyncIterator[RunEvent]:
         yield ResultEvent(
             result=RunResult(
                 final_message=prompt,
@@ -167,7 +169,9 @@ class ScriptedFinalMessageRunner(AgentRunner):
         self._final_message = final_message
         self._cost = cost
 
-    async def stream(self, prompt: str, *, model: str) -> AsyncIterator[RunEvent]:
+    async def stream(
+        self, prompt: str, *, model: str, cwd: Path | None = None
+    ) -> AsyncIterator[RunEvent]:
         yield ResultEvent(
             result=RunResult(
                 final_message=self._final_message,
@@ -185,7 +189,9 @@ class FailingRunner(AgentRunner):
     def __init__(self, exc: Exception | None = None) -> None:
         self._exc = exc or RuntimeError("runner failed")
 
-    async def stream(self, prompt: str, *, model: str) -> AsyncIterator[RunEvent]:
+    async def stream(
+        self, prompt: str, *, model: str, cwd: Path | None = None
+    ) -> AsyncIterator[RunEvent]:
         raise self._exc
         yield  # type: ignore[misc]
 
@@ -196,7 +202,9 @@ class ExitNonZeroRunner(AgentRunner):
     def __init__(self, exit_status: int = 1) -> None:
         self._exit_status = exit_status
 
-    async def stream(self, prompt: str, *, model: str) -> AsyncIterator[RunEvent]:
+    async def stream(
+        self, prompt: str, *, model: str, cwd: Path | None = None
+    ) -> AsyncIterator[RunEvent]:
         yield ResultEvent(
             result=RunResult(
                 final_message="non-zero exit",
@@ -248,7 +256,9 @@ class ScriptedInterviewRunner(AgentRunner):
         self._iter: Iterator[tuple[str, float]] = iter([])
         self._call_count = 0
 
-    async def stream(self, prompt: str, *, model: str) -> AsyncIterator[RunEvent]:
+    async def stream(
+        self, prompt: str, *, model: str, cwd: Path | None = None
+    ) -> AsyncIterator[RunEvent]:
         from cog.core.runner import AssistantTextEvent
 
         message, cost = self._responses[self._call_count % len(self._responses)]
@@ -287,7 +297,9 @@ class ScriptedRewriteRunner(AgentRunner):
         self._response = response
         self._cost = cost_usd
 
-    async def stream(self, prompt: str, *, model: str) -> AsyncIterator[RunEvent]:
+    async def stream(
+        self, prompt: str, *, model: str, cwd: Path | None = None
+    ) -> AsyncIterator[RunEvent]:
         yield ResultEvent(
             result=RunResult(
                 final_message=self._response,

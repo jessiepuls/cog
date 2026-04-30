@@ -55,7 +55,7 @@ def _dummy_result() -> RunResult:
 class _SlowRunner:
     """Runner that blocks until cancelled — used to keep the workflow in 'running' state."""
 
-    def stream(self, prompt: str, *, model: str):  # type: ignore[return]
+    def stream(self, prompt: str, *, model: str, cwd=None):  # type: ignore[return]
         return self._slow_stream()
 
     async def _slow_stream(self):
@@ -177,7 +177,9 @@ async def test_run_screen_completion_panel_shows_per_stage_breakdown(tmp_path: P
     from cog.core.runner import AgentRunner, RunEvent
 
     class _CostRunner(AgentRunner):
-        async def stream(self, prompt: str, *, model: str) -> AsyncIterator[RunEvent]:
+        async def stream(
+            self, prompt: str, *, model: str, cwd: Path | None = None
+        ) -> AsyncIterator[RunEvent]:
             yield ResultEvent(
                 result=RunResult(
                     final_message="done",
@@ -212,7 +214,7 @@ async def test_run_screen_failure_panel_marks_failing_stage_and_shows_prior_stag
                 yield  # generator
 
             class _ErrRunner:
-                def stream(self, prompt, *, model):
+                def stream(self, prompt, *, model, cwd=None):
                     return _err_stream(prompt, model=model)
 
                 async def run(self, prompt, *, model):  # pragma: no cover
@@ -273,7 +275,9 @@ async def test_run_screen_cost_accumulates_from_result_events(tmp_path: Path) ->
     class _CostRunner(AgentRunner):
         """Runner that yields a ResultEvent with non-zero cost."""
 
-        async def stream(self, prompt: str, *, model: str) -> AsyncIterator[RunEvent]:
+        async def stream(
+            self, prompt: str, *, model: str, cwd: Path | None = None
+        ) -> AsyncIterator[RunEvent]:
             yield ResultEvent(
                 result=RunResult(
                     final_message="done",
@@ -345,7 +349,7 @@ async def test_run_screen_shows_error_panel_on_workflow_exception(tmp_path: Path
                 yield  # make it a generator
 
             class _ErrRunner:
-                def stream(self, prompt, *, model):
+                def stream(self, prompt, *, model, cwd=None):
                     return _err_stream(prompt, model=model)
 
                 async def run(self, prompt, *, model):  # pragma: no cover
@@ -509,7 +513,7 @@ async def test_run_screen_loop_mode_stage_error_shows_error_panel_and_exits(
                 yield  # type: ignore[misc]
 
             class _R:
-                def stream(self, prompt, *, model):
+                def stream(self, prompt, *, model, cwd=None):
                     return _err(prompt, model=model)
 
                 async def run(self, prompt, *, model):  # pragma: no cover

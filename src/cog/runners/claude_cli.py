@@ -91,7 +91,9 @@ class ClaudeCliRunner(AgentRunner):
         )
         self._sigterm_grace_seconds = 5.0
 
-    async def stream(self, prompt: str, *, model: str) -> AsyncIterator[RunEvent]:
+    async def stream(
+        self, prompt: str, *, model: str, cwd: Path | None = None
+    ) -> AsyncIterator[RunEvent]:
         await self._sandbox.prepare()
 
         _fd, tmp = tempfile.mkstemp(suffix=".jsonl", prefix="cog-claude-")
@@ -109,7 +111,8 @@ class ClaudeCliRunner(AgentRunner):
                 "--model",
                 model,
                 prompt,
-            ]
+            ],
+            cwd=cwd,
         )
         env = self._sandbox.wrap_env(dict(os.environ))
 

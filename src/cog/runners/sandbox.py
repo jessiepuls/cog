@@ -1,4 +1,5 @@
 from collections.abc import Mapping, Sequence
+from pathlib import Path
 
 
 class NullSandbox:
@@ -7,7 +8,7 @@ class NullSandbox:
     async def prepare(self) -> None:
         return
 
-    def wrap_argv(self, argv: Sequence[str]) -> list[str]:
+    def wrap_argv(self, argv: Sequence[str], cwd: Path | None = None) -> list[str]:
         return list(argv)
 
     def wrap_env(self, env: Mapping[str, str]) -> dict[str, str]:

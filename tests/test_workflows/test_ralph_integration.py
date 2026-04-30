@@ -73,10 +73,10 @@ async def test_runs_all_three_stages_end_to_end(tmp_path):
 
     # Short-circuit pre_stages; this test isolates stage-sequence behavior
     # from git-setup concerns (which are covered by test_end_to_end_with_real_git).
-    async def _noop_pre_stages(ctx):
+    async def _noop_iteration_start(ctx):
         return
 
-    wf.pre_stages = _noop_pre_stages  # type: ignore[method-assign]
+    wf.iteration_start = _noop_iteration_start  # type: ignore[method-assign]
 
     ctx = ExecutionContext(
         project_dir=tmp_path,
@@ -105,13 +105,15 @@ async def test_end_to_end_with_real_git(git_env: Path) -> None:
         created_at=datetime(2024, 1, 1, tzinfo=UTC),
     )
 
-    from cog.core.host import PrChecks
+    from cog.core.host import CheckRun, PrChecks
 
     tracker_mock = AsyncMock(spec=IssueTracker)
     tracker_mock.list_by_label = AsyncMock(return_value=[item])
     tracker_mock.get = AsyncMock(return_value=item)
     host_mock = AsyncMock(spec=GitHost)
-    host_mock.get_pr_checks.return_value = PrChecks(runs=())
+    host_mock.get_pr_checks.return_value = PrChecks(
+        runs=(CheckRun(name="ci", state="passed", link="https://ci.example/ci"),)
+    )
 
     wf = RalphWorkflow(runner=EchoRunner(), tracker=tracker_mock, host=host_mock)
 
@@ -172,6 +174,7 @@ def _make_pr(number: int = 1, url: str = "https://github.com/org/repo/pull/1") -
 
 async def test_finalize_success_pr_body_with_structured_final_message(tmp_path: Path) -> None:
     """ScriptedFinalMessageRunner emitting structured output → all three sections in PR body."""
+    from cog.core.host import CheckRun as _CheckRun
     from cog.core.host import PrChecks as _PrChecks
 
     final_message = (_FIXTURE_DIR / "final_message_structured.md").read_text()
@@ -180,7 +183,9 @@ async def test_finalize_success_pr_body_with_structured_final_message(tmp_path: 
     host = AsyncMock(spec=GitHost)
     host.push_branch.return_value = None
     host.get_pr_for_branch.return_value = None
-    host.get_pr_checks.return_value = _PrChecks(runs=())
+    host.get_pr_checks.return_value = _PrChecks(
+        runs=(_CheckRun(name="ci", state="passed", link="https://ci.example/ci"),)
+    )
     pr = _make_pr()
     host.create_pr.return_value = pr
 
@@ -190,10 +195,10 @@ async def test_finalize_success_pr_body_with_structured_final_message(tmp_path: 
         host=host,
     )
 
-    async def _noop_pre_stages(ctx: ExecutionContext) -> None:
+    async def _noop_iteration_start(ctx: ExecutionContext) -> None:
         return
 
-    wf.pre_stages = _noop_pre_stages  # type: ignore[method-assign]
+    wf.iteration_start = _noop_iteration_start  # type: ignore[method-assign]
 
     ctx = ExecutionContext(
         project_dir=tmp_path,
@@ -220,6 +225,7 @@ async def test_finalize_success_pr_body_with_structured_final_message(tmp_path: 
 
 async def test_finalize_success_pr_body_with_unstructured_final_message(tmp_path: Path) -> None:
     """Terse final message → Summary = full message, no Key changes, test-plan fallback."""
+    from cog.core.host import CheckRun as _CheckRun
     from cog.core.host import PrChecks as _PrChecks
 
     final_message = (_FIXTURE_DIR / "final_message_terse.md").read_text().strip()
@@ -228,7 +234,9 @@ async def test_finalize_success_pr_body_with_unstructured_final_message(tmp_path
     host = AsyncMock(spec=GitHost)
     host.push_branch.return_value = None
     host.get_pr_for_branch.return_value = None
-    host.get_pr_checks.return_value = _PrChecks(runs=())
+    host.get_pr_checks.return_value = _PrChecks(
+        runs=(_CheckRun(name="ci", state="passed", link="https://ci.example/ci"),)
+    )
     host.create_pr.return_value = _make_pr()
 
     wf = RalphWorkflow(
@@ -237,10 +245,10 @@ async def test_finalize_success_pr_body_with_unstructured_final_message(tmp_path
         host=host,
     )
 
-    async def _noop_pre_stages(ctx: ExecutionContext) -> None:
+    async def _noop_iteration_start(ctx: ExecutionContext) -> None:
         return
 
-    wf.pre_stages = _noop_pre_stages  # type: ignore[method-assign]
+    wf.iteration_start = _noop_iteration_start  # type: ignore[method-assign]
 
     ctx = ExecutionContext(
         project_dir=tmp_path,

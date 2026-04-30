@@ -118,10 +118,19 @@ async def log_short_shas(project_dir: Path, revision_range: str) -> list[str]:
 async def rebase_in_progress(project_dir: Path) -> bool:
     """True if a git rebase is currently paused (conflict or interactive).
 
-    Checks for .git/rebase-merge/ or .git/rebase-apply/ — git's canonical
-    mid-rebase markers.
+    Works for both main checkouts (.git is a directory) and worktrees (.git
+    is a gitdir file pointing to the real git directory).
     """
-    git_dir = project_dir / ".git"
+    git_path = project_dir / ".git"
+    if git_path.is_file():
+        # worktree: .git is a file like "gitdir: <abs-path>"
+        content = git_path.read_text().strip()
+        if content.startswith("gitdir: "):
+            git_dir = Path(content.removeprefix("gitdir: "))
+        else:
+            return False
+    else:
+        git_dir = git_path
     return (git_dir / "rebase-merge").is_dir() or (git_dir / "rebase-apply").is_dir()
 
 

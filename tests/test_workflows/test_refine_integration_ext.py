@@ -47,7 +47,7 @@ def _make_wf(
             self._call_count = 0
             self._total_interview_calls = len(interview_responses)
 
-        async def stream(self, prompt, *, model):
+        async def stream(self, prompt, *, model, cwd=None):
             # First N calls are interview turns; next is rewrite
             if self._call_count < self._total_interview_calls:
                 runner = self._interview

@@ -74,9 +74,10 @@ async def ensure_credentials(force: bool = False) -> str:
 
 
 class DockerSandbox:
-    def __init__(self, image: str = "cog:latest") -> None:
+    def __init__(self, image: str = "cog:latest", project_dir: Path | None = None) -> None:
         self._image = image
         self._built = False
+        self._project_dir = project_dir
 
     async def prepare(self) -> None:
         state_dir = Path.home() / ".local" / "state" / "cog"
@@ -94,7 +95,8 @@ class DockerSandbox:
         elif result == "keychain_missing":
             print("warning: Claude Code credentials not found in keychain", file=sys.stderr)
 
-    def wrap_argv(self, argv: Sequence[str]) -> list[str]:
+    def wrap_argv(self, argv: Sequence[str], cwd: Path | None = None) -> list[str]:
+        workdir = self._container_workdir(cwd)
         return [
             "docker",
             "run",
@@ -106,10 +108,19 @@ class DockerSandbox:
             *self._mount_args(),
             *self._passthrough_env_args(),
             "-w",
-            "/work",
+            workdir,
             self._image,
             *argv,
         ]
+
+    def _container_workdir(self, cwd: Path | None) -> str:
+        if cwd is None:
+            return "/work"
+        project_dir = self._project_dir or Path.cwd()
+        try:
+            return str(Path("/work") / cwd.relative_to(project_dir))
+        except ValueError:
+            return "/work"
 
     def wrap_env(self, env: Mapping[str, str]) -> dict[str, str]:
         return {k: env[k] for k in ("PATH", "HOME", "USER") if k in env}
@@ -192,8 +203,8 @@ class DockerSandbox:
 
     def _mount_args(self) -> list[str]:
         home = Path.home()
-        cwd = Path.cwd()
-        # cwd is always present; other paths mounted only when they exist on the host
+        project_dir = self._project_dir or Path.cwd()
+        # project_dir is always mounted; other paths mounted only when they exist on the host
         conditional = [
             (home / ".claude", "/tmp/cog-home/.claude", "rw"),
             (home / ".claude.json", "/tmp/cog-home/.claude.json", "rw"),
@@ -201,7 +212,7 @@ class DockerSandbox:
             (home / ".gitconfig", "/tmp/cog-home/.gitconfig", "ro"),
             (home / ".local" / "state" / "cog", "/tmp/cog-home/.local/state/cog", "rw"),
         ]
-        args = ["-v", f"{cwd}:/work:rw"]
+        args = ["-v", f"{project_dir}:/work:rw"]
         for host, container, mode in conditional:
             if host.exists():
                 args.extend(["-v", f"{host}:{container}:{mode}"])

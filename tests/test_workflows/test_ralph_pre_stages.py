@@ -1,4 +1,6 @@
-"""Tests for RalphWorkflow.pre_stages."""
+"""Tests for RalphWorkflow.iteration_start (was pre_stages)."""
+
+from __future__ import annotations
 
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
@@ -12,8 +14,8 @@ from cog.workflows.ralph import RalphWorkflow
 from tests.fakes import InMemoryStateCache, make_item
 
 
-def _make_workflow() -> RalphWorkflow:
-    return RalphWorkflow(runner=AsyncMock(), tracker=AsyncMock(spec=IssueTracker))
+def _make_workflow(*, restart: bool = False) -> RalphWorkflow:
+    return RalphWorkflow(runner=AsyncMock(), tracker=AsyncMock(spec=IssueTracker), restart=restart)
 
 
 def _make_ctx(item=None) -> ExecutionContext:
@@ -27,144 +29,228 @@ def _make_ctx(item=None) -> ExecutionContext:
     return ctx
 
 
-async def test_pre_stages_git_operations_in_order() -> None:
+def _worktree_patches(
+    *,
+    default_branch: str = "main",
+    branch_exists: bool = False,
+    commits_between: int = 0,
+    remote_exists: bool = False,
+):
+    """Build a context manager that patches all worktree-related functions."""
+    from unittest.mock import patch as _patch
+
+    class _PatchGroup:
+        def __init__(self):
+            self._patches = [
+                _patch(
+                    "cog.workflows.ralph.git.default_branch", AsyncMock(return_value=default_branch)
+                ),
+                _patch("cog.workflows.ralph.git.fetch_origin", AsyncMock()),
+                _patch(
+                    "cog.workflows.ralph.git.branch_exists", AsyncMock(return_value=branch_exists)
+                ),
+                _patch(
+                    "cog.workflows.ralph.git.commits_between",
+                    AsyncMock(return_value=commits_between),
+                ),
+                _patch("cog.workflows.ralph.git.delete_branch", AsyncMock()),
+                _patch("cog.workflows.ralph.create_worktree", AsyncMock()),
+                _patch(
+                    "cog.workflows.ralph.remote_branch_exists",
+                    AsyncMock(return_value=remote_exists),
+                ),
+                _patch("cog.workflows.ralph.discard_worktree", AsyncMock()),
+            ]
+            self._started: list = []
+
+        def __enter__(self):
+            mocks = {}
+            for p in self._patches:
+                m = p.start()
+                mocks[p.attribute] = m
+            self._started = self._patches
+            return mocks
+
+        def __exit__(self, *args):
+            for p in self._started:
+                p.stop()
+
+    return _PatchGroup()
+
+
+# ---------------------------------------------------------------------------
+# iteration_start: fresh start (no existing branch)
+# ---------------------------------------------------------------------------
+
+
+async def test_iteration_start_creates_worktree_for_new_branch() -> None:
     item = make_item(item_id="42", title="Fix the bug")
     ctx = _make_ctx(item)
     wf = _make_workflow()
-    call_order: list[str] = []
-
-    async def _default_branch(project_dir):
-        call_order.append("default_branch")
-        return "main"
-
-    async def _checkout(project_dir, branch):
-        call_order.append(f"checkout:{branch}")
-
-    async def _fetch(project_dir):
-        call_order.append("fetch")
-
-    async def _merge(project_dir, ref):
-        call_order.append(f"merge:{ref}")
-
-    async def _create(project_dir, name, start_point="HEAD"):
-        call_order.append(f"create:{name}")
+    create_mock = AsyncMock()
 
     with (
-        patch("cog.workflows.ralph.git.default_branch", new=_default_branch),
-        patch("cog.workflows.ralph.git.checkout_branch", new=_checkout),
-        patch("cog.workflows.ralph.git.fetch_origin", new=_fetch),
-        patch("cog.workflows.ralph.git.merge_ff_only", new=_merge),
+        patch("cog.workflows.ralph.git.default_branch", AsyncMock(return_value="main")),
+        patch("cog.workflows.ralph.git.fetch_origin", AsyncMock()),
         patch("cog.workflows.ralph.git.branch_exists", AsyncMock(return_value=False)),
-        patch("cog.workflows.ralph.git.create_branch", new=_create),
+        patch("cog.workflows.ralph.remote_branch_exists", AsyncMock(return_value=False)),
+        patch("cog.workflows.ralph.create_worktree", create_mock),
+        patch("cog.workflows.ralph.discard_worktree", AsyncMock()),
     ):
-        await wf.pre_stages(ctx)
+        await wf.iteration_start(ctx)
 
-    assert call_order == [
-        "default_branch",
-        "checkout:main",
-        "fetch",
-        "merge:origin/main",
-        "create:cog/42-fix-the-bug",
-    ]
+    create_mock.assert_awaited_once()
+    call_kwargs = create_mock.call_args
+    assert call_kwargs.kwargs["create_branch"] is True
+    assert call_kwargs.kwargs["start_point"] == "origin/main"
+    assert ctx.work_branch == "cog/42-fix-the-bug"
+    assert ctx.resumed is False
 
 
-async def test_pre_stages_sets_ctx_work_branch() -> None:
+async def test_iteration_start_sets_worktree_path() -> None:
     item = make_item(item_id="7", title="Add feature")
     ctx = _make_ctx(item)
     wf = _make_workflow()
 
     with (
         patch("cog.workflows.ralph.git.default_branch", AsyncMock(return_value="main")),
-        patch("cog.workflows.ralph.git.checkout_branch", AsyncMock()),
         patch("cog.workflows.ralph.git.fetch_origin", AsyncMock()),
-        patch("cog.workflows.ralph.git.merge_ff_only", AsyncMock()),
         patch("cog.workflows.ralph.git.branch_exists", AsyncMock(return_value=False)),
-        patch("cog.workflows.ralph.git.create_branch", AsyncMock()),
+        patch("cog.workflows.ralph.remote_branch_exists", AsyncMock(return_value=False)),
+        patch("cog.workflows.ralph.create_worktree", AsyncMock()),
+        patch("cog.workflows.ralph.discard_worktree", AsyncMock()),
     ):
-        await wf.pre_stages(ctx)
+        await wf.iteration_start(ctx)
 
-    assert ctx.work_branch == "cog/7-add-feature"
+    expected_wt = Path("/fake/project") / ".cog" / "worktrees" / "7-add-feature"
+    assert ctx.worktree_path == expected_wt
 
 
-async def test_pre_stages_branch_name_format() -> None:
-    item = make_item(item_id="99", title="Update deps")
+# ---------------------------------------------------------------------------
+# iteration_start: resume cases
+# ---------------------------------------------------------------------------
+
+
+async def test_iteration_start_resumes_local_branch_with_commits() -> None:
+    item = make_item(item_id="42", title="Fix the bug")
     ctx = _make_ctx(item)
     wf = _make_workflow()
+    create_mock = AsyncMock()
 
     with (
         patch("cog.workflows.ralph.git.default_branch", AsyncMock(return_value="main")),
-        patch("cog.workflows.ralph.git.checkout_branch", AsyncMock()),
         patch("cog.workflows.ralph.git.fetch_origin", AsyncMock()),
-        patch("cog.workflows.ralph.git.merge_ff_only", AsyncMock()),
-        patch("cog.workflows.ralph.git.branch_exists", AsyncMock(return_value=False)),
-        patch("cog.workflows.ralph.git.create_branch", AsyncMock()) as mock_create,
+        patch("cog.workflows.ralph.git.branch_exists", AsyncMock(return_value=True)),
+        patch("cog.workflows.ralph.git.commits_between", AsyncMock(return_value=3)),
+        patch("cog.workflows.ralph.create_worktree", create_mock),
+        patch("cog.workflows.ralph.discard_worktree", AsyncMock()),
+        patch("cog.workflows.ralph.remote_branch_exists", AsyncMock(return_value=False)),
     ):
-        await wf.pre_stages(ctx)
-        name_arg = mock_create.call_args[0][1]
+        await wf.iteration_start(ctx)
 
-    assert name_arg.startswith("cog/99-")
-    assert name_arg == "cog/99-update-deps"
+    # Should use create_branch=False to attach to existing branch
+    call_kwargs = create_mock.call_args
+    assert call_kwargs.kwargs["create_branch"] is False
+    assert ctx.resumed is True
 
 
-async def test_pre_stages_propagates_git_error_from_fetch() -> None:
+async def test_iteration_start_deletes_stale_branch_and_creates_fresh() -> None:
+    item = make_item(item_id="42", title="Fix the bug")
+    ctx = _make_ctx(item)
+    wf = _make_workflow()
+    delete_mock = AsyncMock()
+    create_mock = AsyncMock()
+
+    with (
+        patch("cog.workflows.ralph.git.default_branch", AsyncMock(return_value="main")),
+        patch("cog.workflows.ralph.git.fetch_origin", AsyncMock()),
+        patch("cog.workflows.ralph.git.branch_exists", AsyncMock(return_value=True)),
+        patch("cog.workflows.ralph.git.commits_between", AsyncMock(return_value=0)),
+        patch("cog.workflows.ralph.git.delete_branch", delete_mock),
+        patch("cog.workflows.ralph.create_worktree", create_mock),
+        patch("cog.workflows.ralph.discard_worktree", AsyncMock()),
+        patch("cog.workflows.ralph.remote_branch_exists", AsyncMock(return_value=False)),
+    ):
+        await wf.iteration_start(ctx)
+
+    delete_mock.assert_awaited_once()
+    assert create_mock.call_args.kwargs["create_branch"] is True
+    assert ctx.resumed is False
+
+
+async def test_iteration_start_resumes_from_origin_when_no_local_branch() -> None:
+    item = make_item(item_id="42", title="Fix the bug")
+    ctx = _make_ctx(item)
+    wf = _make_workflow()
+    create_mock = AsyncMock()
+
+    with (
+        patch("cog.workflows.ralph.git.default_branch", AsyncMock(return_value="main")),
+        patch("cog.workflows.ralph.git.fetch_origin", AsyncMock()),
+        patch("cog.workflows.ralph.git.branch_exists", AsyncMock(return_value=False)),
+        patch("cog.workflows.ralph.remote_branch_exists", AsyncMock(return_value=True)),
+        patch("cog.workflows.ralph.create_worktree", create_mock),
+        patch("cog.workflows.ralph.discard_worktree", AsyncMock()),
+    ):
+        await wf.iteration_start(ctx)
+
+    call_kwargs = create_mock.call_args
+    assert "origin/cog/42-fix-the-bug" in call_kwargs.kwargs["start_point"]
+    assert ctx.resumed is True
+
+
+# ---------------------------------------------------------------------------
+# iteration_start: restart flag
+# ---------------------------------------------------------------------------
+
+
+async def test_iteration_start_restart_force_cleans_and_creates_fresh() -> None:
+    item = make_item(item_id="42", title="Fix the bug")
+    ctx = _make_ctx(item)
+    wf = _make_workflow(restart=True)
+    discard_mock = AsyncMock()
+    delete_mock = AsyncMock()
+    create_mock = AsyncMock()
+
+    with (
+        patch("cog.workflows.ralph.git.default_branch", AsyncMock(return_value="main")),
+        patch("cog.workflows.ralph.git.fetch_origin", AsyncMock()),
+        patch("cog.workflows.ralph.git.branch_exists", AsyncMock(return_value=True)),
+        patch("cog.workflows.ralph.git.delete_branch", delete_mock),
+        patch("cog.workflows.ralph.create_worktree", create_mock),
+        patch("cog.workflows.ralph.discard_worktree", discard_mock),
+        patch("pathlib.Path.exists", return_value=True),
+    ):
+        await wf.iteration_start(ctx)
+
+    delete_mock.assert_awaited_once()
+    assert create_mock.call_args.kwargs["create_branch"] is True
+    assert ctx.resumed is False
+
+
+async def test_iteration_start_asserts_item_is_set() -> None:
+    ctx = _make_ctx(item=None)
+    wf = _make_workflow()
+    with pytest.raises(AssertionError, match="requires ctx.item"):
+        await wf.iteration_start(ctx)
+
+
+# ---------------------------------------------------------------------------
+# iteration_start: propagates git errors
+# ---------------------------------------------------------------------------
+
+
+async def test_iteration_start_propagates_git_error_from_fetch() -> None:
     item = make_item(item_id="1", title="t")
     ctx = _make_ctx(item)
     wf = _make_workflow()
 
     with (
         patch("cog.workflows.ralph.git.default_branch", AsyncMock(return_value="main")),
-        patch("cog.workflows.ralph.git.checkout_branch", AsyncMock()),
         patch(
             "cog.workflows.ralph.git.fetch_origin",
             AsyncMock(side_effect=GitError("fetch failed")),
         ),
-        patch("cog.workflows.ralph.git.merge_ff_only", AsyncMock()),
-        patch("cog.workflows.ralph.git.branch_exists", AsyncMock(return_value=False)),
-        patch("cog.workflows.ralph.git.create_branch", AsyncMock()),
     ):
         with pytest.raises(GitError, match="fetch failed"):
-            await wf.pre_stages(ctx)
-
-
-async def test_pre_stages_propagates_git_error_from_merge() -> None:
-    item = make_item(item_id="1", title="t")
-    ctx = _make_ctx(item)
-    wf = _make_workflow()
-
-    with (
-        patch("cog.workflows.ralph.git.default_branch", AsyncMock(return_value="main")),
-        patch("cog.workflows.ralph.git.checkout_branch", AsyncMock()),
-        patch("cog.workflows.ralph.git.fetch_origin", AsyncMock()),
-        patch("cog.workflows.ralph.git.merge_ff_only", AsyncMock(side_effect=GitError("not ff"))),
-        patch("cog.workflows.ralph.git.branch_exists", AsyncMock(return_value=False)),
-        patch("cog.workflows.ralph.git.create_branch", AsyncMock()),
-    ):
-        with pytest.raises(GitError, match="not ff"):
-            await wf.pre_stages(ctx)
-
-
-async def test_pre_stages_propagates_git_error_from_create_branch() -> None:
-    item = make_item(item_id="1", title="t")
-    ctx = _make_ctx(item)
-    wf = _make_workflow()
-
-    with (
-        patch("cog.workflows.ralph.git.default_branch", AsyncMock(return_value="main")),
-        patch("cog.workflows.ralph.git.checkout_branch", AsyncMock()),
-        patch("cog.workflows.ralph.git.fetch_origin", AsyncMock()),
-        patch("cog.workflows.ralph.git.merge_ff_only", AsyncMock()),
-        patch("cog.workflows.ralph.git.branch_exists", AsyncMock(return_value=False)),
-        patch(
-            "cog.workflows.ralph.git.create_branch",
-            AsyncMock(side_effect=GitError("branch already exists")),
-        ),
-    ):
-        with pytest.raises(GitError, match="branch already exists"):
-            await wf.pre_stages(ctx)
-
-
-async def test_pre_stages_asserts_item_is_set() -> None:
-    ctx = _make_ctx(item=None)
-    wf = _make_workflow()
-    with pytest.raises(AssertionError, match="requires ctx.item"):
-        await wf.pre_stages(ctx)
+            await wf.iteration_start(ctx)
