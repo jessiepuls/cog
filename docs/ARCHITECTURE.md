@@ -162,7 +162,7 @@ directory name with non-alphanumerics replaced by `-`.
 |------|----------|
 | `state.json` | Processed / deferred item tracking. Processed entries are revived if the issue is edited after the record (`updated_at > ts`). |
 | `runs.jsonl` | One JSON line per workflow run — telemetry record. Append-only with fcntl locking. |
-| `reports/<ts>-<workflow>-<item-slug>.md` | Human-readable run report. Refine reports include the original body, proposed body, full interview transcript, and per-stage cost table. |
+| `reports/<ts>-<workflow>-<item-slug>.md` | Human-readable run report. Ralph reports include per-stage cost, iteration commentary (captured assistant-text turns, grouped by stage), and the final outcome. Refine reports include the original body, proposed body, full interview transcript, and per-stage cost table. |
 
 Ralph also writes worktrees inside the **project directory** (not the state dir):
 
