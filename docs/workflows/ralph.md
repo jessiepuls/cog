@@ -13,8 +13,8 @@ hands off (or retries fixes) based on the result.
 flowchart TD
     Select[Select next agent-ready item] --> Blockers{Open blockers?}
     Blockers -->|yes| Defer[Defer — outcome: deferred-by-blocker]
-    Blockers -->|no| Prep[Fetch origin, checkout default,<br/>merge --ff-only]
-    Prep --> Branch[Create worktree at<br/>.cog/worktrees/N-slug/<br/>on cog/N-slug branch]
+    Blockers -->|no| Prep[Fetch origin]
+    Prep --> Branch[Create worktree at<br/>.cog/worktrees/N-slug/<br/>on cog/N-slug branch from origin/default]
     Branch --> Stages[Stages:<br/>build → review → document]
     Stages --> Commits{Commits<br/>created?}
     Commits -->|no| Noop[Outcome: no-op<br/>add agent-abandoned]

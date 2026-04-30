@@ -233,12 +233,11 @@ class RunScreen(Screen):
                 )
                 try:
                     results = await StageExecutor().run(self._workflow, ctx)
-                except Exception as exc:
+                except BaseException as exc:
                     it_outcome = (
-                        IterationOutcome.error
-                        if isinstance(exc, Exception)
-                        and not isinstance(exc, asyncio.CancelledError)
-                        else IterationOutcome.exception
+                        IterationOutcome.exception
+                        if isinstance(exc, asyncio.CancelledError)
+                        else IterationOutcome.error
                     )
                     await self._workflow.iteration_end(ctx, it_outcome)
                     raise
