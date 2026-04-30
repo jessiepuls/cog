@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import AsyncMock
 
@@ -9,8 +10,9 @@ from textual.app import App
 from textual.widget import Widget
 from textual.widgets import ListView
 
+from cog.core.item import Item
 from cog.core.tracker import IssueTracker
-from cog.ui.messages import ViewAttention
+from cog.ui.messages import QueueCountsStale, ViewAttention
 from cog.ui.screens.shell import CogShellScreen, Sidebar
 from cog.ui.views.dashboard import DashboardView
 from cog.ui.views.ralph import RalphView
@@ -23,13 +25,42 @@ def _fake_tracker() -> IssueTracker:
     return t  # type: ignore[return-value]
 
 
+def _make_items(count: int) -> list[Item]:
+    return [
+        Item(
+            tracker_id="gh",
+            item_id=str(i),
+            title=f"item {i}",
+            body="",
+            labels=(),
+            comments=(),
+            state="open",
+            created_at=datetime(2026, 1, 1, tzinfo=UTC),
+            updated_at=datetime(2026, 1, 1, tzinfo=UTC),
+            url="",
+        )
+        for i in range(count)
+    ]
+
+
+def _tracker_with_counts(**label_counts: int) -> IssueTracker:
+    t = AsyncMock(spec=IssueTracker)
+
+    async def list_by_label(label: str, *, assignee: str | None = None) -> list[Item]:
+        return _make_items(label_counts.get(label, 0))
+
+    t.list_by_label = AsyncMock(side_effect=list_by_label)
+    return t  # type: ignore[return-value]
+
+
 class _ShellApp(App):
-    def __init__(self, project_dir: Path) -> None:
+    def __init__(self, project_dir: Path, tracker: IssueTracker | None = None) -> None:
         super().__init__()
         self._project_dir = project_dir
+        self._tracker = tracker or _fake_tracker()
 
     def on_mount(self) -> None:
-        self.push_screen(CogShellScreen(self._project_dir, _fake_tracker()))
+        self.push_screen(CogShellScreen(self._project_dir, self._tracker))
 
 
 async def test_shell_mounts_all_views_on_startup(tmp_path: Path) -> None:
@@ -337,3 +368,117 @@ async def test_sidebar_label_shows_dot_marker_when_attention_set(tmp_path: Path)
         ralph_row = sidebar.query_one("#nav-ralph")
         label = ralph_row.query_one("Label")
         assert "●" in str(label.renderable)
+
+
+# ---------------------------------------------------------------------------
+# Queue counts in sidebar (#157)
+# ---------------------------------------------------------------------------
+
+
+async def test_shell_refresh_queue_counts_populates_reactive(tmp_path: Path) -> None:
+    tracker = _tracker_with_counts(**{"agent-ready": 3, "needs-refinement": 7})
+    async with _ShellApp(tmp_path, tracker).run_test(headless=True) as pilot:
+        # Wait for the on_mount worker to finish.
+        for _ in range(5):
+            await pilot.pause()
+        screen = pilot.app.screen
+        assert isinstance(screen, CogShellScreen)
+        assert screen.queue_counts.get("ralph") == 3
+        assert screen.queue_counts.get("refine") == 7
+
+
+async def test_shell_refresh_queue_counts_sets_none_on_error(tmp_path: Path) -> None:
+    from cog.core.errors import TrackerError
+
+    t: IssueTracker = AsyncMock(spec=IssueTracker)
+
+    async def list_by_label(label: str, *, assignee: str | None = None) -> list[Item]:
+        if label == "agent-ready":
+            raise TrackerError("boom")
+        return _make_items(0)
+
+    t.list_by_label = AsyncMock(side_effect=list_by_label)  # type: ignore[attr-defined]
+
+    async with _ShellApp(tmp_path, t).run_test(headless=True) as pilot:
+        for _ in range(5):
+            await pilot.pause()
+        screen = pilot.app.screen
+        assert isinstance(screen, CogShellScreen)
+        assert screen.queue_counts.get("ralph") is None
+        assert screen.queue_counts.get("refine") == 0
+
+
+async def test_shell_queue_counts_stale_triggers_refresh(tmp_path: Path) -> None:
+    tracker = _tracker_with_counts(**{"agent-ready": 5})
+    async with _ShellApp(tmp_path, tracker).run_test(headless=True) as pilot:
+        for _ in range(5):
+            await pilot.pause()
+        screen = pilot.app.screen
+        assert isinstance(screen, CogShellScreen)
+        # Override tracker to return a new count.
+        tracker.list_by_label = AsyncMock(  # type: ignore[attr-defined]
+            side_effect=lambda label, *, assignee=None: _make_items(
+                9 if label == "agent-ready" else 1
+            )
+        )
+        screen.post_message(QueueCountsStale())
+        for _ in range(5):
+            await pilot.pause()
+        assert screen.queue_counts.get("ralph") == 9
+
+
+async def test_sidebar_renders_count_for_workflow_rows(tmp_path: Path) -> None:
+    async with _ShellApp(tmp_path).run_test(headless=True) as pilot:
+        await pilot.pause()
+        sidebar = pilot.app.query_one(Sidebar)
+        # Inject counts directly and re-render.
+        sidebar._counts = {"ralph": 5, "refine": 0}
+        sidebar._rerender_row("ralph")
+        sidebar._rerender_row("refine")
+        await pilot.pause()
+
+        ralph_label = sidebar.query_one("#nav-ralph").query_one("Label")
+        refine_label = sidebar.query_one("#nav-refine").query_one("Label")
+        assert "5" in str(ralph_label.renderable)
+        assert "0" in str(refine_label.renderable)
+
+
+async def test_sidebar_renders_blank_slot_for_none_count(tmp_path: Path) -> None:
+    async with _ShellApp(tmp_path).run_test(headless=True) as pilot:
+        await pilot.pause()
+        sidebar = pilot.app.query_one(Sidebar)
+        # None means loading/error — count slot should be blank (no digit).
+        sidebar._counts = {"ralph": None}
+        sidebar._rerender_row("ralph")
+        await pilot.pause()
+        ralph_label = sidebar.query_one("#nav-ralph").query_one("Label")
+        rendered = str(ralph_label.renderable)
+        # No digit in the count slot area — keybind still present.
+        assert "^3" in rendered
+
+
+async def test_sidebar_renders_blank_slot_for_non_workflow_rows(tmp_path: Path) -> None:
+    async with _ShellApp(tmp_path).run_test(headless=True) as pilot:
+        await pilot.pause()
+        sidebar = pilot.app.query_one(Sidebar)
+        # Dashboard row should never have a count digit even if _counts is populated.
+        sidebar._counts = {"ralph": 99, "refine": 1}
+        sidebar._rerender_row("dashboard")
+        await pilot.pause()
+        dash_label = sidebar.query_one("#nav-dashboard").query_one("Label")
+        rendered = str(dash_label.renderable)
+        assert "^1" in rendered
+        # 99 should not appear in the dashboard row.
+        assert "99" not in rendered
+
+
+async def test_sidebar_count_updates_via_reactive(tmp_path: Path) -> None:
+    tracker = _tracker_with_counts(**{"agent-ready": 4, "needs-refinement": 2})
+    async with _ShellApp(tmp_path, tracker).run_test(headless=True) as pilot:
+        for _ in range(5):
+            await pilot.pause()
+        sidebar = pilot.app.query_one(Sidebar)
+        ralph_label = sidebar.query_one("#nav-ralph").query_one("Label")
+        assert "4" in str(ralph_label.renderable)
+        refine_label = sidebar.query_one("#nav-refine").query_one("Label")
+        assert "2" in str(refine_label.renderable)

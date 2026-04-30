@@ -41,6 +41,7 @@ class Workflow(ABC):
     needs_item_picker: ClassVar[bool] = False
     preflight_checks: ClassVar[Sequence[PreflightCheck]] = ()
     content_widget_cls: ClassVar[type[Widget] | None] = None
+    count_assignee: ClassVar[str | None] = "@me"  # assignee scope for sidebar counts
 
     @abstractmethod
     async def select_item(self, ctx: ExecutionContext) -> Item | None:

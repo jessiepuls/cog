@@ -33,7 +33,7 @@ from cog.state import JsonFileStateCache
 from cog.state_paths import project_state_dir
 from cog.telemetry import TelemetryWriter
 from cog.ui.editor import suspend_and_edit
-from cog.ui.messages import ViewAttention
+from cog.ui.messages import QueueCountsStale, ViewAttention
 from cog.ui.picker import _format_assignees
 from cog.ui.widgets.chat_pane import ChatPaneWidget
 from cog.workflows.refine import RefineWorkflow, ReviewDecision, ReviewOutcome
@@ -296,6 +296,7 @@ class RefineView(Widget, can_focus=True):
         try:
             await StageExecutor().run(workflow, ctx)
             self._set_status(self._format_status("Completed", item=item))
+            self.post_message(QueueCountsStale())
         except Exception as e:  # noqa: BLE001
             self._set_status(
                 f"[red]{self._format_status('Failed', item=item, suffix=f': {e}')}[/red]"

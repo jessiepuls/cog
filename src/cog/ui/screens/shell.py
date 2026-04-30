@@ -19,16 +19,18 @@ from pathlib import Path
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Container, Horizontal
+from textual.reactive import reactive
 from textual.screen import Screen
 from textual.widget import Widget
 from textual.widgets import Footer, Header, Label, ListItem, ListView, Static
 
 from cog.core.tracker import IssueTracker
-from cog.ui.messages import ViewAttention
+from cog.ui.messages import QueueCountsStale, ViewAttention
 from cog.ui.views.chat import ChatView
 from cog.ui.views.dashboard import DashboardView
 from cog.ui.views.ralph import RalphView
 from cog.ui.views.refine import RefineView
+from cog.workflows import WORKFLOWS
 
 
 @dataclass(frozen=True)
@@ -100,19 +102,30 @@ class Sidebar(Widget):
         super().__init__()
         self._views = tuple(views)
         self._attention: set[str] = set()
+        self._counts: dict[str, int | None] = {}
+
+    def on_mount(self) -> None:
+        if hasattr(self.screen, "queue_counts"):
+            self.watch(self.screen, "queue_counts", self._on_counts_changed)
+
+    def _on_counts_changed(self, counts: dict[str, int | None]) -> None:
+        self._counts = counts
+        for v in self._views:
+            self._rerender_row(v.id)
 
     def _label_for(self, v: ShellView) -> str:
-        # Left: view name + optional attention dot.
-        # Right: dim keybind hint (e.g. ^1).
-        # Use string padding so keybinds right-align within the row.
+        # Layout: [name + dot][padding][count slot (3)][space][keybind]
         dot = " [yellow]●[/yellow]" if v.id in self._attention else "  "
         name = f"{v.label}{dot}"
-        # Left-pad the keybind so it ends at the right edge.
         keybind = v.keybind.replace("ctrl+", "^")
-        # Strip markup chars when measuring width.
         visible_len = len(v.label) + 2  # name + dot/spacer
-        pad = max(1, self._ROW_CONTENT_WIDTH - visible_len - len(keybind))
-        return f"{name}{' ' * pad}[dim]{keybind}[/dim]"
+
+        count = self._counts.get(v.id)
+        count_slot = f"[dim]{count:>3}[/dim]" if count is not None else "   "
+
+        # Reserve 4 chars for count_slot (3) + gap (1), then right-align keybind.
+        pad = max(1, self._ROW_CONTENT_WIDTH - visible_len - 4 - len(keybind))
+        return f"{name}{' ' * pad}{count_slot} [dim]{keybind}[/dim]"
 
     def compose(self) -> ComposeResult:
         yield ListView(
@@ -157,6 +170,9 @@ class CogShellScreen(Screen):
     stay in the tree.
     """
 
+    # key: workflow.name ("ralph", "refine") | value: count or None (error/loading)
+    queue_counts: reactive[dict[str, int | None]] = reactive({})
+
     DEFAULT_CSS = """
     CogShellScreen {
         layout: vertical;
@@ -181,6 +197,22 @@ class CogShellScreen(Screen):
         self._tracker = tracker
         self._active_view_id: str = _VIEWS[0].id
 
+    async def refresh_queue_counts(self) -> None:
+        new_counts: dict[str, int | None] = {}
+        for workflow_cls in WORKFLOWS:
+            try:
+                items = await self._tracker.list_by_label(
+                    workflow_cls.queue_label,
+                    assignee=workflow_cls.count_assignee,
+                )
+                new_counts[workflow_cls.name] = len(items)
+            except Exception:  # noqa: BLE001
+                new_counts[workflow_cls.name] = None
+        self.queue_counts = new_counts
+
+    def on_queue_counts_stale(self, message: QueueCountsStale) -> None:
+        self.run_worker(self.refresh_queue_counts(), exclusive=True, group="queue_counts")
+
     def compose(self) -> ComposeResult:
         yield Header()
         with Horizontal(id="shell-body"):
@@ -195,6 +227,7 @@ class CogShellScreen(Screen):
     def on_mount(self) -> None:
         self._apply_active_view()
         self._highlight_sidebar_row(self._active_view_id)
+        self.run_worker(self.refresh_queue_counts(), exclusive=True, group="queue_counts")
 
     def action_quit_app(self) -> None:
         busy: list[str] = []

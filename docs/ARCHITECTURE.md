@@ -134,8 +134,8 @@ with the log caught up.
 ┌──────────┬──────────────────────────────────────────────────┐
 │ sidebar  │ active view (content area)                       │
 │ ^1 Dash  │                                                  │
-│ ^2 Ref●  │  <DashboardView / RefineView / RalphView / ChatView>
-│ ^3 Ral   │                                                  │
+│ ^2 Ref●  3│  <DashboardView / RefineView / RalphView / ChatView>
+│ ^3 Ral   1│                                                  │
 │ ^4 Chat  │                                                  │
 └──────────┴──────────────────────────────────────────────────┘
  ^Q Quit
@@ -145,6 +145,10 @@ with the log caught up.
 - **Ctrl+Q** — quit (confirm if workflows in-flight)
 - Sidebar yellow `●` — attention indicator (refine awaiting reply, run
   complete, etc.)
+- Sidebar dim count — queue depth for Refine (`needs-refinement`) and
+  Ralph (`agent-ready`), refreshed on mount and whenever a view posts
+  `QueueCountsStale`. Owned by `CogShellScreen.queue_counts` reactive;
+  the Dashboard reads the same reactive instead of fetching independently.
 - Each view exposes `focus_content()` and `busy_description()` hooks
   the shell uses
 
