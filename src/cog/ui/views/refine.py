@@ -3,8 +3,8 @@
 Replaces the shell's Refine stub. Drives the refine workflow inline:
 
 - Idle: list of needs-refinement items; Enter to start.
-- Running: ChatPaneWidget streams the interview; user replies inline.
-- Review: original vs. proposed body panes; `a` accept, `e` edit, `q` abandon.
+- Running: split pane — issue body (left) + chat (right).
+- Review: split pane — issue body (left) + proposed body (right).
 
 Worker ownership stays on this widget, so switching to another shell
 view (Ctrl+1, Ctrl+3) doesn't cancel the interview — the chat pane
@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Literal
 
 from rich.markdown import Markdown
+from textual import events
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Container, Horizontal, ScrollableContainer
@@ -64,6 +65,9 @@ class RefineView(Widget, can_focus=True):
         Binding("a", "review_accept", "Accept"),
         Binding("e", "review_edit", "Edit"),
         Binding("shift+q", "review_abandon", "Abandon"),
+        # Splitter bindings — active in running and review
+        Binding("ctrl+comma", "narrow_issue", "Narrow issue"),
+        Binding("ctrl+full_stop", "widen_issue", "Widen issue"),
     ]
 
     DEFAULT_CSS = """
@@ -96,10 +100,7 @@ class RefineView(Widget, can_focus=True):
         border: solid $primary;
         height: 1fr;
     }
-    RefineView #refine-running {
-        height: 1fr;
-    }
-    RefineView #refine-review {
+    RefineView #refine-active {
         layout: vertical;
         height: 1fr;
     }
@@ -109,11 +110,14 @@ class RefineView(Widget, can_focus=True):
         background: $surface;
         border-bottom: solid $primary;
     }
-    RefineView #review-panes {
+    RefineView #refine-panes {
         layout: horizontal;
         height: 1fr;
     }
-    RefineView .review-pane {
+    RefineView #refine-panes.vertical {
+        layout: vertical;
+    }
+    RefineView .refine-pane {
         width: 1fr;
         height: 1fr;
         border: solid $primary;
@@ -131,6 +135,7 @@ class RefineView(Widget, can_focus=True):
         self._review_future: asyncio.Future[ReviewOutcome] | None = None
         self._review_state: dict[str, str | Path] = {}
         self._chat_pane: ChatPaneWidget | None = None
+        self._split_pct: int = 50
 
     def compose(self) -> ComposeResult:
         yield Static("", id="refine-status")
@@ -142,36 +147,35 @@ class RefineView(Widget, can_focus=True):
                     id="refine-idle-hint",
                 )
                 yield ListView(id="refine-queue")
-            # Running state — holds the chat pane
-            running = Container(id="refine-running")
-            running.display = False
-            yield running
-            # Review state — two panes with original vs proposed body
-            with Container(id="refine-review") as review:
-                review.display = False
+            # Active state — used for both running and review sub-states
+            with Container(id="refine-active") as active:
+                active.display = False
                 yield Static("", id="review-title-strip")
-                with Horizontal(id="review-panes"):
-                    with ScrollableContainer(classes="review-pane", id="review-original"):
-                        yield Static("", id="review-original-body")
-                    with ScrollableContainer(classes="review-pane", id="review-proposed"):
-                        yield Static("", id="review-proposed-body")
+                with Horizontal(id="refine-panes"):
+                    with ScrollableContainer(classes="refine-pane", id="refine-original"):
+                        yield Static("", id="refine-original-body")
+                    yield Container(classes="refine-pane", id="refine-right")
 
     async def on_mount(self) -> None:
+        self.query_one("#review-title-strip", Static).display = False
         await self.refresh_queue()
 
     async def on_show(self) -> None:
-        # Called when the view becomes visible in the shell. Refresh the
-        # queue if we're idle so counts stay current across view switches.
         if self._substate == "idle":
             await self.refresh_queue()
 
-    def needs_attention(self) -> str | None:
-        """Current attention state (synchronous). Returns a short reason or None.
+    def on_resize(self, event: events.Resize) -> None:
+        try:
+            panes = self.query_one("#refine-panes", Horizontal)
+        except Exception:  # noqa: BLE001
+            return
+        if self.size.width < 100:
+            panes.add_class("vertical")
+        else:
+            panes.remove_class("vertical")
+        self._apply_split()
 
-        Distinct from busy_description(), which is for the quit-confirm modal
-        and describes what's in flight. Attention is about "would the user want
-        to switch here?"
-        """
+    def needs_attention(self) -> str | None:
         if self._substate == "review":
             return "review ready"
         if self._substate == "running" and self._chat_pane is not None:
@@ -181,7 +185,6 @@ class RefineView(Widget, can_focus=True):
         return None
 
     def busy_description(self) -> str | None:
-        """Human-readable description of in-flight work, or None when idle."""
         if self._substate == "idle":
             return None
         item_id = self._active_item.item_id if self._active_item else "?"
@@ -192,9 +195,6 @@ class RefineView(Widget, can_focus=True):
         return None
 
     def focus_content(self) -> None:
-        """Called by the shell after this view becomes active and by
-        _switch_to on internal substate changes. Focus the sub-widget or
-        the view itself so keybinds fire without a click."""
         if self._substate == "idle":
             try:
                 self.query_one("#refine-queue", ListView).focus()
@@ -208,8 +208,6 @@ class RefineView(Widget, can_focus=True):
             except Exception:  # noqa: BLE001
                 pass
         elif self._substate == "review":
-            # Review bindings (a / e / shift+q) fire on the view itself —
-            # focus the view so Enter-style keypresses reach them.
             self.focus()
 
     async def action_refresh_queue(self) -> None:
@@ -218,7 +216,7 @@ class RefineView(Widget, can_focus=True):
     async def refresh_queue(self) -> None:
         try:
             items = await self._tracker.list_by_label("needs-refinement")
-        except Exception as e:  # noqa: BLE001 — surface any list-failure
+        except Exception as e:  # noqa: BLE001
             self._set_status(f"[red]error listing queue: {e}[/red]")
             return
         items.sort(key=lambda i: i.created_at)
@@ -257,18 +255,19 @@ class RefineView(Widget, can_focus=True):
 
     async def _run_refine(self, item: Item) -> None:
         self._active_item = item
+        self._split_pct = 50
         self._switch_to("running")
-        self._set_status(f"running refine on #{item.item_id}")
+        self._set_status(self._format_status("Refining", item=item))
 
-        # Lazily (re)create the chat pane for each iteration so scrollback
-        # resets between runs. Mount into #refine-running.
-        running = self.query_one("#refine-running", Container)
-        await running.remove_children()
+        # Mount chat into right pane. Recreate for each run so scrollback resets.
+        right = self.query_one("#refine-right", Container)
+        await right.remove_children()
         chat = ChatPaneWidget()
         self._chat_pane = chat
-        await running.mount(chat)
+        await right.mount(chat)
+        self._render_left_pane(item)
+        self._apply_split()
 
-        # Build per-iteration ctx. Everything scoped to this run.
         state_dir = project_state_dir(self._project_dir)
         cache = JsonFileStateCache(state_dir / "state.json")
         cache.load()
@@ -285,8 +284,6 @@ class RefineView(Widget, can_focus=True):
             input_provider=_AttentionInputProvider(chat, self),
             review_provider=self,
         )
-        # Workflow needs a runner + tracker. Build them here since the view
-        # is the entry point for shell-driven refine iterations.
         from cog.runners.claude_cli import ClaudeCliRunner
         from cog.runners.docker_sandbox import DockerSandbox
 
@@ -298,9 +295,11 @@ class RefineView(Widget, can_focus=True):
 
         try:
             await StageExecutor().run(workflow, ctx)
-            self._set_status(f"completed refine on #{item.item_id}")
-        except Exception as e:  # noqa: BLE001 — error path surfaces to status
-            self._set_status(f"[red]refine failed: {e}[/red]")
+            self._set_status(self._format_status("Completed", item=item))
+        except Exception as e:  # noqa: BLE001
+            self._set_status(
+                f"[red]{self._format_status('Failed', item=item, suffix=f': {e}')}[/red]"
+            )
 
         self._active_item = None
         self._review_future = None
@@ -326,29 +325,79 @@ class RefineView(Widget, can_focus=True):
             "proposed_body": proposed_body,
             "tmp_dir": tmp_dir,
         }
-        self._render_review_panes()
+
+        # Hide the chat pane (don't detach it — Textual rebuilds children
+        # on remount, which would clear RichLog scrollback) and mount the
+        # proposed body alongside it.
+        right = self.query_one("#refine-right", Container)
+        if self._chat_pane is not None:
+            self._chat_pane.display = False
+        proposed = Static("", id="review-proposed-body")
+        await right.mount(proposed)
+        proposed.update(Markdown(str(proposed_body) or "*(empty)*"))
+
+        self._render_title_strip(original_title, proposed_title)
         self._switch_to("review")
-        self.refresh_bindings()
+        if self._active_item is not None:
+            self._set_status(self._format_status("Reviewing", item=self._active_item))
 
         self._review_future = asyncio.get_running_loop().create_future()
         try:
             outcome = await self._review_future
         finally:
             self._review_future = None
+            # Restore: remove proposed body, unhide chat pane (instance preserved).
+            try:
+                await self.query_one("#review-proposed-body", Static).remove()
+            except Exception:  # noqa: BLE001
+                pass
+            if self._chat_pane is not None:
+                self._chat_pane.display = True
+            self._switch_to("running")
+            if self._active_item is not None:
+                self._set_status(self._format_status("Refining", item=self._active_item))
+
         return outcome
 
-    def _render_review_panes(self) -> None:
-        title_strip = self.query_one("#review-title-strip", Static)
-        ot = self._review_state.get("original_title", "")
-        pt = self._review_state.get("proposed_title", "")
-        if ot == pt:
-            title_strip.update(f"Title: {ot} [dim][unchanged][/dim]")
+    def _render_title_strip(self, original_title: str, proposed_title: str) -> None:
+        strip = self.query_one("#review-title-strip", Static)
+        if original_title == proposed_title:
+            strip.update(f"Title: {original_title} [dim][unchanged][/dim]")
         else:
-            title_strip.update(f"Title: {ot} → [bold]{pt}[/bold]")
-        orig = self.query_one("#review-original-body", Static)
-        prop = self.query_one("#review-proposed-body", Static)
-        orig.update(Markdown(str(self._review_state.get("original_body", "") or "*(empty)*")))
-        prop.update(Markdown(str(self._review_state.get("proposed_body", "") or "*(empty)*")))
+            strip.update(f"Title: {original_title} → [bold]{proposed_title}[/bold]")
+
+    def _render_left_pane(self, item: Item) -> None:
+        parts = [item.body or "*(empty body)*"]
+        for comment in item.comments:
+            ts = comment.created_at.strftime("%Y-%m-%d %H:%M")
+            parts.append(f"\n---\n\n**@{comment.author}** · {ts}\n\n{comment.body}")
+        content = "".join(parts)
+        self.query_one("#refine-original-body", Static).update(Markdown(content))
+
+    def _format_status(self, verb: str, *, item: Item, suffix: str = "") -> str:
+        labels = f" [{', '.join(item.labels)}]" if item.labels else ""
+        return f"{verb} #{item.item_id} - {item.title}{labels}{suffix}"
+
+    def _apply_split(self) -> None:
+        try:
+            panes = self.query_one("#refine-panes", Horizontal)
+            orig = self.query_one("#refine-original", ScrollableContainer)
+            if panes.has_class("vertical"):
+                orig.styles.height = f"{self._split_pct}%"
+                orig.styles.width = "1fr"
+            else:
+                orig.styles.width = f"{self._split_pct}%"
+                orig.styles.height = "1fr"
+        except Exception:  # noqa: BLE001
+            pass
+
+    def action_narrow_issue(self) -> None:
+        self._split_pct = max(20, self._split_pct - 5)
+        self._apply_split()
+
+    def action_widen_issue(self) -> None:
+        self._split_pct = min(80, self._split_pct + 5)
+        self._apply_split()
 
     def action_review_accept(self) -> None:
         self._resolve_review(ReviewDecision.ACCEPT)
@@ -365,7 +414,12 @@ class RefineView(Widget, can_focus=True):
         edited = await suspend_and_edit(self.app, proposed, tmp_dir)
         if edited is not None:
             self._review_state["proposed_body"] = edited
-            self._render_review_panes()
+            proposed_widget = self.query_one("#review-proposed-body", Static)
+            proposed_widget.update(Markdown(edited or "*(empty)*"))
+            self._render_title_strip(
+                str(self._review_state.get("original_title", "")),
+                str(self._review_state.get("proposed_title", "")),
+            )
 
     def _resolve_review(self, decision: ReviewDecision) -> None:
         if self._substate != "review":
@@ -381,11 +435,12 @@ class RefineView(Widget, can_focus=True):
         )
 
     def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:
-        # Hide review bindings from the footer outside the review sub-state.
         if action in ("review_accept", "review_edit", "review_abandon"):
             return True if self._substate == "review" else None
         if action == "refresh_queue":
             return True if self._substate == "idle" else None
+        if action in ("narrow_issue", "widen_issue"):
+            return True if self._substate in ("running", "review") else None
         return True
 
     # ---- sub-state helpers ------------------------------------------------
@@ -393,11 +448,9 @@ class RefineView(Widget, can_focus=True):
     def _switch_to(self, substate: _SubState) -> None:
         self._substate = substate
         self.query_one("#refine-idle", Container).display = substate == "idle"
-        self.query_one("#refine-running", Container).display = substate == "running"
-        self.query_one("#refine-review", Container).display = substate == "review"
+        self.query_one("#refine-active", Container).display = substate != "idle"
+        self.query_one("#review-title-strip", Static).display = substate == "review"
         self.refresh_bindings()
-        # Internal substate changes (e.g. running → review) don't trigger
-        # the shell's auto-focus hook, so re-focus here.
         self.call_after_refresh(self.focus_content)
         if substate == "review":
             self.post_message(ViewAttention("refine", reason="review ready"))
