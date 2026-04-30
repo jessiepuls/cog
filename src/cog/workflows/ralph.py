@@ -342,9 +342,7 @@ class RalphWorkflow(Workflow):
             )
             ctx.resumed = False
         elif await git.branch_exists(ctx.project_dir, work_branch):
-            ahead = await git.commits_between(
-                ctx.project_dir, f"origin/{default}", work_branch
-            )
+            ahead = await git.commits_between(ctx.project_dir, f"origin/{default}", work_branch)
             if ahead > 0:
                 # (a) local branch with commits — resume it
                 await create_worktree(
