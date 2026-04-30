@@ -163,15 +163,13 @@ async def remote_branch_exists(repo: Path, branch: str) -> bool:
 async def is_ahead_of_origin(path: Path, branch: str) -> bool:
     """True if `branch` has commits not on `origin/<branch>` (or origin lacks it)."""
     repo = _find_repo_root(path)
-    try:
-        count_str = await _run(
-            ["git", "rev-list", "--count", f"origin/{branch}..{branch}"],
-            repo,
-        )
-        return int(count_str) > 0
-    except GitError:
-        # origin/branch doesn't exist — we're ahead by definition
+    if not await remote_branch_exists(repo, branch):
         return True
+    count_str = await _run(
+        ["git", "rev-list", "--count", f"origin/{branch}..{branch}"],
+        repo,
+    )
+    return int(count_str) > 0
 
 
 def _find_repo_root(path: Path) -> Path:

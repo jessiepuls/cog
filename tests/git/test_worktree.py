@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import subprocess
 from pathlib import Path
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -239,6 +240,20 @@ def test_is_ahead_of_origin_true_when_remote_lacks_branch(temp_git_repo: Path) -
         return result
 
     assert _run(body()) is True
+
+
+@pytest.mark.asyncio
+async def test_is_ahead_of_origin_propagates_git_error(tmp_path: Path) -> None:
+    """GitError from rev-list must propagate, not be swallowed as 'ahead'."""
+    with (
+        patch("cog.git.worktree.remote_branch_exists", AsyncMock(return_value=True)),
+        patch(
+            "cog.git.worktree._run",
+            AsyncMock(side_effect=GitError("corrupt object store")),
+        ),
+    ):
+        with pytest.raises(GitError, match="corrupt object store"):
+            await is_ahead_of_origin(tmp_path, "some-branch")
 
 
 # ---------------------------------------------------------------------------
