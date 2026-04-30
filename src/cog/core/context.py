@@ -22,6 +22,8 @@ class ExecutionContext:
     headless: bool
     item: Item | None = None
     work_branch: str | None = None
+    worktree_path: Path | None = None
+    resumed: bool = False
     event_sink: RunEventSink | None = None
     input_provider: UserInputProvider | None = None
     item_picker: ItemPicker | None = None

@@ -11,7 +11,7 @@ from cog.core.runner import (
     StatusEvent,
     ToolUseEvent,
 )
-from cog.core.workflow import StageExecutor, Workflow
+from cog.core.workflow import IterationOutcome, StageExecutor, Workflow
 from cog.loop import LoopState, fresh_iteration_context
 
 
@@ -63,12 +63,14 @@ async def run_headless(
         try:
             results = await StageExecutor().run(workflow, ctx)
         except StageError as e:
+            await workflow.iteration_end(ctx, IterationOutcome.error)
             duration = time.monotonic() - start
             sys.stderr.write(
                 f"\niteration FAILED: stage {e.stage.name!r} failed after {duration:.0f}s\n"
             )
             return 1
         except Exception as e:  # noqa: BLE001 - surface any unexpected failure
+            await workflow.iteration_end(ctx, IterationOutcome.exception)
             duration = time.monotonic() - start
             sys.stderr.write(
                 f"\niteration FAILED: {type(e).__name__}: {e} (after {duration:.0f}s)\n"
@@ -77,9 +79,12 @@ async def run_headless(
         if not results:
             state.iteration -= 1  # empty-queue probe: don't count as an iteration
             break
+        commits = sum(r.commits_created for r in results)
+        it_outcome = IterationOutcome.success if commits > 0 else IterationOutcome.noop
+        await workflow.iteration_end(ctx, it_outcome)
         state.cumulative_cost_usd += sum(r.cost_usd for r in results)
         iter_duration = sum(r.duration_seconds for r in results)
-        outcome = "success" if any(r.commits_created > 0 for r in results) else "no-op"
+        outcome = "success" if commits > 0 else "no-op"
         sys.stderr.write(
             f"iteration complete: outcome={outcome}, "
             f"cost=${sum(r.cost_usd for r in results):.3f}, "

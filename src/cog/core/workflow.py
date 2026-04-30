@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import enum
 import time
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
@@ -26,6 +27,13 @@ if TYPE_CHECKING:
     from textual.widget import Widget
 
 
+class IterationOutcome(enum.Enum):
+    success = "success"
+    noop = "noop"
+    error = "error"
+    exception = "exception"
+
+
 class Workflow(ABC):
     name: ClassVar[str]
     queue_label: ClassVar[str]  # "agent-ready" / "needs-refinement"
@@ -37,6 +45,14 @@ class Workflow(ABC):
     @abstractmethod
     async def select_item(self, ctx: ExecutionContext) -> Item | None:
         """Return next item to process. None = queue empty → executor exits."""
+
+    async def iteration_start(self, ctx: ExecutionContext) -> None:
+        """Called after select_item, before pre_stages. Default: no-op."""
+        return
+
+    async def iteration_end(self, ctx: ExecutionContext, outcome: IterationOutcome) -> None:
+        """Called after the iteration completes (success/noop/error/exception). Default: no-op."""
+        return
 
     async def pre_stages(self, ctx: ExecutionContext) -> None:
         return
@@ -90,6 +106,7 @@ class StageExecutor:
             await ctx.event_sink.emit(ItemSelectedEvent(item=ctx.item))
         results: list[StageResult] = []
         try:
+            await workflow.iteration_start(ctx)
             await workflow.pre_stages(ctx)
             for stage in workflow.stages(ctx):
                 results.append(await self._run_stage(stage, ctx))
@@ -114,9 +131,12 @@ class StageExecutor:
         if sink is not None:
             await sink.emit(StageStartEvent(stage_name=stage.name, model=stage.model))
 
+        # Use worktree path for HEAD-relative operations when available
+        git_dir = ctx.worktree_path or ctx.project_dir
+
         head_before: str | None = None
         try:
-            head_before = await git.current_head_sha(ctx.project_dir)
+            head_before = await git.current_head_sha(git_dir)
         except GitError:
             pass  # not a git repo; commits_created stays 0
 
@@ -125,7 +145,7 @@ class StageExecutor:
         run_result: RunResult | None = None
         try:
             prompt = stage.prompt_source(ctx)
-            async for event in stage.runner.stream(prompt, model=stage.model):
+            async for event in stage.runner.stream(prompt, model=stage.model, cwd=stage.cwd):
                 if isinstance(event, ResultEvent):
                     run_result = event.result
                 elif sink is not None:
@@ -142,7 +162,7 @@ class StageExecutor:
         commits_created = 0
         if head_before is not None:
             try:
-                commits_created = await git.commits_between(ctx.project_dir, head_before)
+                commits_created = await git.commits_between(git_dir, head_before)
             except GitError:
                 pass  # counting failed; leave 0
 
@@ -203,10 +223,11 @@ class StageExecutor:
     ) -> StageResult:
         """Best-effort StageResult for error paths."""
         duration = time.monotonic() - start
+        git_dir = ctx.worktree_path or ctx.project_dir
         commits_created = 0
         if head_before is not None:
             try:
-                commits_created = await git.commits_between(ctx.project_dir, head_before)
+                commits_created = await git.commits_between(git_dir, head_before)
             except GitError:
                 pass
         if run_result is not None:

@@ -23,14 +23,16 @@ from typing import Literal
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Container
+from textual.screen import ModalScreen
 from textual.widget import Widget
-from textual.widgets import Label, ListItem, ListView, Static
+from textual.widgets import Button, Label, ListItem, ListView, Static
 from textual.worker import Worker
 
 from cog.core.context import ExecutionContext
 from cog.core.errors import TrackerError
 from cog.core.item import Item
 from cog.core.tracker import IssueTracker
+from cog.git.worktree import discard_worktree, is_dirty
 from cog.state import JsonFileStateCache
 from cog.state_paths import project_state_dir
 from cog.telemetry import TelemetryWriter
@@ -46,6 +48,50 @@ from cog.ui.widgets.log_pane import LogPaneWidget
 from cog.workflows.ralph import RalphWorkflow
 
 _SubState = Literal["idle", "running", "post_run"]
+
+
+class DirtyWorktreeModal(ModalScreen[bool]):
+    """Confirm discard of a dirty worktree before starting a fresh iteration."""
+
+    DEFAULT_CSS = """
+    DirtyWorktreeModal {
+        align: center middle;
+    }
+    DirtyWorktreeModal > Container {
+        width: 60;
+        height: auto;
+        padding: 1 2;
+        border: solid $warning;
+        background: $surface;
+    }
+    DirtyWorktreeModal #modal-buttons {
+        layout: horizontal;
+        height: auto;
+        margin-top: 1;
+        align-horizontal: right;
+    }
+    DirtyWorktreeModal Button {
+        margin-left: 1;
+    }
+    """
+
+    def __init__(self, worktree_path: Path) -> None:
+        super().__init__()
+        self._worktree_path = worktree_path
+
+    def compose(self) -> ComposeResult:
+        with Container():
+            yield Label(
+                f"Worktree at [bold]{self._worktree_path}[/bold] has uncommitted changes "
+                f"from a previous iteration.\n\nDiscard and start fresh?",
+                id="modal-text",
+            )
+            with Container(id="modal-buttons"):
+                yield Button("Discard", variant="warning", id="btn-discard")
+                yield Button("Cancel", variant="default", id="btn-cancel")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        self.dismiss(event.button.id == "btn-discard")
 
 
 class RalphView(Widget, can_focus=True):
@@ -235,7 +281,26 @@ class RalphView(Widget, can_focus=True):
             return
         if idx >= len(self._items):
             return
-        self._worker = self.run_worker(self._run_ralph(self._items[idx]), exclusive=True)
+        self._worker = self.run_worker(
+            self._pick_with_worktree_check(self._items[idx]), exclusive=True
+        )
+
+    async def _pick_with_worktree_check(self, item: Item) -> None:
+        from cog.workflows.ralph import _slugify
+
+        slug = _slugify(item.title)
+        wt_path = self._project_dir / ".cog" / "worktrees" / f"{item.item_id}-{slug}"
+        if wt_path.exists():
+            try:
+                dirty = await is_dirty(wt_path)
+            except Exception:
+                dirty = False
+            if dirty:
+                discard = await self.app.push_screen_wait(DirtyWorktreeModal(wt_path))
+                if not discard:
+                    return
+                await discard_worktree(self._project_dir, wt_path)
+        await self._run_ralph(item)
 
     async def _run_ralph(self, item: Item) -> None:
         self._active_item = item
@@ -275,24 +340,29 @@ class RalphView(Widget, can_focus=True):
         from cog.runners.claude_cli import ClaudeCliRunner
         from cog.runners.docker_sandbox import DockerSandbox
 
-        sandbox = DockerSandbox()
+        sandbox = DockerSandbox(project_dir=self._project_dir)
         runner = ClaudeCliRunner(sandbox)
         host = GitHubGitHost(self._project_dir)
         workflow = RalphWorkflow(runner=runner, tracker=self._tracker, host=host)
 
-        from cog.core.workflow import StageExecutor
+        from cog.core.workflow import IterationOutcome, StageExecutor
 
         header: str
+        results: list = []
         try:
             results = await StageExecutor().run(workflow, ctx)
             if not results:
                 header = "[yellow]No eligible items — queue drained or deferred.[/yellow]"
             else:
+                commits = sum(r.commits_created for r in results)
+                it_outcome = IterationOutcome.success if commits > 0 else IterationOutcome.noop
+                await workflow.iteration_end(ctx, it_outcome)
                 header = (
                     f"[green]✓ Complete[/green] — ${self._cumulative_cost:.3f} · "
                     f"{self._elapsed()} total"
                 )
         except asyncio.CancelledError:
+            await workflow.iteration_end(ctx, IterationOutcome.exception)
             if self._sink is not None:
                 self._sink.mark_running_stages_failed()
             header = "[yellow]Cancelled[/yellow]"
@@ -300,6 +370,7 @@ class RalphView(Widget, can_focus=True):
             self._switch_to("post_run")
             raise
         except Exception as e:  # noqa: BLE001 — surface any unexpected failure
+            await workflow.iteration_end(ctx, IterationOutcome.error)
             if self._sink is not None:
                 self._sink.mark_running_stages_failed()
             header = f"[red]✗ Failed:[/red] {e!s}"

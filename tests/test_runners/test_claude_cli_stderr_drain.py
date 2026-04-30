@@ -25,7 +25,7 @@ class _RealSubprocessSandbox(RecordingSandbox):
         super().__init__()
         self._snippet = python_snippet
 
-    def wrap_argv(self, argv):  # type: ignore[override]
+    def wrap_argv(self, argv, cwd=None):  # type: ignore[override]
         # Ignore the simulated claude argv entirely; invoke python3 -c <snippet>.
         return ["python3", "-c", self._snippet]
 

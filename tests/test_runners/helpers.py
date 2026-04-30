@@ -163,7 +163,7 @@ class RecordingSandbox:
     async def prepare(self) -> None:
         self.prepare_calls += 1
 
-    def wrap_argv(self, argv: Any) -> list[str]:
+    def wrap_argv(self, argv: Any, cwd: Any = None) -> list[str]:
         result = list(argv)
         self.wrap_argv_args.append(result)
         return result

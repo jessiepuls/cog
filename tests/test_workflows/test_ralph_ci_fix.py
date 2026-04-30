@@ -215,7 +215,7 @@ async def test_retry_uses_ci_fix_not_build_prompt(
     captured_prompts: list[str] = []
 
     class CapturingRunner(AgentRunner):
-        async def stream(self, prompt: str, *, model: str):
+        async def stream(self, prompt: str, *, model: str, cwd: Path | None = None):
             captured_prompts.append(prompt)
             yield ResultEvent(
                 result=RunResult(
