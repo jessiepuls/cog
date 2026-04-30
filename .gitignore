@@ -8,11 +8,12 @@ dist/
 .coverage*
 *.pyc
 
-.claude/settings.json
+.claude/*
+!.claude/skills/*
+
+**venv/*
+
 .uv/
 .uv_python/
 .uv_cache/
 .uv-bin/
-
-.review-venv/
-.local-data/
