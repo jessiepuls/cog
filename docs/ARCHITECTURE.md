@@ -253,6 +253,10 @@ end with a `ResultEvent`. See `ClaudeCliRunner` for the reference.
 
 1. Subclass `Workflow` (`src/cog/core/workflow.py`).
 2. Implement `select_item` / `stages` / `classify_outcome` at minimum.
-3. Register in `src/cog/workflows/__init__.py::WORKFLOWS`.
-4. For a TUI presence, create a view widget under `src/cog/ui/views/`
+3. Override `iteration_start` / `iteration_end` if you need per-iteration
+   setup or teardown (e.g. creating an isolated worktree). Both default to
+   no-op. `iteration_end` receives the `IterationOutcome` and is called
+   even on Ctrl+C / exception.
+4. Register in `src/cog/workflows/__init__.py::WORKFLOWS`.
+5. For a TUI presence, create a view widget under `src/cog/ui/views/`
    and add it to `CogShellScreen`'s compose.

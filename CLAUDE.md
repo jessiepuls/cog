@@ -79,9 +79,12 @@ strict).
   signal means adding an event type in `core/runner.py` and a handler
   in the widget's `emit()`.
 - **StageExecutor is the single iteration unit.** A workflow iteration =
-  `select_item → pre_stages → stages → post_stages → classify_outcome
-  → finalize_{success|noop|error}`. Don't replicate this shape inline;
-  extend the workflow interface.
+  `select_item → iteration_start → pre_stages → stages → post_stages
+  → classify_outcome → finalize_{success|noop|error} → iteration_end`.
+  `iteration_start`/`iteration_end` are optional hooks on `Workflow`
+  (default: no-op) for per-iteration setup/teardown (e.g. worktree create/
+  remove in ralph). Don't replicate this shape inline; extend the workflow
+  interface.
 - **Ralph failures are additive, not destructive.** On error, ralph
   keeps `agent-ready`, adds `agent-failed`. The item stays eligible for
   resume. `agent-failed` is a *signal*, not a terminal state.
