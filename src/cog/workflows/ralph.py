@@ -358,17 +358,8 @@ class RalphWorkflow(Workflow):
         case = await self._classify_branch(ctx, work_branch, default)
         match case:
             case _BranchCase.RESTART:
-                if wt_path.exists():
-                    await discard_worktree(ctx.project_dir, wt_path)
-                if await git.branch_exists(ctx.project_dir, work_branch):
-                    await git.delete_branch(ctx.project_dir, work_branch)
-                await create_worktree(
-                    ctx.project_dir,
-                    wt_path,
-                    work_branch,
-                    start_point=f"origin/{default}",
-                    create_branch=True,
-                )
+                await self._cleanup_for_restart(ctx, wt_path, work_branch)
+                await self._create_fresh_worktree(ctx, wt_path, work_branch, default)
             case _BranchCase.RESUME_LOCAL:
                 await create_worktree(
                     ctx.project_dir,
@@ -379,13 +370,7 @@ class RalphWorkflow(Workflow):
                 )
             case _BranchCase.RECREATE_STALE:
                 await git.delete_branch(ctx.project_dir, work_branch)
-                await create_worktree(
-                    ctx.project_dir,
-                    wt_path,
-                    work_branch,
-                    start_point=f"origin/{default}",
-                    create_branch=True,
-                )
+                await self._create_fresh_worktree(ctx, wt_path, work_branch, default)
             case _BranchCase.RESUME_REMOTE:
                 await create_worktree(
                     ctx.project_dir,
@@ -395,18 +380,28 @@ class RalphWorkflow(Workflow):
                     create_branch=True,
                 )
             case _BranchCase.FRESH_START:
-                await create_worktree(
-                    ctx.project_dir,
-                    wt_path,
-                    work_branch,
-                    start_point=f"origin/{default}",
-                    create_branch=True,
-                )
+                await self._create_fresh_worktree(ctx, wt_path, work_branch, default)
 
         ctx.resumed = case in (_BranchCase.RESUME_LOCAL, _BranchCase.RESUME_REMOTE)
         ctx.work_branch = work_branch
         ctx.worktree_path = wt_path
         self._stuck_worktree_item_ids.discard(item.item_id)
+
+    async def _create_fresh_worktree(
+        self, ctx: ExecutionContext, wt_path: Path, branch: str, default: str
+    ) -> None:
+        await create_worktree(
+            ctx.project_dir, wt_path, branch,
+            start_point=f"origin/{default}", create_branch=True,
+        )
+
+    async def _cleanup_for_restart(
+        self, ctx: ExecutionContext, wt_path: Path, branch: str
+    ) -> None:
+        if wt_path.exists():
+            await discard_worktree(ctx.project_dir, wt_path)
+        if await git.branch_exists(ctx.project_dir, branch):
+            await git.delete_branch(ctx.project_dir, branch)
 
     async def _teardown_action(
         self, wt_path: Path, branch: str, outcome: IterationOutcome
