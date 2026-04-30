@@ -201,3 +201,10 @@ Cog writes per-project state under
 - `runs.jsonl` — one telemetry record per run (schema in
   [ARCHITECTURE.md](docs/ARCHITECTURE.md#telemetry-runsjsonl))
 - `reports/<ts>-<workflow>-<item-slug>.md` — per-run markdown report
+
+Ralph also writes into the **project directory**:
+
+- `.cog/worktrees/<id>-<slug>/` — isolated git worktree per iteration.
+  Created at iteration start, removed after push. A surviving directory
+  indicates a stuck or crashed run; see
+  [ralph.md § Worktrees](docs/workflows/ralph.md#worktrees).
