@@ -387,6 +387,21 @@ async def test_shell_refresh_queue_counts_populates_reactive(tmp_path: Path) -> 
         assert screen.queue_counts.get("refine") == 7
 
 
+async def test_shell_refresh_queue_counts_no_assignee_filter(tmp_path: Path) -> None:
+    """Sidebar counts fetch all items in the queue, not just @me-assigned ones."""
+    t: IssueTracker = AsyncMock(spec=IssueTracker)
+    t.list_by_label = AsyncMock(return_value=_make_items(4))  # type: ignore[attr-defined]
+
+    async with _ShellApp(tmp_path, t).run_test(headless=True) as pilot:
+        for _ in range(5):
+            await pilot.pause()
+        screen = pilot.app.screen
+        assert isinstance(screen, CogShellScreen)
+        # Verify list_by_label was called without an assignee keyword argument.
+        for call in t.list_by_label.call_args_list:
+            assert "assignee" not in call.kwargs
+
+
 async def test_shell_refresh_queue_counts_sets_none_on_error(tmp_path: Path) -> None:
     from cog.core.errors import TrackerError
 

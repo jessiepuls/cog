@@ -201,10 +201,7 @@ class CogShellScreen(Screen):
         new_counts: dict[str, int | None] = {}
         for workflow_cls in WORKFLOWS:
             try:
-                items = await self._tracker.list_by_label(
-                    workflow_cls.queue_label,
-                    assignee=workflow_cls.count_assignee,
-                )
+                items = await self._tracker.list_by_label(workflow_cls.queue_label)
                 new_counts[workflow_cls.name] = len(items)
             except Exception:  # noqa: BLE001
                 new_counts[workflow_cls.name] = None
