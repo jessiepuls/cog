@@ -15,9 +15,10 @@ class CogApp(App):
     CSS_PATH = "cog.tcss"
     TITLE = "Cog"
 
-    def __init__(self, initial_screen: Screen) -> None:
+    def __init__(self, initial_screen: Screen, project_dir: Path) -> None:
         super().__init__()
         self._initial = initial_screen
+        self.sub_title = project_dir.resolve().name
 
     def on_mount(self) -> None:
         self.push_screen(self._initial)
@@ -32,7 +33,7 @@ async def run_textual(
     tracker: IssueTracker | None = None,
 ) -> int:
     run_screen = RunScreen(workflow, ctx, loop=loop, max_iterations=max_iterations)
-    app = CogApp(run_screen)
+    app = CogApp(run_screen, ctx.project_dir)
     ctx.app = app
     if type(workflow).needs_item_picker:
         assert tracker is not None, (
@@ -55,5 +56,5 @@ async def _run_main_menu(project_dir: Path) -> None:
     from cog.ui.screens.shell import CogShellScreen
 
     tracker = GitHubIssueTracker(project_dir)
-    app = CogApp(CogShellScreen(project_dir, tracker))
+    app = CogApp(CogShellScreen(project_dir, tracker), project_dir)
     await app.run_async()
