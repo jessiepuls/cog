@@ -48,8 +48,10 @@ file; pipe through `head -c 30000` or use `--jq` to stay bounded.
    implementation against the acceptance criteria.
 6. Identify any defects, missing coverage, or style violations.
 7. Fix what you can directly. Commit fixes with clear messages.
-8. In your final message, list any remaining concerns that require human
-   attention (things you couldn't fix, architectural trade-offs, etc.).
+8. End your final message with the four structured sections described
+   below. Put any remaining concerns that require human attention (things
+   you couldn't fix, architectural trade-offs, etc.) under
+   `### Follow-up items`.
 
 ## Bounded tool calls (important)
 
@@ -95,6 +97,39 @@ Consult the project's CLAUDE.md for the specific commands (test runner,
 type checker, linter) this project uses. If CLAUDE.md doesn't list them,
 infer from the project's config files (pyproject.toml, package.json,
 go.mod, etc.).
+
+## Final message format
+
+End your final message with four structured sections in this order:
+`### Summary`, `### Key changes`, `### Test plan`, `### Follow-up items`.
+The wrapper extracts each section into the PR body.
+
+For Summary, Key changes, and Test plan: these describe what this PR
+adds against the base branch, not what you did this iteration. Default
+to copying each section forward verbatim from the build stage's output.
+Update a section only if there is inaccurate or missing information a
+reviewer needs to understand the scope of changes to be merged.
+
+If you made a judgment call between options where reviewer input would
+help (timeouts, retry counts, naming, scoping decisions), call it out in
+Summary so the reviewer can validate.
+
+### Follow-up items
+
+Optional. List only items you noticed during THIS stage. The wrapper
+appends follow-up items from prior stages automatically — do NOT copy
+build's follow-ups forward, or they will be duplicated in the PR body.
+
+Use this section for anything the reviewer should know about that
+doesn't fit Summary / Key changes / Test plan. Examples:
+
+  - The test you wrote depends on a flaky external service
+  - An unrelated bug you noticed in foo.py
+  - A workaround you took because the proper fix would balloon the PR
+  - Something worth filing as its own follow-up issue (e.g., "the
+    `_compute_cost` divide-by-zero in telemetry.py deserves its own fix")
+
+Skip this section entirely if there is nothing worth flagging.
 
 ## Git rules (hard)
 

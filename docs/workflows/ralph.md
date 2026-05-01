@@ -35,13 +35,36 @@ flowchart TD
 |-------|---------------|---------|
 | `build` | `claude-sonnet-4-6` | Implement the change + write tests |
 | `review` | `claude-opus-4-7` | Review build output; fix issues found |
-| `document` | `claude-sonnet-4-6` | Update docs / comments. Failures don't abort the iteration — they're reported in the PR body |
+| `document` | `claude-sonnet-4-6` | Update docs / comments. Failures don't abort the iteration — they're flagged in the PR body |
 
 Override each via `COG_RALPH_BUILD_MODEL` / `COG_RALPH_REVIEW_MODEL` /
 `COG_RALPH_DOCUMENT_MODEL`.
 
 Prompts live in [`src/cog/prompts/claude/ralph/`](../../src/cog/prompts/claude/ralph/)
 as markdown. Change prompt behavior by editing the markdown, not Python.
+
+## PR body
+
+Each main stage ends its final message with four structured sections that
+ralph extracts into the PR body:
+
+| Section | Source priority | Description |
+|---------|-----------------|-------------|
+| `## Summary` | document → review → build | 2–4 sentence description of what changed and why |
+| `## Key changes` | document → review → build | Conceptual bullet list for the reviewer |
+| `## Test plan` | document → review → build | Manual verification checklist |
+| `## Follow-up items` | all stages, aggregated | Items noticed during THIS stage that don't fit the above |
+
+**Source priority** means ralph uses the first non-empty value found,
+checking document then review then build. Review and document stages
+default to copying the build stage's sections forward verbatim unless
+they have something to correct or add.
+
+**Follow-up items** are cumulative: ralph collects each stage's
+`### Follow-up items` block and appends them all under one
+`## Follow-up items` section in the PR body. Each stage only lists items
+it noticed — do not copy items from earlier stages or they will be
+duplicated.
 
 ## Outcomes
 

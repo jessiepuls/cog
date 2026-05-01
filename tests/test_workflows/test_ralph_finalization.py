@@ -209,6 +209,61 @@ def test_split_final_message_ignores_unknown_sections() -> None:
     assert "rationale" not in sections
 
 
+@pytest.mark.parametrize(
+    "msg, expected_keys, expected_follow_up",
+    [
+        # All four sections present in declared order
+        (
+            "### Summary\n\nDid it.\n\n"
+            "### Key changes\n\n- foo.py\n\n"
+            "### Test plan\n\n- [ ] step\n\n"
+            "### Follow-up items\n\n- Watch the flaky test",
+            {"summary", "key_changes", "test_plan", "follow_up_items"},
+            "- Watch the flaky test",
+        ),
+        # Follow-up items in mixed order (second)
+        (
+            "### Summary\n\nDid it.\n\n"
+            "### Follow-up items\n\n- Bug in bar.py\n\n"
+            "### Test plan\n\n- [ ] step",
+            {"summary", "follow_up_items", "test_plan"},
+            "- Bug in bar.py",
+        ),
+        # Only Follow-up items present
+        (
+            "### Follow-up items\n\n- Something odd",
+            {"follow_up_items"},
+            "- Something odd",
+        ),
+        # Follow-up items heading with whitespace-only body
+        (
+            "### Summary\n\nDid it.\n\n### Follow-up items\n\n   \n\n### Test plan\n\n- [ ] step",
+            {"summary", "follow_up_items", "test_plan"},
+            "",
+        ),
+        # No structured headings
+        (
+            "Just some free text with no headings.",
+            set(),
+            None,
+        ),
+        # Follow-up items with prose (not bullets) — forgiving extraction
+        (
+            "### Follow-up items\n\nConsider refactoring foo into two smaller functions.",
+            {"follow_up_items"},
+            "Consider refactoring foo into two smaller functions.",
+        ),
+    ],
+)
+def test_split_final_message_follow_up_items(
+    msg: str, expected_keys: set[str], expected_follow_up: str | None
+) -> None:
+    sections = _split_final_message(msg)
+    assert set(sections.keys()) == expected_keys
+    if expected_follow_up is not None:
+        assert sections.get("follow_up_items", "") == expected_follow_up
+
+
 # ---------------------------------------------------------------------------
 # _build_pr_body unit tests
 # ---------------------------------------------------------------------------
@@ -319,16 +374,18 @@ def test_build_pr_body_section_order_preserved(tmp_path: Path) -> None:
     msg = (
         "### Summary\n\nSummary text.\n\n"
         "### Key changes\n\n- file.py: change\n\n"
-        "### Test plan\n\n- [ ] step"
+        "### Test plan\n\n- [ ] step\n\n"
+        "### Follow-up items\n\n- Watch out for flaky test"
     )
     results = [make_stage_result("build", final_message=msg)]
     body = wf._build_pr_body(ctx, results)
     summary_pos = body.index("## Summary")
     key_changes_pos = body.index("## Key changes")
-    closes_pos = body.index("## Closes")
     test_plan_pos = body.index("## Test plan")
+    follow_up_pos = body.index("## Follow-up items")
+    closes_pos = body.index("## Closes")
     footer_pos = body.index("---")
-    assert summary_pos < key_changes_pos < closes_pos < test_plan_pos < footer_pos
+    assert summary_pos < key_changes_pos < test_plan_pos < follow_up_pos < closes_pos < footer_pos
 
 
 def test_build_pr_body_doc_warning_still_appended_on_document_error(tmp_path: Path) -> None:
@@ -355,6 +412,127 @@ def test_build_pr_body_cost_line_still_appears(tmp_path: Path) -> None:
     ]
     body = wf._build_pr_body(ctx, results)
     assert "0.050" in body
+
+
+def test_build_pr_body_follow_up_items_from_build_only(tmp_path: Path) -> None:
+    wf = _make_wf()
+    ctx = _make_ctx(tmp_path)
+    msg = "### Summary\n\nDone.\n\n### Follow-up items\n\n- Watch the flaky test"
+    results = [make_stage_result("build", final_message=msg)]
+    body = wf._build_pr_body(ctx, results)
+    assert "## Follow-up items" in body
+    assert "- Watch the flaky test" in body
+
+
+def test_build_pr_body_follow_up_items_from_review_only(tmp_path: Path) -> None:
+    wf = _make_wf()
+    ctx = _make_ctx(tmp_path)
+    review_msg = "### Summary\n\nDone.\n\n### Follow-up items\n\n- Bug in bar.py"
+    results = [
+        make_stage_result("build", final_message="### Summary\n\nDone."),
+        make_stage_result("review", final_message=review_msg),
+    ]
+    body = wf._build_pr_body(ctx, results)
+    assert "## Follow-up items" in body
+    assert "- Bug in bar.py" in body
+
+
+def test_build_pr_body_follow_up_items_concat_build_and_review(tmp_path: Path) -> None:
+    wf = _make_wf()
+    ctx = _make_ctx(tmp_path)
+    build_msg = "### Summary\n\nDone.\n\n### Follow-up items\n\n- From build"
+    review_msg = "### Summary\n\nDone.\n\n### Follow-up items\n\n- From review"
+    results = [
+        make_stage_result("build", final_message=build_msg),
+        make_stage_result("review", final_message=review_msg),
+    ]
+    body = wf._build_pr_body(ctx, results)
+    assert "## Follow-up items" in body
+    follow_up_pos = body.index("## Follow-up items")
+    assert "- From build" in body[follow_up_pos:]
+    assert "- From review" in body[follow_up_pos:]
+    assert body.index("- From build") < body.index("- From review")
+
+
+def test_build_pr_body_ci_fix_follow_up_appended(tmp_path: Path) -> None:
+    wf = _make_wf()
+    ctx = _make_ctx(tmp_path)
+    build_msg = "### Summary\n\nDone.\n\n### Follow-up items\n\n- From build"
+    ci_fix_msg = "### Follow-up items\n\n- From ci-fix"
+    results = [
+        make_stage_result("build", final_message=build_msg),
+        make_stage_result("ci-fix-1", final_message=ci_fix_msg),
+    ]
+    body = wf._build_pr_body(ctx, results)
+    assert "## Follow-up items" in body
+    assert "- From build" in body
+    assert "- From ci-fix" in body
+    assert body.index("- From build") < body.index("- From ci-fix")
+
+
+def test_build_pr_body_no_follow_up_items_when_none_emitted(tmp_path: Path) -> None:
+    wf = _make_wf()
+    ctx = _make_ctx(tmp_path)
+    results = [
+        make_stage_result(
+            "build",
+            final_message="### Summary\n\nDone.\n\n### Test plan\n\n- [ ] step",
+        ),
+    ]
+    body = wf._build_pr_body(ctx, results)
+    assert "## Follow-up items" not in body
+
+
+def test_build_pr_body_whitespace_only_follow_up_omitted(tmp_path: Path) -> None:
+    wf = _make_wf()
+    ctx = _make_ctx(tmp_path)
+    msg = "### Summary\n\nDone.\n\n### Follow-up items\n\n   "
+    results = [make_stage_result("build", final_message=msg)]
+    body = wf._build_pr_body(ctx, results)
+    assert "## Follow-up items" not in body
+
+
+def test_build_pr_body_document_summary_overwrites_build(tmp_path: Path) -> None:
+    wf = _make_wf()
+    ctx = _make_ctx(tmp_path)
+    build_msg = "### Summary\n\nBuild summary."
+    doc_msg = "### Summary\n\nDocument summary."
+    results = [
+        make_stage_result("build", final_message=build_msg),
+        make_stage_result("document", final_message=doc_msg),
+    ]
+    body = wf._build_pr_body(ctx, results)
+    assert "Document summary." in body
+    assert "Build summary." not in body
+
+
+def test_build_pr_body_review_summary_overwrites_build_when_no_document(tmp_path: Path) -> None:
+    wf = _make_wf()
+    ctx = _make_ctx(tmp_path)
+    build_msg = "### Summary\n\nBuild summary."
+    review_msg = "### Summary\n\nReview summary."
+    results = [
+        make_stage_result("build", final_message=build_msg),
+        make_stage_result("review", final_message=review_msg),
+    ]
+    body = wf._build_pr_body(ctx, results)
+    assert "Review summary." in body
+    assert "Build summary." not in body
+
+
+def test_build_pr_body_build_summary_survives_when_review_and_document_omit_it(
+    tmp_path: Path,
+) -> None:
+    wf = _make_wf()
+    ctx = _make_ctx(tmp_path)
+    build_msg = "### Summary\n\nBuild summary."
+    results = [
+        make_stage_result("build", final_message=build_msg),
+        make_stage_result("review", final_message="No sections here."),
+        make_stage_result("document", final_message="No sections here either."),
+    ]
+    body = wf._build_pr_body(ctx, results)
+    assert "Build summary." in body
 
 
 # ---------------------------------------------------------------------------
