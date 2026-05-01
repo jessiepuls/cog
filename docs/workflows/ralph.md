@@ -142,6 +142,25 @@ dashboard (Ctrl+1) mid-run and the log keeps streaming in the
 background. A yellow `●` appears on the Ralph sidebar row when the run
 finishes (attention indicator).
 
+## Iteration reports
+
+After each iteration ralph writes a markdown report to
+`$XDG_STATE_HOME/cog/<project-slug>/reports/<ts>-ralph-<slug>.md`
+(default: `~/.local/state/cog/<project-slug>/reports/`).
+
+Report sections (in order):
+
+| Section | Content |
+|---------|---------|
+| `## Item` | Item number, title, and URL |
+| `## Stages` | Per-stage cost, token counts, and duration |
+| `## Iteration commentary` | All text Claude emitted during stage execution, grouped by stage. Headings inside the commentary are demoted one level. Omitted if Claude produced no text output. |
+| `## Outcome` | Final outcome label and any error message |
+
+The commentary section is useful when running headless (`--headless`) — it
+lets you recover what Claude said about its decisions without having watched
+the live TUI pane.
+
 ## Related
 
 - [Architecture](../ARCHITECTURE.md) — harness internals and seams

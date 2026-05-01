@@ -10,8 +10,9 @@ import pytest
 from cog.core.context import ExecutionContext
 from cog.core.errors import HostError, StageError
 from cog.core.host import CheckRun, GitHost, PrChecks, PullRequest
+from cog.core.runner import AssistantTextEvent, StageEndEvent, StageStartEvent
 from cog.core.tracker import IssueTracker
-from cog.workflows.ralph import RalphWorkflow, _split_final_message
+from cog.workflows.ralph import CommentaryCapture, RalphWorkflow, _split_final_message
 from tests.fakes import InMemoryStateCache, RecordingEventSink, make_item, make_stage_result
 
 
@@ -995,3 +996,109 @@ async def test_finalize_error_telemetry_error_string_contains_cause(tmp_path: Pa
     record = tel.write.call_args.args[0]
     assert record.error is not None
     assert "runner exploded" in record.error
+
+
+# ---------------------------------------------------------------------------
+# Iteration commentary in report
+# ---------------------------------------------------------------------------
+
+
+async def _make_commentary_with_turns() -> CommentaryCapture:
+    cap = CommentaryCapture(inner=None)
+    await cap.emit(StageStartEvent(stage_name="build", model="m"))
+    await cap.emit(AssistantTextEvent(text="claude's build commentary"))
+    await cap.emit(StageEndEvent(stage_name="build", cost_usd=0.0, exit_status=0))
+    return cap
+
+
+@pytest.mark.parametrize("outcome", ["success", "noop", "error"])
+async def test_write_report_includes_commentary_section(tmp_path: Path, outcome: str) -> None:
+    wf = _make_wf()
+    ctx = _make_ctx(tmp_path)
+    wf._commentary = await _make_commentary_with_turns()
+
+    report_path = await wf.write_report(ctx, [make_stage_result("build")], outcome)  # type: ignore[arg-type]
+    assert report_path is not None
+    content = report_path.read_text()
+    assert "## Iteration commentary" in content
+    assert "claude's build commentary" in content
+
+
+async def test_write_report_omits_commentary_section_when_no_turns(tmp_path: Path) -> None:
+    wf = _make_wf()
+    ctx = _make_ctx(tmp_path)
+    wf._commentary = CommentaryCapture(inner=None)  # no turns emitted
+
+    report_path = await wf.write_report(ctx, [make_stage_result("build")], "success")
+    assert report_path is not None
+    content = report_path.read_text()
+    assert "## Iteration commentary" not in content
+
+
+async def test_write_report_omits_commentary_section_when_commentary_is_none(
+    tmp_path: Path,
+) -> None:
+    wf = _make_wf()
+    ctx = _make_ctx(tmp_path)
+    wf._commentary = None
+
+    report_path = await wf.write_report(ctx, [make_stage_result("build")], "success")
+    assert report_path is not None
+    content = report_path.read_text()
+    assert "## Iteration commentary" not in content
+
+
+async def test_write_report_commentary_section_order(tmp_path: Path) -> None:
+    """Commentary appears after Stages/Commits and before Outcome."""
+    wf = _make_wf()
+    ctx = _make_ctx(tmp_path)
+    wf._commentary = await _make_commentary_with_turns()
+
+    report_path = await wf.write_report(ctx, [make_stage_result("build")], "success")
+    assert report_path is not None
+    content = report_path.read_text()
+
+    stages_pos = content.index("## Stages")
+    commentary_pos = content.index("## Iteration commentary")
+    outcome_pos = content.index("## Outcome")
+    assert stages_pos < commentary_pos < outcome_pos
+
+
+async def test_write_report_commentary_heading_demotion(tmp_path: Path) -> None:
+    """Headings in claude's text are demoted in the on-disk file."""
+    cap = CommentaryCapture(inner=None)
+    await cap.emit(StageStartEvent(stage_name="build", model="m"))
+    await cap.emit(AssistantTextEvent(text="# Top-level heading from claude"))
+    await cap.emit(StageEndEvent(stage_name="build", cost_usd=0.0, exit_status=0))
+
+    wf = _make_wf()
+    ctx = _make_ctx(tmp_path)
+    wf._commentary = cap
+
+    report_path = await wf.write_report(ctx, [make_stage_result("build")], "success")
+    assert report_path is not None
+    content = report_path.read_text()
+    assert "## Top-level heading from claude" in content
+    assert "# Top-level heading from claude" not in content.split("## Top-level")[0]
+
+
+async def test_write_report_commentary_subsection_per_stage(tmp_path: Path) -> None:
+    """Each stage with turns gets its own ### subsection."""
+    cap = CommentaryCapture(inner=None)
+    await cap.emit(StageStartEvent(stage_name="build", model="m"))
+    await cap.emit(AssistantTextEvent(text="build commentary"))
+    await cap.emit(StageEndEvent(stage_name="build", cost_usd=0.0, exit_status=0))
+    await cap.emit(StageStartEvent(stage_name="review", model="m"))
+    await cap.emit(AssistantTextEvent(text="review commentary"))
+    await cap.emit(StageEndEvent(stage_name="review", cost_usd=0.0, exit_status=0))
+
+    wf = _make_wf()
+    ctx = _make_ctx(tmp_path)
+    wf._commentary = cap
+
+    report_path = await wf.write_report(ctx, [make_stage_result("build")], "success")
+    assert report_path is not None
+    content = report_path.read_text()
+    assert "### build" in content
+    assert "### review" in content
+    assert content.index("### build") < content.index("### review")
