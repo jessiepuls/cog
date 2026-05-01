@@ -27,6 +27,8 @@ LIST_BASE_ARGV = (
     "agent-ready",
     "--state",
     "open",
+    "--limit",
+    "1000",
     "--json",
     LIST_FIELDS,
 )
@@ -118,6 +120,18 @@ async def test_list_by_label_json_fields(
         "updatedAt",
         "url",
     }
+
+
+async def test_list_by_label_passes_limit(
+    registry: FakeSubprocessRegistry, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    register_repo(registry)
+    registry.expect(LIST_BASE_ARGV, stdout=b"[]")
+    await list_by_label(registry, tmp_path, monkeypatch=monkeypatch)
+    calls = registry.calls
+    list_call = next(c for c in calls if "issue" in c and "list" in c)
+    assert "--limit" in list_call
+    assert "1000" in list_call
 
 
 async def test_list_by_label_json_field_list_includes_state(
