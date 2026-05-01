@@ -104,11 +104,11 @@ End your final message with four structured sections in this order:
 `### Summary`, `### Key changes`, `### Test plan`, `### Follow-up items`.
 The wrapper extracts each section into the PR body.
 
-These sections describe what this PR adds against the base branch, not
-what you did this iteration. Default to copying each section forward
-verbatim from the build stage's output. Update a section only if there
-is inaccurate or missing information a reviewer needs to understand the
-scope of changes to be merged.
+For Summary, Key changes, and Test plan: these describe what this PR
+adds against the base branch, not what you did this iteration. Default
+to copying each section forward verbatim from the build stage's output.
+Update a section only if there is inaccurate or missing information a
+reviewer needs to understand the scope of changes to be merged.
 
 If you made a judgment call between options where reviewer input would
 help (timeouts, retry counts, naming, scoping decisions), call it out in
@@ -116,9 +116,12 @@ Summary so the reviewer can validate.
 
 ### Follow-up items
 
-Optional. If you noticed anything during this iteration the reviewer
-should know about — but doesn't fit Summary / Key changes / Test plan —
-list each as a bullet. Examples:
+Optional. List only items you noticed during THIS stage. The wrapper
+appends follow-up items from prior stages automatically — do NOT copy
+build's follow-ups forward, or they will be duplicated in the PR body.
+
+Use this section for anything the reviewer should know about that
+doesn't fit Summary / Key changes / Test plan. Examples:
 
   - The test you wrote depends on a flaky external service
   - An unrelated bug you noticed in foo.py
