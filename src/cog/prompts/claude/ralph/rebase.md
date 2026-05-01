@@ -33,3 +33,13 @@ has been observed to hang indefinitely. To avoid this:
   `head -c 30000` or equivalent defensively.
 - Use `Read <file>` to inspect specific conflict files rather than broad
   shell expansions.
+
+## Final message format
+
+End your final message with `### Follow-up items` if you noticed anything
+during the rebase the reviewer should know about:
+
+  - A conflict resolution that involved a judgment call
+  - Something worth flagging that doesn't belong in the main PR sections
+
+Skip this section entirely if there is nothing worth flagging.

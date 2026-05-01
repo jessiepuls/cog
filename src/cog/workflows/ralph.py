@@ -61,6 +61,7 @@ from cog.ui.widgets.log_pane import LogPaneWidget
 class RebaseOutcome:
     status: Literal["clean", "conflict"]
     final_message: str = ""  # claude's analysis on conflict; empty on clean
+    stage_result: StageResult | None = None  # populated when the stage actually ran
 
 
 def _parse_float_env(key: str, default: float) -> float:
@@ -127,7 +128,7 @@ _COLLAPSE_RE = re.compile(r"-+")
 _BLOCKER_RE = re.compile(r"\b(?:blocked by|depends on)\s+#(\d+)", re.IGNORECASE)
 _ITEM_ID_FROM_PATH_RE = re.compile(r"^(\d+)-")
 _SECTION_RE = re.compile(
-    r"^###\s+(Summary|Key changes|Test plan)\s*\n(.*?)(?=\n###\s|\Z)",
+    r"^###\s+(Summary|Key changes|Test plan|Follow-up items)[ \t]*\n(.*?)(?=\n###\s|\Z)",
     re.MULTILINE | re.DOTALL | re.IGNORECASE,
 )
 
@@ -186,7 +187,7 @@ def _make_prompt_source(stage_name: str) -> Callable[[ExecutionContext], str]:
 def _split_final_message(message: str) -> dict[str, str]:
     sections: dict[str, str] = {}
     for match in _SECTION_RE.finditer(message):
-        key = match.group(1).lower().replace(" ", "_")
+        key = match.group(1).lower().replace(" ", "_").replace("-", "_")
         sections[key] = match.group(2).strip()
     return sections
 
@@ -568,10 +569,14 @@ class RalphWorkflow(Workflow):
         assert ctx.item is not None and ctx.work_branch is not None
         assert self._host is not None, "RalphWorkflow.finalize_success requires host"
 
+        results = list(results)  # local mutable copy so ci-fix/rebase can append
+
         rebase = await self._rebase_before_push(ctx)
         if rebase.status == "conflict":
             await self._handle_rebase_conflict(ctx, results, rebase.final_message)
             return
+        if rebase.stage_result is not None:
+            results.append(rebase.stage_result)
 
         try:
             await self._host.push_branch(ctx.work_branch)
@@ -579,16 +584,7 @@ class RalphWorkflow(Workflow):
             await self._handle_push_failed(ctx, results, e)
             return
 
-        existing = await self._host.get_pr_for_branch(ctx.work_branch)
-        body = self._build_pr_body(ctx, results)
-        if existing is None:
-            title = f"{ctx.item.title} (#{ctx.item.item_id})"
-            pr = await self._host.create_pr(head=ctx.work_branch, title=title, body=body)
-        else:
-            await self._host.update_pr(existing.number, body=body)
-            pr = existing
-
-        await self._tracker.comment(ctx.item, f"🤖 Cog opened a PR for this: {pr.url}")
+        pr = await self._create_or_update_pr(ctx, results)
 
         try:
             checks = await self._wait_for_ci(ctx, pr)
@@ -600,6 +596,22 @@ class RalphWorkflow(Workflow):
             await self._mark_ci_success(ctx, results, pr)
         else:
             await self._handle_ci_failure(ctx, results, pr, checks)
+
+    async def _create_or_update_pr(
+        self, ctx: ExecutionContext, results: list[StageResult]
+    ) -> PullRequest:
+        assert ctx.item is not None and ctx.work_branch is not None
+        assert self._host is not None
+        existing = await self._host.get_pr_for_branch(ctx.work_branch)
+        body = self._build_pr_body(ctx, results)
+        if existing is None:
+            title = f"{ctx.item.title} (#{ctx.item.item_id})"
+            pr = await self._host.create_pr(head=ctx.work_branch, title=title, body=body)
+        else:
+            await self._host.update_pr(existing.number, body=body)
+            pr = existing
+        await self._tracker.comment(ctx.item, f"🤖 Cog opened a PR for this: {pr.url}")
+        return pr
 
     async def _wait_for_ci(self, ctx: ExecutionContext, pr: PullRequest) -> PrChecks:
         poll_interval = _parse_float_env("COG_CI_POLL_INTERVAL_SECONDS", _DEFAULT_POLL_INTERVAL)
@@ -708,11 +720,15 @@ class RalphWorkflow(Workflow):
                 )
                 return
 
+            results.append(fix_result)
             try:
                 await self._host.push_branch(ctx.work_branch)  # type: ignore[union-attr,arg-type]
             except HostError as e:
                 await self._handle_push_failed(ctx, results, e)
                 return
+
+            assert self._host is not None
+            await self._host.update_pr(pr.number, body=self._build_pr_body(ctx, results))
 
             try:
                 checks = await self._wait_for_ci(ctx, pr)
@@ -806,6 +822,8 @@ class RalphWorkflow(Workflow):
     ) -> None:
         assert ctx.item is not None
         assert self._host is not None
+
+        await self._host.update_pr(pr.number, body=self._build_pr_body(ctx, results))
 
         if isinstance(cause, CiRetryCapExhaustedError):
             retries_done = self._ci_retries.get(ctx.item.item_id, 0)
@@ -1000,22 +1018,43 @@ class RalphWorkflow(Workflow):
         return report_path
 
     def _build_pr_body(self, ctx: ExecutionContext, results: list[StageResult]) -> str:
-        build = next((r for r in results if r.stage.name == "build"), None)
-        sections = _split_final_message(build.final_message if build else "")
-        summary = sections.get("summary") or (build.final_message.strip() if build else "")
-        key_changes = sections.get("key_changes")
-        test_plan = sections.get("test_plan") or "- [ ] Manual verification of the change"
-        total_cost = sum(r.cost_usd for r in results)
+        by_name = {r.stage.name: r for r in results}
 
+        def _best_section(key: str) -> str | None:
+            for stage_name in ("document", "review", "build"):
+                r = by_name.get(stage_name)
+                if r is not None:
+                    val = _split_final_message(r.final_message).get(key)
+                    if val:
+                        return val
+            return None
+
+        build = by_name.get("build")
+        summary = _best_section("summary") or (build.final_message.strip() if build else "")
+        key_changes = _best_section("key_changes")
+        test_plan = _best_section("test_plan") or "- [ ] Manual verification of the change"
+
+        fixed_order = ["build", "review", "document", "rebase"]
+        ci_fix_names = sorted(n for n in by_name if n.startswith("ci-fix"))
+        follow_up_parts = [
+            _split_final_message(by_name[n].final_message).get("follow_up_items", "").strip()
+            for n in fixed_order + ci_fix_names
+            if n in by_name
+        ]
+        follow_up = "\n".join(p for p in follow_up_parts if p) or None
+
+        total_cost = sum(r.cost_usd for r in results)
         body = f"## Summary\n\n{summary}\n\n"
         if key_changes:
             body += f"## Key changes\n\n{key_changes}\n\n"
+        body += f"## Test plan\n\n{test_plan}\n\n"
+        if follow_up:
+            body += f"## Follow-up items\n\n{follow_up}\n\n"
         body += (
             f"## Closes\n\nCloses #{ctx.item.item_id}\n\n"  # type: ignore[union-attr]
-            f"## Test plan\n\n{test_plan}\n\n"
             f"---\n🤖 Generated by cog. Iteration cost: ${total_cost:.3f}\n"
         )
-        doc = next((r for r in results if r.stage.name == "document"), None)
+        doc = by_name.get("document")
         if doc is not None and doc.error is not None:
             body += f"\n⚠ Document stage failed: {doc.error}. Docs may be out of date.\n"
         return body
@@ -1053,7 +1092,7 @@ class RalphWorkflow(Workflow):
             await git.rebase_abort(git_dir)
             return RebaseOutcome(status="conflict", final_message=result.final_message)
 
-        return RebaseOutcome(status="clean")
+        return RebaseOutcome(status="clean", stage_result=result)
 
     async def _handle_rebase_conflict(
         self,

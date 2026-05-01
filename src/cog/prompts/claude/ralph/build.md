@@ -112,15 +112,23 @@ only if they represent distinct logical moves (e.g., "refactor X" then
 
 ## Final message format
 
-End your final message with three structured sections in this order:
-`### Summary`, `### Key changes`, `### Test plan`. The wrapper extracts
-each section into the PR body; keeping them structured is load-bearing.
+End your final message with four structured sections in this order:
+`### Summary`, `### Key changes`, `### Test plan`, `### Follow-up items`.
+The wrapper extracts each section into the PR body; keeping them structured
+is load-bearing.
+
+These sections describe what this PR adds against the base branch, not
+what you did this iteration. Fill in each section based on the work done.
 
 ### Summary
 
 2–4 sentences explaining WHAT changed and WHY — enough for a reviewer to
 understand the PR without reading the diff. Focus on intent and the
 approach chosen; the code shows the details.
+
+If you made a judgment call between options where reviewer input would help
+(timeouts, retry counts, naming, scoping decisions), call it out so the
+reviewer can validate.
 
 Example:
 ```
@@ -192,6 +200,20 @@ Example format:
 - [ ] Toggle skip on for breakfast, save, reload — confirm it persists
 - [ ] Verify skipped meals don't appear on the weekly planner
 ```
+
+### Follow-up items
+
+Optional. If you noticed anything during this iteration the reviewer
+should know about — but doesn't fit Summary / Key changes / Test plan —
+list each as a bullet. Examples:
+
+  - The test you wrote depends on a flaky external service
+  - An unrelated bug you noticed in foo.py
+  - A workaround you took because the proper fix would balloon the PR
+  - Something worth filing as its own follow-up issue (e.g., "the
+    `_compute_cost` divide-by-zero in telemetry.py deserves its own fix")
+
+Skip this section entirely if there is nothing worth flagging.
 
 ## Git rules (hard)
 

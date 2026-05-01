@@ -44,6 +44,17 @@ Consult the project's CLAUDE.md for the specific commands this project uses.
 Commit exactly once when the fix passes the full suite. If you cannot
 reproduce or fix the failure, exit without committing.
 
+## Final message format
+
+End your final message with `### Follow-up items` if there is anything
+the reviewer should know about:
+
+  - Something you noticed that doesn't fit the CI fix itself
+  - A workaround you took because the proper fix would balloon scope
+  - Something worth filing as its own follow-up issue
+
+Skip this section entirely if there is nothing worth flagging.
+
 ## Git rules (hard)
 
 - Make commits locally; do not push them. The wrapper pushes the branch.
