@@ -443,6 +443,22 @@ async def test_sidebar_renders_count_for_workflow_rows(tmp_path: Path) -> None:
         assert "0" in str(refine_label.renderable)
 
 
+async def test_sidebar_row_layout_keybind_left_count_right(tmp_path: Path) -> None:
+    """Pin the sidebar layout: keybind on the left, count on the right."""
+    async with _ShellApp(tmp_path).run_test(headless=True) as pilot:
+        await pilot.pause()
+        sidebar = pilot.app.query_one(Sidebar)
+        sidebar._counts = {"ralph": 7}
+        sidebar._rerender_row("ralph")
+        await pilot.pause()
+
+        rendered = str(sidebar.query_one("#nav-ralph").query_one("Label").renderable)
+        keybind_idx = rendered.index("^3")
+        name_idx = rendered.index("Ralph")
+        count_idx = rendered.index("7")
+        assert keybind_idx < name_idx < count_idx
+
+
 async def test_sidebar_renders_blank_slot_for_none_count(tmp_path: Path) -> None:
     async with _ShellApp(tmp_path).run_test(headless=True) as pilot:
         await pilot.pause()
