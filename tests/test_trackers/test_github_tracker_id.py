@@ -15,6 +15,8 @@ LIST_ARGV = (
     "agent-ready",
     "--state",
     "open",
+    "--limit",
+    "1000",
     "--json",
     LIST_FIELDS,
 )

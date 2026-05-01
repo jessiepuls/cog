@@ -33,6 +33,8 @@ class GitHubIssueTracker(IssueTracker):
             label,
             "--state",
             "open",
+            "--limit",
+            "1000",
             "--json",
             "number,title,body,labels,assignees,state,createdAt,updatedAt,url",
         ]
