@@ -301,6 +301,8 @@ class RefineView(Widget, can_focus=True):
             self._set_status(
                 f"[red]{self._format_status('Failed', item=item, suffix=f': {e}')}[/red]"
             )
+        finally:
+            await self._cleanup_review_pane()
 
         self._active_item = None
         self._review_future = None
@@ -349,18 +351,19 @@ class RefineView(Widget, can_focus=True):
             outcome = await self._review_future
         finally:
             self._review_future = None
-            # Restore: remove proposed scroll wrapper, unhide chat pane (instance preserved).
-            try:
-                await self.query_one("#review-proposed-scroll", ScrollableContainer).remove()
-            except Exception:  # noqa: BLE001
-                pass
-            if self._chat_pane is not None:
-                self._chat_pane.display = True
-            self._switch_to("running")
             if self._active_item is not None:
-                self._set_status(self._format_status("Refining", item=self._active_item))
+                self._set_status(f"Applying changes to #{self._active_item.item_id}...")
+            self.refresh_bindings()
 
         return outcome
+
+    async def _cleanup_review_pane(self) -> None:
+        try:
+            await self.query_one("#review-proposed-scroll", ScrollableContainer).remove()
+        except Exception:  # noqa: BLE001
+            pass
+        if self._chat_pane is not None:
+            self._chat_pane.display = True
 
     def _render_title_strip(self, original_title: str, proposed_title: str) -> None:
         strip = self.query_one("#review-title-strip", Static)
@@ -439,7 +442,8 @@ class RefineView(Widget, can_focus=True):
 
     def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:
         if action in ("review_accept", "review_edit", "review_abandon"):
-            return True if self._substate == "review" else None
+            active = self._substate == "review" and self._review_future is not None
+            return True if active else None
         if action == "refresh_queue":
             return True if self._substate == "idle" else None
         if action in ("narrow_issue", "widen_issue"):
