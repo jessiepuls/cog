@@ -114,18 +114,18 @@ class Sidebar(Widget):
             self._rerender_row(v.id)
 
     def _label_for(self, v: ShellView) -> str:
-        # Layout: [name + dot][padding][count slot (3)][space][keybind]
+        # Layout: [keybind][space][name + dot][padding][count slot (3)]
         dot = " [yellow]●[/yellow]" if v.id in self._attention else "  "
         name = f"{v.label}{dot}"
         keybind = v.keybind.replace("ctrl+", "^")
-        visible_len = len(v.label) + 2  # name + dot/spacer
+        visible_name_len = len(v.label) + 2  # name + dot/spacer
 
         count = self._counts.get(v.id)
         count_slot = f"[dim]{count:>3}[/dim]" if count is not None else "   "
 
-        # Reserve 4 chars for count_slot (3) + gap (1), then right-align keybind.
-        pad = max(1, self._ROW_CONTENT_WIDTH - visible_len - 4 - len(keybind))
-        return f"{name}{' ' * pad}{count_slot} [dim]{keybind}[/dim]"
+        # Reserve len(keybind) + 1 (gap) on the left, 3 for count slot on the right.
+        pad = max(1, self._ROW_CONTENT_WIDTH - len(keybind) - 1 - visible_name_len - 3)
+        return f"[dim]{keybind}[/dim] {name}{' ' * pad}{count_slot}"
 
     def compose(self) -> ComposeResult:
         yield ListView(
