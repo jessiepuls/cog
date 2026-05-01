@@ -333,8 +333,10 @@ class RefineView(Widget, can_focus=True):
         right = self.query_one("#refine-right", Container)
         if self._chat_pane is not None:
             self._chat_pane.display = False
+        proposed_scroll = ScrollableContainer(id="review-proposed-scroll")
+        await right.mount(proposed_scroll)
         proposed = Static("", id="review-proposed-body")
-        await right.mount(proposed)
+        await proposed_scroll.mount(proposed)
         proposed.update(Markdown(str(proposed_body) or "*(empty)*"))
 
         self._render_title_strip(original_title, proposed_title)
@@ -347,9 +349,9 @@ class RefineView(Widget, can_focus=True):
             outcome = await self._review_future
         finally:
             self._review_future = None
-            # Restore: remove proposed body, unhide chat pane (instance preserved).
+            # Restore: remove proposed scroll wrapper, unhide chat pane (instance preserved).
             try:
-                await self.query_one("#review-proposed-body", Static).remove()
+                await self.query_one("#review-proposed-scroll", ScrollableContainer).remove()
             except Exception:  # noqa: BLE001
                 pass
             if self._chat_pane is not None:

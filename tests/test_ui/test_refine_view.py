@@ -182,6 +182,73 @@ async def test_refine_view_review_panes_populated_with_bodies(
         await task
 
 
+async def test_refine_view_review_proposed_body_in_scrollable_container(
+    tmp_path: Path, xdg_state: Path
+) -> None:
+    from textual.containers import ScrollableContainer
+
+    tracker = _tracker_with([])
+    async with _RefineApp(tmp_path, tracker).run_test(headless=True) as pilot:
+        await pilot.pause()
+        view = pilot.app.query_one(RefineView)
+
+        long_body = "\n".join(f"Line {i}" for i in range(120))
+        task = asyncio.create_task(
+            view.review(
+                original_title="t",
+                original_body="o",
+                proposed_title="t",
+                proposed_body=long_body,
+                tmp_dir=tmp_path,
+            )
+        )
+        for _ in range(10):
+            await asyncio.sleep(0)
+
+        # The proposed body Static must be inside a ScrollableContainer
+        scroll = view.query_one("#review-proposed-scroll", ScrollableContainer)
+        prop = scroll.query_one("#review-proposed-body", Static)
+        assert prop is not None
+
+        # The scroll wrapper is removed after review completes
+        view.action_review_accept()
+        await task
+        assert len(view.query("#review-proposed-scroll")) == 0
+
+
+async def test_refine_view_review_edit_updates_proposed_body_in_scroll(
+    tmp_path: Path, xdg_state: Path
+) -> None:
+    from unittest.mock import patch
+
+    tracker = _tracker_with([])
+    async with _RefineApp(tmp_path, tracker).run_test(headless=True) as pilot:
+        await pilot.pause()
+        view = pilot.app.query_one(RefineView)
+
+        task = asyncio.create_task(
+            view.review(
+                original_title="t",
+                original_body="o",
+                proposed_title="t",
+                proposed_body="original proposed",
+                tmp_dir=tmp_path,
+            )
+        )
+        for _ in range(10):
+            await asyncio.sleep(0)
+
+        # Edit action must still find and update #review-proposed-body
+        with patch("cog.ui.views.refine.suspend_and_edit", return_value="edited proposed"):
+            await view.action_review_edit()
+
+        prop = view.query_one("#review-proposed-body", Static)
+        assert "edited proposed" in prop.renderable.markup  # type: ignore[attr-defined]
+
+        view.action_review_accept()
+        await task
+
+
 async def test_refine_view_chat_pane_instance_preserved_across_review_swap(
     tmp_path: Path, xdg_state: Path
 ) -> None:
