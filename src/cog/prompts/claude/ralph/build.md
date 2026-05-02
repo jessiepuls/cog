@@ -28,7 +28,9 @@ file; pipe through `head -c 30000` or use `--jq` to stay bounded.
    context** above). Item number and title are already in the runtime
    context.
 2. Implement the change required by the item.
-3. Write or update tests that exercise the new or changed behavior.
+3. Write or update tests that exercise the new or changed behavior. See
+   **Stewardship** below for when to extend coverage beyond the
+   directly-changed code.
 4. Run the project's test suite. Fix any failures.
 5. Run the project's linter. Fix any errors.
 6. Commit your work with a clear message that references the issue number
@@ -56,6 +58,49 @@ These are concrete maintainability rules, not stylistic preferences:
   workaround).
 
 The project's `CLAUDE.md` may override these thresholds — its rules win.
+
+## Stewardship
+
+<!-- Stewardship criteria (Small / Adjacent / Same-shape) appear in three
+     places. Keep the criteria definitions consistent across:
+       - src/cog/prompts/claude/ralph/build.md
+       - src/cog/prompts/claude/ralph/review.md
+       - docs/workflows/ralph.md
+     The surrounding framing differs per context (this prompt = "do this",
+     review prompt = "don't flag these", docs = "the system does this");
+     only the three criteria themselves must stay in sync. -->
+
+Be a steward of the code. When you notice something wrong in code you're
+already working in — a missing test case, a small bug, a local refactor
+opportunity — the default is to fix it in this PR, not to walk past it.
+The `### Follow-up items` PR section is the escape valve when a fix is
+too large or too far afield to fold in.
+
+A noticed improvement belongs in this PR only when **all three** of the
+following hold. If any one fails, list it under `### Follow-up items`
+instead.
+
+- **Small** — the fix is bounded: roughly one function or a handful of
+  lines, a single missing test case, a single local refactor. As a rough
+  ceiling, it should not grow the diff by more than ~30% and must not
+  pull in a new module.
+- **Adjacent** — the file or area is already open as part of the primary
+  work, and you understand it from doing that work. "While I'm here, let
+  me jump three modules over" is not adjacent.
+- **Same-shape** — the fix is a bug fix, a missing test, or a local
+  refactor. Redesigning an abstraction, changing a public interface, or
+  restructuring a module is not same-shape and belongs in a follow-up
+  regardless of size.
+
+All three criteria must hold; any failing criterion sends the item to
+`### Follow-up items`.
+
+*Fold in*: while modifying `parse_event()`, you notice it has no test
+for empty input — add the test in this PR.
+
+*Follow up*: while modifying `parse_event()`, you notice the surrounding
+module mixes sync and async APIs inconsistently — file as a follow-up,
+don't refactor here.
 
 ## Bounded tool calls (important)
 
