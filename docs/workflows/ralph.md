@@ -45,6 +45,15 @@ as markdown. Change prompt behavior by editing the markdown, not Python.
 
 ### Stewardship
 
+<!-- Stewardship criteria (Small / Adjacent / Same-shape) appear in three
+     places. Keep the criteria definitions consistent across:
+       - src/cog/prompts/claude/ralph/build.md
+       - src/cog/prompts/claude/ralph/review.md
+       - docs/workflows/ralph.md (this file)
+     The surrounding framing differs per context (build prompt = "do this",
+     review prompt = "don't flag these", these docs = "the system does this");
+     only the three criteria themselves must stay in sync. -->
+
 The build stage is expected to fold small adjacent improvements into the same
 PR rather than leave them behind. A noticed fix belongs in the PR only when all
 three of the following hold; otherwise it goes under `### Follow-up items`:

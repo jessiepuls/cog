@@ -22,6 +22,15 @@ final message.
    prevents? Near-duplicate blocks that should be extracted? Comments that
    restate what the code does?
 
+<!-- Stewardship criteria (Small / Adjacent / Same-shape) appear in three
+     places. Keep the criteria definitions consistent across:
+       - src/cog/prompts/claude/ralph/build.md
+       - src/cog/prompts/claude/ralph/review.md
+       - docs/workflows/ralph.md
+     The surrounding framing differs per context (build prompt = "do this",
+     this prompt = "don't flag these", docs = "the system does this");
+     only the three criteria themselves must stay in sync. -->
+
 **Stewardship scope** — the build stage is expected to fold in small,
 adjacent, same-shape improvements noticed while working: a missing test
 case, a nearby bug fix, a local refactor. Do not flag these as scope

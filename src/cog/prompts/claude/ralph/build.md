@@ -61,6 +61,15 @@ The project's `CLAUDE.md` may override these thresholds — its rules win.
 
 ## Stewardship
 
+<!-- Stewardship criteria (Small / Adjacent / Same-shape) appear in three
+     places. Keep the criteria definitions consistent across:
+       - src/cog/prompts/claude/ralph/build.md
+       - src/cog/prompts/claude/ralph/review.md
+       - docs/workflows/ralph.md
+     The surrounding framing differs per context (this prompt = "do this",
+     review prompt = "don't flag these", docs = "the system does this");
+     only the three criteria themselves must stay in sync. -->
+
 Be a steward of the code. When you notice something wrong in code you're
 already working in — a missing test case, a small bug, a local refactor
 opportunity — the default is to fix it in this PR, not to walk past it.
