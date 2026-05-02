@@ -12,7 +12,7 @@ from textual.widgets import ListView
 
 from cog.core.item import Item
 from cog.core.tracker import IssueTracker
-from cog.ui.messages import QueueCountsStale, ViewAttention
+from cog.ui.messages import ViewAttention
 from cog.ui.screens.shell import CogShellScreen, Sidebar
 from cog.ui.views.dashboard import DashboardView
 from cog.ui.views.ralph import RalphView
@@ -371,38 +371,29 @@ async def test_sidebar_label_shows_dot_marker_when_attention_set(tmp_path: Path)
 
 
 # ---------------------------------------------------------------------------
-# Queue counts in sidebar (#157)
+# Queue counts in sidebar (#202)
 # ---------------------------------------------------------------------------
 
 
-async def test_shell_refresh_queue_counts_populates_reactive(tmp_path: Path) -> None:
-    tracker = _tracker_with_counts(**{"agent-ready": 3, "needs-refinement": 7})
+async def test_ralph_view_queue_count_reactive_set_after_refresh(tmp_path: Path) -> None:
+    tracker = _tracker_with_counts(**{"agent-ready": 3})
     async with _ShellApp(tmp_path, tracker).run_test(headless=True) as pilot:
-        # Wait for the on_mount worker to finish.
         for _ in range(5):
             await pilot.pause()
-        screen = pilot.app.screen
-        assert isinstance(screen, CogShellScreen)
-        assert screen.queue_counts.get("ralph") == 3
-        assert screen.queue_counts.get("refine") == 7
+        ralph = pilot.app.query_one(RalphView)
+        assert ralph.queue_count == 3
 
 
-async def test_shell_refresh_queue_counts_no_assignee_filter(tmp_path: Path) -> None:
-    """Sidebar counts fetch all items in the queue, not just @me-assigned ones."""
-    t: IssueTracker = AsyncMock(spec=IssueTracker)
-    t.list_by_label = AsyncMock(return_value=_make_items(4))  # type: ignore[attr-defined]
-
-    async with _ShellApp(tmp_path, t).run_test(headless=True) as pilot:
+async def test_refine_view_queue_count_reactive_set_after_refresh(tmp_path: Path) -> None:
+    tracker = _tracker_with_counts(**{"needs-refinement": 7})
+    async with _ShellApp(tmp_path, tracker).run_test(headless=True) as pilot:
         for _ in range(5):
             await pilot.pause()
-        screen = pilot.app.screen
-        assert isinstance(screen, CogShellScreen)
-        # Verify list_by_label was called without an assignee keyword argument.
-        for call in t.list_by_label.call_args_list:
-            assert "assignee" not in call.kwargs
+        refine = pilot.app.query_one(RefineView)
+        assert refine.queue_count == 7
 
 
-async def test_shell_refresh_queue_counts_sets_none_on_error(tmp_path: Path) -> None:
+async def test_ralph_view_queue_count_none_on_error(tmp_path: Path) -> None:
     from cog.core.errors import TrackerError
 
     t: IssueTracker = AsyncMock(spec=IssueTracker)
@@ -413,33 +404,25 @@ async def test_shell_refresh_queue_counts_sets_none_on_error(tmp_path: Path) -> 
         return _make_items(0)
 
     t.list_by_label = AsyncMock(side_effect=list_by_label)  # type: ignore[attr-defined]
-
     async with _ShellApp(tmp_path, t).run_test(headless=True) as pilot:
         for _ in range(5):
             await pilot.pause()
-        screen = pilot.app.screen
-        assert isinstance(screen, CogShellScreen)
-        assert screen.queue_counts.get("ralph") is None
-        assert screen.queue_counts.get("refine") == 0
+        ralph = pilot.app.query_one(RalphView)
+        assert ralph.queue_count is None
 
 
-async def test_shell_queue_counts_stale_triggers_refresh(tmp_path: Path) -> None:
-    tracker = _tracker_with_counts(**{"agent-ready": 5})
+async def test_sidebar_count_updates_when_view_queue_count_changes(tmp_path: Path) -> None:
+    tracker = _tracker_with_counts(**{"agent-ready": 4, "needs-refinement": 2})
     async with _ShellApp(tmp_path, tracker).run_test(headless=True) as pilot:
         for _ in range(5):
             await pilot.pause()
-        screen = pilot.app.screen
-        assert isinstance(screen, CogShellScreen)
-        # Override tracker to return a new count.
-        tracker.list_by_label = AsyncMock(  # type: ignore[attr-defined]
-            side_effect=lambda label, *, assignee=None: _make_items(
-                9 if label == "agent-ready" else 1
-            )
-        )
-        screen.post_message(QueueCountsStale())
-        for _ in range(5):
-            await pilot.pause()
-        assert screen.queue_counts.get("ralph") == 9
+        sidebar = pilot.app.query_one(Sidebar)
+        # Directly mutate the view's reactive and verify sidebar updates.
+        ralph = pilot.app.query_one(RalphView)
+        ralph.queue_count = 11
+        await pilot.pause()
+        ralph_label = sidebar.query_one("#nav-ralph").query_one("Label")
+        assert "11" in str(ralph_label.renderable)
 
 
 async def test_sidebar_renders_count_for_workflow_rows(tmp_path: Path) -> None:
