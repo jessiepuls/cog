@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 
 from textual.app import ComposeResult
 from textual.containers import VerticalScroll
+from textual.events import Resize
 from textual.message import Message
 from textual.widget import Widget
 from textual.widgets import Label, ListItem, ListView, Markdown, Static
@@ -84,24 +85,30 @@ class IssueList(Widget):
 
     async def set_items(self, items: list[Item], *, preserve_id: str | None = None) -> None:
         self._items = items
+        await self._render_rows(preserve_id=preserve_id)
+
+    async def _render_rows(self, *, preserve_id: str | None = None) -> None:
         lv = self.query_one("#issue-listview", ListView)
         overlay = self.query_one("#list-overlay", Static)
         await lv.clear()
-        if not items:
+        if not self._items:
             overlay.add_class("visible")
             lv.display = False
             return
         overlay.remove_class("visible")
         lv.display = True
-        for item in items:
-            await lv.append(ListItem(Label(_row_text(item)), id=f"issue-{item.item_id}"))
-        # Restore focus
+        width = self.size.width or 80
+        for item in self._items:
+            await lv.append(ListItem(Label(_row_text(item, width)), id=f"issue-{item.item_id}"))
         if preserve_id:
-            for i, it in enumerate(items):
+            for i, it in enumerate(self._items):
                 if it.item_id == preserve_id:
                     lv.index = i
                     return
         lv.index = 0
+
+    async def on_resize(self, _: Resize) -> None:
+        await self._render_rows(preserve_id=self.focused_item_id())
 
     def show_overlay(self, text: str) -> None:
         overlay = self.query_one("#list-overlay", Static)
