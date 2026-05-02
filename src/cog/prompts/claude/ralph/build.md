@@ -28,7 +28,9 @@ file; pipe through `head -c 30000` or use `--jq` to stay bounded.
    context** above). Item number and title are already in the runtime
    context.
 2. Implement the change required by the item.
-3. Write or update tests that exercise the new or changed behavior. See **Stewardship** below for when to extend coverage beyond the directly-changed code.
+3. Write or update tests that exercise the new or changed behavior. See
+   **Stewardship** below for when to extend coverage beyond the
+   directly-changed code.
 4. Run the project's test suite. Fix any failures.
 5. Run the project's linter. Fix any errors.
 6. Commit your work with a clear message that references the issue number
