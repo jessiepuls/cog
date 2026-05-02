@@ -210,10 +210,8 @@ async def test_refine_view_review_proposed_body_in_scrollable_container(
         prop = scroll.query_one("#review-proposed-body", Static)
         assert prop is not None
 
-        # The scroll wrapper is removed after review completes
         view.action_review_accept()
         await task
-        assert len(view.query("#review-proposed-scroll")) == 0
 
 
 async def test_refine_view_review_edit_updates_proposed_body_in_scroll(
@@ -288,11 +286,97 @@ async def test_refine_view_chat_pane_instance_preserved_across_review_swap(
         )
         await pilot.pause()
 
-        # Same chat instance still mounted, same RichLog inside
+        # Same chat instance still mounted, same RichLog inside.
+        # display is still False here — cleanup happens in _run_refine, not review().
         children = list(right.children)
         assert chat in children
-        assert chat.display is True
         assert id(chat.query_one("#scrollback", RichLog)) == log_id
+
+
+async def test_review_finalize_gap_chat_pane_stays_hidden_and_proposed_body_visible(
+    tmp_path: Path, xdg_state: Path
+) -> None:
+    """After accept, chat pane stays hidden and proposed body stays visible until
+    _cleanup_review_pane() is called — i.e. not during the finalize gap."""
+    from textual.containers import Container
+
+    from cog.ui.widgets.chat_pane import ChatPaneWidget
+
+    tracker = _tracker_with([])
+    async with _RefineApp(tmp_path, tracker).run_test(headless=True) as pilot:
+        await pilot.pause()
+        view = pilot.app.query_one(RefineView)
+
+        right = view.query_one("#refine-right", Container)
+        chat = ChatPaneWidget()
+        view._chat_pane = chat
+        await right.mount(chat)
+        view._substate = "running"
+        view._active_item = _item(42)
+
+        async def _accept_later() -> None:
+            await asyncio.sleep(0.05)
+            view.action_review_accept()
+
+        pilot.app.run_worker(_accept_later())
+        await view.review(
+            original_title="orig",
+            original_body="o",
+            proposed_title="new",
+            proposed_body="p",
+            tmp_dir=tmp_path,
+        )
+
+        # Simulates the finalize gap: review() returned but executor hasn't finished.
+        # Chat pane must still be hidden; proposed scroll must still be mounted.
+        assert chat.display is False
+        assert len(view.query("#review-proposed-scroll")) == 1
+
+        # Simulates executor finishing: _cleanup_review_pane() restores state.
+        await view._cleanup_review_pane()
+        assert chat.display is True
+        assert len(view.query("#review-proposed-scroll")) == 0
+
+
+async def test_review_bindings_hidden_after_accept_during_finalize_gap(
+    tmp_path: Path, xdg_state: Path
+) -> None:
+    """Once the user accepts, review bindings disappear even though the view
+    stays in review substate during the finalize gap."""
+    from textual.containers import Container
+
+    from cog.ui.widgets.chat_pane import ChatPaneWidget
+
+    tracker = _tracker_with([])
+    async with _RefineApp(tmp_path, tracker).run_test(headless=True) as pilot:
+        await pilot.pause()
+        view = pilot.app.query_one(RefineView)
+
+        right = view.query_one("#refine-right", Container)
+        chat = ChatPaneWidget()
+        view._chat_pane = chat
+        await right.mount(chat)
+        view._substate = "running"
+        view._active_item = _item(7)
+
+        async def _accept_later() -> None:
+            await asyncio.sleep(0.05)
+            view.action_review_accept()
+
+        pilot.app.run_worker(_accept_later())
+        await view.review(
+            original_title="t",
+            original_body="o",
+            proposed_title="t",
+            proposed_body="p",
+            tmp_dir=tmp_path,
+        )
+
+        # After accept: _review_future is None, so review bindings are hidden.
+        assert view._review_future is None
+        assert view.check_action("review_accept", ()) is None
+        assert view.check_action("review_edit", ()) is None
+        assert view.check_action("review_abandon", ()) is None
 
 
 async def test_refine_view_check_action_hides_review_bindings_outside_review(
