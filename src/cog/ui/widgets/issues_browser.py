@@ -26,10 +26,16 @@ def _row_text(item: Item, width: int = 80) -> str:
     glyph = " ⚠" if has_failed else ""
 
     label_parts = cog + other
-    chips_str = " ".join(f"[{lbl}]" for lbl in label_parts) + glyph
+    # Visual representation: "[name1] [name2]". Brackets must be escaped in Textual
+    # markup so they render as literal characters instead of being parsed as tags.
+    chips_visible_len = sum(len(lbl) + 2 for lbl in label_parts)
+    if len(label_parts) > 1:
+        chips_visible_len += len(label_parts) - 1  # spaces between chips
+    chips_visible_len += len(glyph)
+    chips_str = " ".join(rf"\[{lbl}\]" for lbl in label_parts) + glyph
 
     # Account for number (6), space, chips, trailing spaces
-    title_budget = max(10, width - 6 - len(chips_str) - 2)
+    title_budget = max(10, width - 6 - chips_visible_len - 2)
     title = item.title if len(item.title) <= title_budget else item.title[: title_budget - 1] + "…"
 
     dim = item.state == "closed"

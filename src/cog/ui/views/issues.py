@@ -31,6 +31,17 @@ class IssuesView(Widget, can_focus=True):
         Binding("/", "focus_search", "Search"),
     ]
 
+    def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:
+        # When the filter input has focus, every keystroke is text input — don't
+        # let ancestor bindings (like `r` / `/`) swallow them.
+        if action in ("refresh", "focus_search"):
+            try:
+                if self.query_one("#issues-filter-input", Input).has_focus:
+                    return False
+            except Exception:  # noqa: BLE001
+                pass
+        return True
+
     DEFAULT_CSS = """
     IssuesView {
         layout: vertical;
@@ -53,7 +64,7 @@ class IssuesView(Widget, can_focus=True):
         layout: horizontal;
     }
     IssuesView IssueList {
-        width: 1fr;
+        width: 2fr;
         height: 1fr;
     }
     IssuesView IssuePreview {
