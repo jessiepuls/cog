@@ -8,7 +8,7 @@ from typing import Any, ClassVar
 
 from cog.core.errors import TrackerError
 from cog.core.item import Comment, Item
-from cog.core.tracker import IssueTracker
+from cog.core.tracker import IssueTracker, ItemListFilter
 
 
 class GitHubIssueTracker(IssueTracker):
@@ -40,6 +40,29 @@ class GitHubIssueTracker(IssueTracker):
         ]
         if assignee is not None:
             args += ["--assignee", assignee]
+        data = await self._gh_json(args)
+        tracker_id = await self._tracker_id_cached()
+        return [self._to_item(record, tracker_id, with_comments=False) for record in data]
+
+    async def list(self, filter: ItemListFilter | None = None) -> list[Item]:
+        """Returns metadata-only Items. `comments` is always an empty tuple."""
+        f = filter or ItemListFilter()
+        args = [
+            "issue",
+            "list",
+            "--state",
+            f.state,
+            "--limit",
+            str(f.limit),
+            "--json",
+            "number,title,body,labels,assignees,state,createdAt,updatedAt,url",
+        ]
+        for label in f.labels:
+            args += ["--label", label]
+        if f.assignee is not None:
+            args += ["--assignee", f.assignee]
+        if f.search is not None:
+            args += ["--search", f.search]
         data = await self._gh_json(args)
         tracker_id = await self._tracker_id_cached()
         return [self._to_item(record, tracker_id, with_comments=False) for record in data]

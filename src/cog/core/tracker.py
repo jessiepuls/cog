@@ -1,7 +1,17 @@
 from abc import ABC, abstractmethod
-from typing import ClassVar
+from dataclasses import dataclass
+from typing import ClassVar, Literal
 
 from cog.core.item import Item
+
+
+@dataclass(frozen=True)
+class ItemListFilter:
+    labels: tuple[str, ...] = ()
+    state: Literal["open", "closed", "all"] = "open"
+    assignee: str | None = None
+    search: str | None = None
+    limit: int = 1000
 
 
 class IssueTracker(ABC):
@@ -12,6 +22,9 @@ class IssueTracker(ABC):
 
     @abstractmethod
     async def list_by_label(self, label: str, *, assignee: str | None = None) -> list[Item]: ...
+
+    @abstractmethod
+    async def list(self, filter: ItemListFilter | None = None) -> list[Item]: ...
 
     @abstractmethod
     async def get(self, item_id: str) -> Item: ...
