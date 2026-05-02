@@ -14,6 +14,12 @@ class ItemListFilter:
     limit: int = 1000
 
 
+@dataclass(frozen=True)
+class ItemListResult:
+    items: list[Item]
+    total: int
+
+
 class IssueTracker(ABC):
     can_read: ClassVar[bool]
     can_comment: ClassVar[bool]
@@ -24,7 +30,7 @@ class IssueTracker(ABC):
     async def list_by_label(self, label: str, *, assignee: str | None = None) -> list[Item]: ...
 
     @abstractmethod
-    async def list(self, filter: ItemListFilter | None = None) -> list[Item]: ...
+    async def list(self, filter: ItemListFilter | None = None) -> ItemListResult: ...
 
     @abstractmethod
     async def get(self, item_id: str) -> Item: ...

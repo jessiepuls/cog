@@ -134,14 +134,15 @@ with the log caught up.
 ┌──────────┬──────────────────────────────────────────────────┐
 │ sidebar  │ active view (content area)                       │
 │ ^1 Dash  │                                                  │
-│ ^2 Ref●  3│  <DashboardView / RefineView / RalphView / ChatView>
-│ ^3 Ral   1│                                                  │
-│ ^4 Chat  │                                                  │
+│ ^2 Iss   │  <DashboardView / IssuesView / RefineView /      │
+│ ^3 Ref●  3│   RalphView / ChatView>                         │
+│ ^4 Ral   1│                                                  │
+│ ^5 Chat  │                                                  │
 └──────────┴──────────────────────────────────────────────────┘
  ^Q Quit
 ```
 
-- **Ctrl+1/2/3/4** — switch views
+- **Ctrl+1/2/3/4/5** — switch views
 - **Ctrl+Q** — quit (confirm if workflows in-flight)
 - Sidebar yellow `●` — attention indicator (refine awaiting reply, run
   complete, etc.)
