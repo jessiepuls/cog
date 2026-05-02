@@ -1,4 +1,4 @@
-"""CogShellScreen — persistent sidebar + content shell (#121, #122).
+"""CogShellScreen — persistent sidebar + content shell (#121, #122, #192).
 
 Replaces the old screen-stack root (`MainMenuScreen`) with a single screen
 that hosts all top-level views as mounted-but-toggled widgets. Workers
@@ -6,8 +6,8 @@ living on a view keep running when the user flips to another view, which
 unlocks multitasking (e.g. start a ralph run, flip to refine, return to
 ralph and see progress).
 
-Real view content lands in follow-up sub-issues (#123-#125). This file
-stubs the three views so the navigation shell is reviewable on its own.
+Dynamic slots (#192): parallel workflow runs launched from the Issues view
+are appended below the static rows in the sidebar and numbered Ctrl+6 onward.
 """
 
 from __future__ import annotations
@@ -19,12 +19,15 @@ from pathlib import Path
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Container, Horizontal
+from textual.events import Key
 from textual.screen import Screen
 from textual.widget import Widget
-from textual.widgets import Footer, Header, Label, ListItem, ListView, Static
+from textual.widgets import Footer, Header, Label, ListItem, ListView
 
+from cog.core.item import Item
 from cog.core.tracker import IssueTracker
-from cog.ui.messages import ViewAttention
+from cog.ui.dynamic_slots import DynamicSlot, DynamicSlotRegistry, max_concurrent_implements
+from cog.ui.messages import LaunchSlotRequest, SlotDismissed, SlotStateChanged, ViewAttention
 from cog.ui.views.chat import ChatView
 from cog.ui.views.dashboard import DashboardView
 from cog.ui.views.issues import IssuesView
@@ -50,23 +53,15 @@ _VIEWS: tuple[ShellView, ...] = (
     ShellView(id="chat", label="Chat", keybind="ctrl+5"),
 )
 
-
-class _StubView(Widget):
-    """Placeholder view widget — replaced with real content in #123-#125."""
-
-    def __init__(self, view: ShellView) -> None:
-        super().__init__(id=f"view-{view.id}")
-        self._view = view
-
-    def compose(self) -> ComposeResult:
-        yield Static(
-            f"[dim]{self._view.label} view — coming in a follow-up issue.[/dim]",
-            id=f"stub-{self._view.id}",
-        )
+_STATIC_COUNT = len(_VIEWS)
 
 
 class Sidebar(Widget):
-    """Left sidebar listing views with keybind hints."""
+    """Left sidebar listing views with keybind hints.
+
+    Static rows are rendered once and updated in-place. Dynamic rows
+    (slots) are rebuilt asynchronously whenever the registry changes.
+    """
 
     _SIDEBAR_WIDTH = 28
     # Content width inside a row = sidebar width - ListView scroll/padding
@@ -95,6 +90,9 @@ class Sidebar(Widget):
         border-left: thick $accent;
         background: $surface-lighten-1;
         text-style: bold;
+    }
+    Sidebar ListItem.-divider {
+        color: $text-muted;
     }
     """
 
@@ -156,13 +154,52 @@ class Sidebar(Widget):
         label = row.query_one(Label)
         label.update(self._label_for(target))
 
+    async def update_dynamic_slots(self, slots: list[DynamicSlot]) -> None:
+        """Rebuild the dynamic section (divider + slot rows) below the static rows."""
+        list_view = self.query_one("#sidebar-nav", ListView)
+        # Remove all children after the static rows
+        children = list(list_view.children)
+        for child in children[_STATIC_COUNT:]:
+            await child.remove()
+
+        if not slots:
+            return
+
+        # Divider (non-selectable)
+        await list_view.append(
+            ListItem(
+                Label("[dim]──────────[/dim]"),
+                id="nav-divider",
+                disabled=True,
+                classes="-divider",
+            )
+        )
+        # Slot rows
+        for i, slot in enumerate(slots):
+            keybind = f"ctrl+{_STATIC_COUNT + 1 + i}"
+            await list_view.append(
+                ListItem(
+                    Label(slot.sidebar_label(keybind)),
+                    id=f"nav-slot-{slot.run_id}",
+                )
+            )
+
+    def rerender_slot_row(self, slot: DynamicSlot, index: int) -> None:
+        """Update an existing dynamic slot row label in-place (no DOM changes)."""
+        try:
+            row = self.query_one(f"#nav-slot-{slot.run_id}", ListItem)
+        except Exception:  # noqa: BLE001
+            return
+        keybind = f"ctrl+{_STATIC_COUNT + 1 + index}"
+        row.query_one(Label).update(slot.sidebar_label(keybind))
+
 
 class CogShellScreen(Screen):
     """Persistent shell with sidebar navigation and mounted-always content views.
 
-    All views are mounted on startup; switching toggles `display`. Workers
-    owned by a view widget keep running when the view is inactive — widgets
-    stay in the tree.
+    All static views are mounted on startup; switching toggles `display`.
+    Dynamic slot views (#192) are mounted at launch time and removed on dismiss.
+    Workers owned by a view widget keep running when the view is inactive.
     """
 
     DEFAULT_CSS = """
@@ -188,6 +225,7 @@ class CogShellScreen(Screen):
         self._project_dir = project_dir
         self._tracker = tracker
         self._active_view_id: str = _VIEWS[0].id
+        self._registry = DynamicSlotRegistry(on_change=self._on_registry_changed)
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -221,6 +259,140 @@ class CogShellScreen(Screen):
         except Exception:  # noqa: BLE001 — not yet mounted
             pass
 
+    # -------------------------------------------------------------------------
+    # Dynamic slot management
+    # -------------------------------------------------------------------------
+
+    def _on_registry_changed(self) -> None:
+        """Called synchronously by the registry; schedule async sidebar rebuild.
+
+        Pass the callable (not the coroutine) so that if the worker is
+        cancelled before it runs, no "coroutine was never awaited" warning fires.
+        """
+        self.run_worker(
+            self._rebuild_sidebar_dynamic,  # type: ignore[arg-type]
+            exclusive=True,
+            group="sidebar-dynamic",
+        )
+
+    async def _rebuild_sidebar_dynamic(self) -> None:
+        try:
+            sidebar = self.query_one(Sidebar)
+        except Exception:  # noqa: BLE001
+            return
+        await sidebar.update_dynamic_slots(self._registry.active_slots)
+        # Re-apply active highlight (the row may have been re-created).
+        self._highlight_sidebar_row(self._active_view_id)
+
+    def on_slot_state_changed(self, msg: SlotStateChanged) -> None:
+        self._registry.update_state(msg.run_id, msg.state, errored=msg.errored)
+        self._registry.update_stage(msg.run_id, msg.stage)
+        # In-place label update for the affected slot (avoids full rebuild)
+        active = self._registry.active_slots
+        try:
+            idx = next(i for i, s in enumerate(active) if s.run_id == msg.run_id)
+            slot = active[idx]
+            try:
+                self.query_one(Sidebar).rerender_slot_row(slot, idx)
+            except Exception:  # noqa: BLE001
+                pass
+        except StopIteration:
+            pass
+
+    def on_slot_dismissed(self, msg: SlotDismissed) -> None:
+        self._registry.remove(msg.run_id)
+        try:
+            view = self.query_one(f"#view-slot-{msg.run_id}")
+            view.remove()
+        except Exception:  # noqa: BLE001
+            pass
+        # If this was the active view, fall back to dashboard
+        if self._active_view_id == f"slot-{msg.run_id}":
+            self._active_view_id = _VIEWS[0].id
+            self._apply_active_view()
+            self._highlight_sidebar_row(self._active_view_id)
+
+    def on_launch_slot_request(self, msg: LaunchSlotRequest) -> None:
+        self.run_worker(
+            self._launch_slot(msg.workflow, msg.item),
+            exclusive=False,
+            group="launch-slot",
+        )
+
+    async def _launch_slot(
+        self,
+        workflow: str,
+        item: Item,  # SlotWorkflow but str avoids circular
+    ) -> None:
+        from cog.ui.dynamic_slots import SlotWorkflow
+        from cog.ui.widgets.dynamic_slot_view import DynamicSlotView
+
+        wf: SlotWorkflow = workflow  # type: ignore[assignment]
+
+        # Dedup: if a slot for this (workflow, item_id) already exists, focus it.
+        existing = self._registry.get(wf, item.item_id)
+        if existing is not None:
+            self._switch_to_slot(existing.run_id)
+            return
+
+        # Concurrency cap for implement.
+        if wf == "implement":
+            cap = max_concurrent_implements()
+            if self._registry.active_count("implement") >= cap:
+                self.app.notify(
+                    f"{cap} implement run(s) active; dismiss one to start another",
+                    severity="warning",
+                )
+                return
+
+        run_id = DynamicSlotRegistry.new_run_id()
+        slot = DynamicSlot(run_id=run_id, workflow=wf, item_id=item.item_id)
+        view = DynamicSlotView(slot, self._project_dir, self._tracker, item, self._registry)
+
+        content_area = self.query_one("#content-area")
+        await content_area.mount(view)
+        view.display = False
+
+        # Add to registry (triggers sidebar rebuild)
+        self._registry.add(slot)
+
+        view.start_run()
+
+        # Toast with Ctrl-N hint (slot was just added, so count it)
+        static_count = _STATIC_COUNT
+        slot_idx = len(self._registry.active_slots) - 1
+        ctrl_n = f"Ctrl+{static_count + 1 + slot_idx}"
+        self.app.notify(f"Started {wf} #{item.item_id} ({ctrl_n} to view)", timeout=5)
+
+    # -------------------------------------------------------------------------
+    # Navigation
+    # -------------------------------------------------------------------------
+
+    def on_key(self, event: Key) -> None:
+        """Intercept Ctrl+6..N to activate dynamic slots."""
+        key = event.key
+        if not key.startswith("ctrl+"):
+            return
+        try:
+            n = int(key.removeprefix("ctrl+"))
+        except ValueError:
+            return
+        if n <= _STATIC_COUNT:
+            return  # handled by BINDINGS
+        slot_idx = n - _STATIC_COUNT - 1  # 0-based
+        slots = self._registry.active_slots
+        if 0 <= slot_idx < len(slots):
+            event.stop()
+            self._switch_to_slot(slots[slot_idx].run_id)
+
+    def _switch_to_slot(self, run_id: str) -> None:
+        view_id = f"slot-{run_id}"
+        if self._active_view_id == view_id:
+            return
+        self._active_view_id = view_id
+        self._apply_active_view()
+        self._highlight_sidebar_row(view_id)
+
     def action_quit_app(self) -> None:
         busy: list[str] = []
         for v in _VIEWS:
@@ -233,6 +405,21 @@ class CogShellScreen(Screen):
             desc = widget.busy_description()
             if desc:
                 busy.append(desc)
+        # Count active dynamic slots (running or awaiting dismiss)
+        for slot in self._registry.active_slots:
+            try:
+                view = self.query_one(f"#view-slot-{slot.run_id}")
+            except Exception:  # noqa: BLE001
+                continue
+            if hasattr(view, "busy_description"):
+                desc = view.busy_description()
+                if desc:
+                    busy.append(desc)
+        n_dynamic = self._registry.active_count()
+        if n_dynamic > 0 and not busy:
+            busy.append(
+                f"{n_dynamic} active run(s). Active worktrees and branches will remain on disk."
+            )
         if not busy:
             self.app.exit()
             return
@@ -292,25 +479,46 @@ class CogShellScreen(Screen):
         sidebar.set_attention(view_id, state is not None)
 
     def on_list_view_selected(self, event: ListView.Selected) -> None:
-        chosen_id = (event.item.id or "").removeprefix("nav-")
-        if chosen_id:
+        item_id = event.item.id or ""
+        if item_id.startswith("nav-slot-"):
+            run_id = item_id.removeprefix("nav-slot-")
+            self._switch_to_slot(run_id)
+            return
+        chosen_id = item_id.removeprefix("nav-")
+        if chosen_id and chosen_id != "divider":
             self.action_switch_to(chosen_id)
 
     def _apply_active_view(self) -> None:
+        active = self._active_view_id
+        # Static views
         for v in _VIEWS:
-            widget = self.query_one(f"#view-{v.id}")
-            widget.display = v.id == self._active_view_id
-            if v.id == self._active_view_id and hasattr(widget, "focus_content"):
-                # Defer focus until the layout pass finishes; otherwise the
-                # target widget's focusable state may not be settled yet.
+            try:
+                widget = self.query_one(f"#view-{v.id}")
+            except Exception:  # noqa: BLE001
+                continue
+            widget.display = v.id == active
+            if v.id == active and hasattr(widget, "focus_content"):
                 self.call_after_refresh(widget.focus_content)
+        # Dynamic slot views
+        for slot in self._registry.active_slots:
+            try:
+                view = self.query_one(f"#view-slot-{slot.run_id}")
+            except Exception:  # noqa: BLE001
+                continue
+            view.display = f"slot-{slot.run_id}" == active
+            if f"slot-{slot.run_id}" == active and hasattr(view, "focus_content"):
+                self.call_after_refresh(view.focus_content)
 
     def _highlight_sidebar_row(self, view_id: str) -> None:
-        list_view = self.query_one("#sidebar-nav", ListView)
-        for i, v in enumerate(_VIEWS):
-            row = list_view.children[i]
-            if v.id == view_id:
-                row.add_class("-active")
+        """Set the -active class on nav-{view_id}, clear all others."""
+        try:
+            list_view = self.query_one("#sidebar-nav", ListView)
+        except Exception:  # noqa: BLE001
+            return
+        target_id = f"nav-{view_id}"
+        for i, child in enumerate(list_view.children):
+            if child.id == target_id:
+                child.add_class("-active")
                 list_view.index = i
             else:
-                row.remove_class("-active")
+                child.remove_class("-active")

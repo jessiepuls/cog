@@ -135,14 +135,18 @@ with the log caught up.
 │ sidebar  │ active view (content area)                       │
 │ ^1 Dash  │                                                  │
 │ ^2 Iss   │  <DashboardView / IssuesView / RefineView /      │
-│ ^3 Ref●  3│   RalphView / ChatView>                         │
-│ ^4 Ral   1│                                                  │
+│ ^3 Ref●  3│   RalphView / ChatView /                        │
+│ ^4 Ral   1│   DynamicSlotView …>                            │
 │ ^5 Chat  │                                                  │
+│ ──────── │                                                  │
+│ ^6 R #42 │                                                  │
+│ ^7 I #17 │                                                  │
 └──────────┴──────────────────────────────────────────────────┘
  ^Q Quit
 ```
 
-- **Ctrl+1/2/3/4/5** — switch views
+- **Ctrl+1/2/3/4/5** — switch static views
+- **Ctrl+6..N** — switch to dynamic slots (parallel workflow runs)
 - **Ctrl+Q** — quit (confirm if workflows in-flight)
 - Sidebar yellow `●` — attention indicator (refine awaiting reply, run
   complete, etc.)
@@ -152,6 +156,31 @@ with the log caught up.
   the Dashboard reads the same reactive instead of fetching independently.
 - Each view exposes `focus_content()` and `busy_description()` hooks
   the shell uses
+
+### Dynamic slots
+
+Pressing `r` (refine) or `i` (implement) in the Issues view posts a
+`LaunchSlotRequest` message. `CogShellScreen` handles this: dedup-check
+(one slot per `(workflow, item_id)` pair), cap-check for implement
+(`COG_MAX_CONCURRENT_IMPLEMENTS`, default 3), then mounts a
+`DynamicSlotView` and adds a `DynamicSlot` to `DynamicSlotRegistry`.
+
+The registry fires `on_change` on every mutation; the shell schedules an
+`exclusive=True` worker (`sidebar-dynamic` group) to rebuild the dynamic
+section of the sidebar (divider + slot rows). In-flight label updates
+(stage/state changes) bypass the full rebuild and use `rerender_slot_row`
+for single-row in-place updates.
+
+`DynamicSlotView` manages one slot's full lifecycle:
+- **implement**: `running` (log pane + footer) → `post_run` (summary
+  panel, Enter to dismiss)
+- **refine**: `running` (split chat + original-body pane) → `reviewing`
+  (proposed body shown, `a` accept / `e` edit / `Q` abandon)
+
+`SlotStateChanged` and `SlotDismissed` messages flow from the view up to
+`CogShellScreen`, which updates the registry and removes the DOM node on
+dismiss. Slot keys, DOM ids, and registry run_ids all use the same 8-char
+hex `run_id` to avoid mapping errors.
 
 ## State directory
 
@@ -220,7 +249,8 @@ Run `cog doctor` to check without launching a workflow.
 | `COG_RALPH_BUILD_MODEL` | `claude-sonnet-4-6` | Ralph build stage |
 | `COG_RALPH_REVIEW_MODEL` | `claude-opus-4-7` | Ralph review stage |
 | `COG_RALPH_DOCUMENT_MODEL` | `claude-sonnet-4-6` | Ralph document stage |
-| `COG_CHAT_MODEL` | `claude-opus-4-7` | Chat view (Ctrl+4) |
+| `COG_CHAT_MODEL` | `claude-opus-4-7` | Chat view (Ctrl+5) |
+| `COG_MAX_CONCURRENT_IMPLEMENTS` | `3` | Max parallel implement (ralph) slots in the TUI; minimum 1 |
 | `COG_RUNNER_TIMEOUT_SECONDS` | `1800` | Overall subprocess wall-clock limit |
 | `COG_RUNNER_INACTIVITY_TIMEOUT_SECONDS` | `300` | Idle window with no stream events |
 | `COG_RUNNER_TOOL_CALL_TIMEOUT_SECONDS` | `600` | Per-tool-call limit |

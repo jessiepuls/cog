@@ -1,9 +1,10 @@
-"""IssuesView — read-only issue browser (#189, #200)."""
+"""IssuesView — read-only issue browser with workflow launch (#189, #192, #200)."""
 
 from __future__ import annotations
 
 from dataclasses import replace
 from pathlib import Path
+from typing import Literal
 
 from textual.app import ComposeResult
 from textual.binding import Binding
@@ -15,6 +16,7 @@ from textual.widgets import Input, Static
 
 from cog.core.item import Item
 from cog.core.tracker import IssueTracker, ItemListFilter
+from cog.ui.messages import LaunchSlotRequest
 from cog.ui.screens.close_confirm import CloseConfirmScreen
 from cog.ui.widgets.filter_query import FilterSuggester, ParsedQuery, apply_parsed, parse_query
 from cog.ui.widgets.issues_browser import IssueList, IssuePreview
@@ -24,12 +26,43 @@ _CLOSED_FILTER = ItemListFilter(state="closed", limit=1000)
 
 _DEFAULT_QUERY = "state:open"
 
+_WorkflowType = Literal["refine", "implement"]
+
+
+def _recommended_workflow(item: Item) -> _WorkflowType | None:
+    """Return the recommended workflow given the item's labels, or None."""
+    if "needs-refinement" in item.labels:
+        return "refine"
+    if "agent-ready" in item.labels:
+        return "implement"
+    return None
+
+
+def _launch_confirm_message(workflow: _WorkflowType, item: Item) -> str | None:
+    """Return a confirmation prompt for a non-recommended launch, or None if recommended."""
+    recommended = _recommended_workflow(item)
+    if recommended == workflow:
+        return None  # Recommended — no confirm needed
+    item_ref = f"#{item.item_id}"
+    if "needs-refinement" in item.labels and workflow == "implement":
+        return f"{item_ref} is needs-refinement, not agent-ready. Implement anyway?"
+    if "agent-ready" in item.labels and workflow == "refine":
+        return f"{item_ref} is agent-ready, not needs-refinement. Refine anyway?"
+    verb = workflow.capitalize()
+    return f"{item_ref} has no workflow labels. {verb} anyway?"
+
 
 class IssuesView(Widget, can_focus=True):
-    """Read-only issues browser: typed-query filter + list pane + side pane."""
+    """Read-only issues browser: typed-query filter + list pane + side pane.
+
+    Also the launch point for dynamic workflow slots (#192): press `r` to
+    refine or `i` to implement the selected item.
+    """
 
     BINDINGS = [
-        Binding("r", "refresh", "Refresh"),
+        Binding("ctrl+r", "refresh", "Refresh"),
+        Binding("r", "refine_item", "Refine"),
+        Binding("i", "implement_item", "Implement"),
         Binding("/", "focus_search", "Search"),
         Binding("c", "close_issue", "Close"),
         Binding("ctrl+comma", "narrow_list", "Narrow list"),
@@ -39,7 +72,7 @@ class IssuesView(Widget, can_focus=True):
     def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:
         # When the filter input has focus, every keystroke is text input — don't
         # let ancestor single-letter bindings swallow them.
-        if action in ("refresh", "focus_search", "close_issue"):
+        if action in ("refresh", "focus_search", "close_issue", "refine_item", "implement_item"):
             try:
                 if self.query_one("#issues-filter-input", Input).has_focus:
                     return False
@@ -149,9 +182,9 @@ class IssuesView(Widget, can_focus=True):
             result = await self._tracker.list(_OPEN_FILTER)
         except Exception as e:  # noqa: BLE001
             issue_list.show_overlay(
-                f"[red]Error loading issues: {e}[/red]\n[dim]Press R to retry[/dim]"
+                f"[red]Error loading issues: {e}[/red]\n[dim]Press Ctrl+R to retry[/dim]"
             )
-            self._set_status(f"Error loading issues: {e} — press R to retry")
+            self._set_status(f"Error loading issues: {e} — press Ctrl+R to retry")
             return
         self._cache = result.items
         self._open_total = result.total
@@ -172,7 +205,7 @@ class IssuesView(Widget, can_focus=True):
             result = await self._tracker.list(_CLOSED_FILTER)
         except Exception:  # noqa: BLE001
             self._closed_fetch_failed = True
-            self._set_status("Failed to load closed issues — press R to retry")
+            self._set_status("Failed to load closed issues — press Ctrl+R to retry")
             return
         # Merge and re-sort by updated_at desc, deduplicating by item_id
         cached_ids = {i.item_id for i in self._cache}
@@ -272,6 +305,42 @@ class IssuesView(Widget, can_focus=True):
         self._cancel_timer(self._status_reset_timer)
         self._status_reset_timer = self.set_timer(3.0, self._update_status)
 
+    # -------------------------------------------------------------------------
+    # Workflow launch actions (#192)
+    # -------------------------------------------------------------------------
+
+    def action_refine_item(self) -> None:
+        self._request_launch("refine")
+
+    def action_implement_item(self) -> None:
+        self._request_launch("implement")
+
+    def _request_launch(self, workflow: _WorkflowType) -> None:
+        item = self.query_one(IssueList).focused_item()
+        if item is None:
+            return
+        confirm_msg = _launch_confirm_message(workflow, item)
+        if confirm_msg is None:
+            self._do_launch(workflow, item)
+            return
+        from cog.ui.screens.launch_confirm import LaunchConfirmScreen
+
+        self.app.push_screen(
+            LaunchConfirmScreen(confirm_msg),
+            lambda confirmed, wf=workflow, it=item: self._on_launch_confirmed(confirmed, wf, it),
+        )
+
+    def _on_launch_confirmed(
+        self, confirmed: bool | None, workflow: _WorkflowType, item: Item
+    ) -> None:
+        if confirmed:
+            self._do_launch(workflow, item)
+
+    def _do_launch(self, workflow: _WorkflowType, item: Item) -> None:
+        self.post_message(LaunchSlotRequest(workflow, item))
+
+    # -------------------------------------------------------------------------
+
     def _apply_split(self) -> None:
         try:
             issue_list = self.query_one(IssueList)
@@ -340,7 +409,7 @@ class IssuesView(Widget, can_focus=True):
 
     def _update_status(self) -> None:
         if self._closed_fetch_failed:
-            self._set_status("Failed to load closed issues — press R to retry")
+            self._set_status("Failed to load closed issues — press Ctrl+R to retry")
             return
         if self._open_total is None:
             return
