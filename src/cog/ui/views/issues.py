@@ -48,11 +48,10 @@ class IssuesView(Widget, can_focus=True):
         height: 1fr;
     }
     IssuesView #issues-filter-input {
-        height: 1;
-        border: none;
+        height: 3;
+        border: tall $primary;
         background: $surface;
         padding: 0 1;
-        border-bottom: solid $primary;
     }
     IssuesView #issues-statusbar {
         height: 1;
