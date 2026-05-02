@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 
 from textual.app import ComposeResult
@@ -14,6 +15,7 @@ from textual.widgets import Input, Static
 
 from cog.core.item import Item
 from cog.core.tracker import IssueTracker, ItemListFilter
+from cog.ui.screens.close_confirm import CloseConfirmScreen
 from cog.ui.widgets.filter_query import FilterSuggester, ParsedQuery, apply_parsed, parse_query
 from cog.ui.widgets.issues_browser import IssueList, IssuePreview
 
@@ -29,14 +31,15 @@ class IssuesView(Widget, can_focus=True):
     BINDINGS = [
         Binding("r", "refresh", "Refresh"),
         Binding("/", "focus_search", "Search"),
+        Binding("c", "close_issue", "Close"),
         Binding("ctrl+comma", "narrow_list", "Narrow list"),
         Binding("ctrl+full_stop", "widen_list", "Widen list"),
     ]
 
     def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:
         # When the filter input has focus, every keystroke is text input — don't
-        # let ancestor bindings (like `r` / `/`) swallow them.
-        if action in ("refresh", "focus_search"):
+        # let ancestor single-letter bindings swallow them.
+        if action in ("refresh", "focus_search", "close_issue"):
             try:
                 if self.query_one("#issues-filter-input", Input).has_focus:
                     return False
@@ -234,6 +237,40 @@ class IssuesView(Widget, can_focus=True):
     def action_widen_list(self) -> None:
         self._split_pct = min(80, self._split_pct + 5)
         self._apply_split()
+
+    def action_close_issue(self) -> None:
+        item = self.query_one(IssueList).focused_item()
+        if item is None or item.state == "closed":
+            return
+        self.app.push_screen(
+            CloseConfirmScreen(item.item_id, item.title),
+            lambda confirmed, it=item: self._on_close_confirmed(confirmed, it),
+        )
+
+    def _on_close_confirmed(self, confirmed: bool | None, item: Item) -> None:
+        if not confirmed:
+            return
+        self.run_worker(self._close_item(item), exclusive=False, group=f"close-{item.item_id}")
+
+    async def _close_item(self, item: Item) -> None:
+        self._set_status(f"Closing #{item.item_id}…")
+        try:
+            await self._tracker.close(item)
+        except Exception as e:  # noqa: BLE001
+            self._set_status(f"[red]Close failed: {e}[/red]")
+            return
+        # Reflect in cache so the list updates without a full refetch.
+        self._cache = [
+            replace(it, state="closed") if it.item_id == item.item_id else it for it in self._cache
+        ]
+        if self._open_total is not None and item.state == "open":
+            self._open_total = max(0, self._open_total - 1)
+        if self._closed_loaded and self._closed_total is not None:
+            self._closed_total += 1
+        self._push_filter()
+        self._set_status(f"Closed #{item.item_id}")
+        self._cancel_timer(self._status_reset_timer)
+        self._status_reset_timer = self.set_timer(3.0, self._update_status)
 
     def _apply_split(self) -> None:
         try:

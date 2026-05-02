@@ -350,6 +350,7 @@ class FakeIssueTracker(IssueTracker):
         self._get_error = get_error
         self.list_calls: list[ItemListFilter | None] = []
         self.get_calls: list[str] = []
+        self.close_calls: list[str] = []
 
     async def list(self, filter: ItemListFilter | None = None) -> ItemListResult:
         self.list_calls.append(filter)
@@ -382,6 +383,15 @@ class FakeIssueTracker(IssueTracker):
 
     async def update_body(self, item: Item, body: str, *, title: str | None = None) -> None:
         pass
+
+    async def close(self, item: Item) -> None:
+        from dataclasses import replace as _replace
+
+        self.close_calls.append(item.item_id)
+        for i, it in enumerate(self._items):
+            if it.item_id == item.item_id:
+                self._items[i] = _replace(it, state="closed")
+                break
 
     async def ensure_label(
         self,

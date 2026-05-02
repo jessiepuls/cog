@@ -48,6 +48,9 @@ class IssueTracker(ABC):
     async def update_body(self, item: Item, body: str, *, title: str | None = None) -> None: ...
 
     @abstractmethod
+    async def close(self, item: Item) -> None: ...
+
+    @abstractmethod
     async def ensure_label(
         self,
         name: str,
