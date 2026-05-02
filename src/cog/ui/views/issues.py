@@ -1,4 +1,4 @@
-"""IssuesView — read-only issue browser (#189)."""
+"""IssuesView — read-only issue browser (#189, #200)."""
 
 from __future__ import annotations
 
@@ -7,28 +7,27 @@ from pathlib import Path
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal
+from textual.events import Key
 from textual.timer import Timer
 from textual.widget import Widget
-from textual.widgets import Static
+from textual.widgets import Input, Static
 
 from cog.core.item import Item
 from cog.core.tracker import IssueTracker, ItemListFilter
-from cog.ui.widgets.issues_browser import (
-    IssueFilterRow,
-    IssueList,
-    IssuePreview,
-    _apply_filter,
-)
+from cog.ui.widgets.filter_query import FilterSuggester, ParsedQuery, apply_parsed, parse_query
+from cog.ui.widgets.issues_browser import IssueList, IssuePreview
 
-_FETCH_FILTER = ItemListFilter(state="all", limit=1000)
+_OPEN_FILTER = ItemListFilter(state="open", limit=1000)
+_CLOSED_FILTER = ItemListFilter(state="closed", limit=1000)
+
+_DEFAULT_QUERY = "state:open"
 
 
 class IssuesView(Widget, can_focus=True):
-    """Read-only issues browser: filter bar + list pane + side pane."""
+    """Read-only issues browser: typed-query filter + list pane + side pane."""
 
     BINDINGS = [
         Binding("r", "refresh", "Refresh"),
-        Binding("ctrl+l", "clear_filters", "Clear filters"),
         Binding("/", "focus_search", "Search"),
     ]
 
@@ -36,6 +35,13 @@ class IssuesView(Widget, can_focus=True):
     IssuesView {
         layout: vertical;
         height: 1fr;
+    }
+    IssuesView #issues-filter-input {
+        height: 1;
+        border: none;
+        background: $surface;
+        padding: 0 1;
+        border-bottom: solid $primary;
     }
     IssuesView #issues-statusbar {
         height: 1;
@@ -62,26 +68,41 @@ class IssuesView(Widget, can_focus=True):
         self._tracker = tracker
         self._cache: list[Item] = []
         self._cache_loaded = False
-        self._active_filter = ItemListFilter(state="open")
-        # (item_id, updated_at) -> Item with comments
+        self._closed_loaded = False
+        self._open_total: int | None = None
+        self._closed_total: int | None = None
+        self._closed_fetch_failed = False
+        self._parsed: ParsedQuery = parse_query(_DEFAULT_QUERY)
         self._comments_cache: dict[tuple[str, str], Item] = {}
         self._focus_debounce: Timer | None = None
-        self._label_options: list[tuple[str, str]] = []
-        self._assignee_options: list[tuple[str, str]] = []
+        self._status_reset_timer: Timer | None = None
 
     def compose(self) -> ComposeResult:
-        yield IssueFilterRow()
+        suggester = FilterSuggester(
+            get_labels=self._known_labels,
+            get_assignees=self._known_assignees,
+            get_current_user_login=lambda: getattr(self.app, "current_user_login", None),
+        )
+        yield Input(
+            value=_DEFAULT_QUERY,
+            suggester=suggester,
+            id="issues-filter-input",
+        )
+        yield Static("", id="issues-statusbar")
         with Horizontal(id="issues-body"):
             yield IssueList()
             yield IssuePreview()
-        yield Static("", id="issues-statusbar")
 
     async def on_mount(self) -> None:
-        pass
+        seed = getattr(self.app, "issues_filter_query", _DEFAULT_QUERY)
+        inp = self.query_one("#issues-filter-input", Input)
+        inp.value = seed
+        self._parsed = parse_query(seed)
 
     async def on_show(self) -> None:
         if not self._cache_loaded:
             await self._first_load()
+        self.query_one("#issues-filter-input", Input).focus()
 
     def focus_content(self) -> None:
         try:
@@ -89,88 +110,132 @@ class IssuesView(Widget, can_focus=True):
         except Exception:  # noqa: BLE001
             pass
 
+    def _known_labels(self) -> list[str]:
+        seen: set[str] = set()
+        for item in self._cache:
+            seen.update(item.labels)
+        return sorted(seen)
+
+    def _known_assignees(self) -> list[str]:
+        seen: set[str] = set()
+        for item in self._cache:
+            seen.update(item.assignees)
+        return sorted(seen)
+
     async def _first_load(self) -> None:
         issue_list = self.query_one(IssueList)
         issue_list.show_overlay("[dim]Loading issues…[/dim]")
         self._set_status("Loading…")
         try:
-            items = await self._tracker.list(_FETCH_FILTER)
+            result = await self._tracker.list(_OPEN_FILTER)
         except Exception as e:  # noqa: BLE001
             issue_list.show_overlay(
                 f"[red]Error loading issues: {e}[/red]\n[dim]Press R to retry[/dim]"
             )
-            self._set_status("")
+            self._set_status(f"Error loading issues: {e} — press R to retry")
             return
-        self._cache = items
+        self._cache = result.items
+        self._open_total = result.total
         self._cache_loaded = True
-        self._rebuild_dropdown_options()
         self._push_filter()
-        self._set_status(f"Loaded {len(items)} issues")
+        self._update_status()
+
+        # If the initial query already requests closed, kick off lazy fetch
+        if self._parsed.state_set and "closed" in self._parsed.state_set:
+            self.run_worker(self._lazy_fetch_closed(), exclusive=False, group="fetch-closed")
+
+    async def _lazy_fetch_closed(self) -> None:
+        if self._closed_loaded:
+            return
+        self._closed_fetch_failed = False
+        self._set_status("Loading closed issues…")
+        try:
+            result = await self._tracker.list(_CLOSED_FILTER)
+        except Exception:  # noqa: BLE001
+            self._closed_fetch_failed = True
+            self._set_status("Failed to load closed issues — press R to retry")
+            return
+        # Merge and re-sort by updated_at desc, deduplicating by item_id
+        cached_ids = {i.item_id for i in self._cache}
+        new_closed = [i for i in result.items if i.item_id not in cached_ids]
+        self._cache = sorted(
+            list(self._cache) + new_closed,
+            key=lambda i: (i.updated_at, int(i.item_id) if i.item_id.isdigit() else 0),
+            reverse=True,
+        )
+        self._closed_total = result.total
+        self._closed_loaded = True
+        self._push_filter()
+        self._update_status()
 
     async def action_refresh(self) -> None:
         self._set_status("[dim]Refreshing…[/dim]")
         focused_id = self.query_one(IssueList).focused_item_id()
         try:
-            items = await self._tracker.list(_FETCH_FILTER)
+            open_result = await self._tracker.list(_OPEN_FILTER)
         except Exception as e:  # noqa: BLE001
             self._set_status(f"[red]Refresh failed: {e}[/red]")
             return
-        self._cache = items
-        self._cache_loaded = True
-        self._rebuild_dropdown_options()
-        self._push_filter(preserve_id=focused_id)
-        self._set_status(f"Loaded just now ({len(items)} issues)")
 
-    def action_clear_filters(self) -> None:
-        self._active_filter = ItemListFilter(state="open")
-        self.query_one(IssueFilterRow).clear_all()
+        if self._closed_loaded:
+            try:
+                closed_result = await self._tracker.list(_CLOSED_FILTER)
+            except Exception as e:  # noqa: BLE001
+                self._set_status(f"[red]Refresh failed: {e}[/red]")
+                return
+            self._closed_total = closed_result.total
+            closed_items = closed_result.items
+        else:
+            closed_items = []
+
+        open_ids = {i.item_id for i in open_result.items}
+        merged = sorted(
+            open_result.items + [i for i in closed_items if i.item_id not in open_ids],
+            key=lambda i: (i.updated_at, int(i.item_id) if i.item_id.isdigit() else 0),
+            reverse=True,
+        )
+        self._cache = merged
+        self._open_total = open_result.total
+        self._cache_loaded = True
+        self._push_filter(preserve_id=focused_id)
+
+        n_matching = len(apply_parsed(self._cache, self._parsed, current_user_login=self._login()))
+        total = (self._open_total or 0) + (self._closed_total or 0)
+        self._set_status(f"Loaded just now ({n_matching} of {total} issues)")
+        self._cancel_timer(self._status_reset_timer)
+        self._status_reset_timer = self.set_timer(3.0, self._update_status)
 
     def action_focus_search(self) -> None:
-        try:
-            inp = self.query_one("#filter-search")
-            if inp.has_focus:
-                return
-            self.query_one(IssueFilterRow).focus_search()
-        except Exception:  # noqa: BLE001
-            pass
+        inp = self.query_one("#issues-filter-input", Input)
+        inp.focus()
 
-    def on_issue_filter_row_filter_changed(self, event: IssueFilterRow.FilterChanged) -> None:
+    def on_input_changed(self, event: Input.Changed) -> None:
+        if event.input.id != "issues-filter-input":
+            return
         event.stop()
-        self._active_filter = event.filter
+        query = event.value
+        # Persist to app level
+        if hasattr(self.app, "issues_filter_query"):
+            self.app.issues_filter_query = query
+        prev_parsed = self._parsed
+        self._parsed = parse_query(query)
+
+        # Check if we need to lazy-fetch closed
+        needs_closed = self._parsed.state_set is not None and "closed" in self._parsed.state_set
+        prev_needed_closed = prev_parsed.state_set is not None and "closed" in prev_parsed.state_set
+        if needs_closed and not prev_needed_closed and not self._closed_loaded:
+            self.run_worker(self._lazy_fetch_closed(), exclusive=False, group="fetch-closed")
+
         self._push_filter()
+        if not (needs_closed and not self._closed_loaded):
+            self._update_status()
 
-    def _push_filter(self, *, preserve_id: str | None = None) -> None:
-        filtered = _apply_filter(self._cache, self._active_filter)
-        issue_list = self.query_one(IssueList)
-        preview = self.query_one(IssuePreview)
-        self.run_worker(
-            issue_list.set_items(filtered, preserve_id=preserve_id),
-            exclusive=True,
-            group="set_items",
-        )
-        if not filtered:
-            preview.show_empty()
-
-    def _rebuild_dropdown_options(self) -> None:
-        # Label options: dedupe by name, preserve color
-        seen_labels: dict[str, str] = {}
-        for item in self._cache:
-            for label_name in item.labels:
-                if label_name not in seen_labels:
-                    seen_labels[label_name] = "cccccc"
-        self._label_options = sorted(seen_labels.items())
-
-        # Assignee options: synthetic (unassigned) + deduped logins
-        seen_assignees: set[str] = set()
-        for item in self._cache:
-            seen_assignees.update(item.assignees)
-        self._assignee_options = [("(unassigned)", "888888")] + sorted(
-            (a, "cccccc") for a in seen_assignees
-        )
-
-        filter_row = self.query_one(IssueFilterRow)
-        filter_row.update_label_options(self._label_options)
-        filter_row.update_assignee_options(self._assignee_options)
+    def on_key(self, event: Key) -> None:
+        """Enter/Down in the filter input moves focus to the list."""
+        inp = self.query_one("#issues-filter-input", Input)
+        if inp.has_focus and event.key in ("enter", "down"):
+            event.stop()
+            self.query_one(IssueList).focus_list()
 
     def on_issue_list_item_focused(self, event: IssueList.ItemFocused) -> None:
         event.stop()
@@ -178,14 +243,34 @@ class IssuesView(Widget, can_focus=True):
             self.query_one(IssuePreview).show_empty()
             return
         self.query_one(IssuePreview).show_item(event.item)
-        if self._focus_debounce is not None:
-            try:
-                self._focus_debounce.stop()
-            except Exception:  # noqa: BLE001
-                pass
+        self._cancel_timer(self._focus_debounce)
         self._focus_debounce = self.set_timer(
             0.15, lambda item=event.item: self._load_comments(item)
         )
+
+    def _push_filter(self, *, preserve_id: str | None = None) -> None:
+        filtered = apply_parsed(self._cache, self._parsed, current_user_login=self._login())
+        issue_list = self.query_one(IssueList)
+        preview = self.query_one(IssuePreview)
+
+        # Pass a callable so the coroutine is only created when the worker runs,
+        # avoiding "coroutine was never awaited" warnings from exclusive cancellation.
+        async def _do_set() -> None:
+            await issue_list.set_items(filtered, preserve_id=preserve_id)
+
+        self.run_worker(_do_set, exclusive=True, group="set_items")  # type: ignore[arg-type]
+        if not filtered:
+            preview.show_empty()
+
+    def _update_status(self) -> None:
+        if self._closed_fetch_failed:
+            self._set_status("Failed to load closed issues — press R to retry")
+            return
+        if self._open_total is None:
+            return
+        n_matching = len(apply_parsed(self._cache, self._parsed, current_user_login=self._login()))
+        total = (self._open_total or 0) + (self._closed_total or 0)
+        self._set_status(f"{n_matching} of {total} issues")
 
     def _load_comments(self, item: Item) -> None:
         cache_key = (item.item_id, item.updated_at.isoformat())
@@ -212,3 +297,13 @@ class IssuesView(Widget, can_focus=True):
             self.query_one("#issues-statusbar", Static).update(text)
         except Exception:  # noqa: BLE001
             pass
+
+    def _login(self) -> str | None:
+        return getattr(self.app, "current_user_login", None)
+
+    def _cancel_timer(self, timer: Timer | None) -> None:
+        if timer is not None:
+            try:
+                timer.stop()
+            except Exception:  # noqa: BLE001
+                pass

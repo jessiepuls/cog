@@ -1,4 +1,4 @@
-"""Tests for IssuesView (#189)."""
+"""Tests for IssuesView (#189, #200)."""
 
 from __future__ import annotations
 
@@ -6,10 +6,12 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from textual.app import App, ComposeResult
+from textual.widgets import Input
 
 from cog.core.errors import TrackerError
 from cog.core.item import Comment, Item
 from cog.ui.views.issues import IssuesView
+from cog.ui.widgets.issues_browser import IssueList
 from tests.fakes import FakeIssueTracker, make_item
 
 _BASE_DT = datetime(2026, 1, 1, tzinfo=UTC)
@@ -38,14 +40,21 @@ class _IssuesApp(App):
         super().__init__()
         self._tracker = tracker
         self._project_dir = project_dir
+        # App-level fields expected by IssuesView
+        self.issues_filter_query: str = "state:open"
+        self.current_user_login: str | None = None
 
     def compose(self) -> ComposeResult:
         yield IssuesView(self._project_dir, self._tracker)
 
     def on_mount(self) -> None:
-        # Simulate the view becoming visible on first show
         view = self.query_one(IssuesView)
         self.call_after_refresh(view.on_show)
+
+
+# ---------------------------------------------------------------------------
+# First load
+# ---------------------------------------------------------------------------
 
 
 async def test_first_load_calls_list(tmp_path: Path) -> None:
@@ -75,6 +84,21 @@ async def test_second_show_does_not_refetch(tmp_path: Path) -> None:
         assert len(tracker.list_calls) == initial_calls
 
 
+async def test_first_load_fetches_open_only(tmp_path: Path) -> None:
+    tracker = FakeIssueTracker([_item("1")])
+    async with _IssuesApp(tracker, tmp_path).run_test(headless=True) as pilot:
+        await pilot.pause(0.2)
+
+        first_call = tracker.list_calls[0]
+        assert first_call is not None
+        assert first_call.state == "open"
+
+
+# ---------------------------------------------------------------------------
+# Refresh
+# ---------------------------------------------------------------------------
+
+
 async def test_refresh_action_refetches(tmp_path: Path) -> None:
     tracker = FakeIssueTracker([_item("1")])
     async with _IssuesApp(tracker, tmp_path).run_test(headless=True) as pilot:
@@ -94,10 +118,7 @@ async def test_refresh_preserves_focused_row_when_item_present(tmp_path: Path) -
     async with _IssuesApp(tracker, tmp_path).run_test(headless=True) as pilot:
         await pilot.pause(0.3)
         view = pilot.app.query_one(IssuesView)
-        from cog.ui.widgets.issues_browser import IssueList
-
         issue_list = view.query_one(IssueList)
-        # Item "1" should be first (newer updated_at)
         focused = issue_list.focused_item()
         assert focused is not None
         focused_id = focused.item_id
@@ -113,66 +134,111 @@ async def test_refresh_error_keeps_last_known_rows(tmp_path: Path) -> None:
     tracker = FakeIssueTracker([_item("1")])
     async with _IssuesApp(tracker, tmp_path).run_test(headless=True) as pilot:
         await pilot.pause(0.2)
-        # Now make subsequent list() calls fail
         tracker._list_error = TrackerError("network down")
         view = pilot.app.query_one(IssuesView)
         await view.action_refresh()
         await pilot.pause(0.1)
-        # Cache should still have the original item
         assert len(view._cache) == 1
 
 
-async def test_first_load_error_shows_message(tmp_path: Path) -> None:
+# ---------------------------------------------------------------------------
+# Error states
+# ---------------------------------------------------------------------------
+
+
+async def test_first_load_error_shows_overlay(tmp_path: Path) -> None:
     tracker = FakeIssueTracker(list_error=TrackerError("boom"))
     async with _IssuesApp(tracker, tmp_path).run_test(headless=True) as pilot:
         await pilot.pause(0.2)
-        from cog.ui.widgets.issues_browser import IssueList
-
         overlay = pilot.app.query_one(IssueList).query_one("#list-overlay")
         assert overlay.has_class("visible")
 
 
-async def test_slash_focuses_search_input(tmp_path: Path) -> None:
+# ---------------------------------------------------------------------------
+# Focus and navigation
+# ---------------------------------------------------------------------------
+
+
+async def test_slash_focuses_filter_input(tmp_path: Path) -> None:
     tracker = FakeIssueTracker([])
     async with _IssuesApp(tracker, tmp_path).run_test(headless=True) as pilot:
         await pilot.pause(0.2)
         view = pilot.app.query_one(IssuesView)
         view.action_focus_search()
         await pilot.pause(0.1)
-        from textual.widgets import Input
-
-        search_input = pilot.app.query_one("#filter-search", Input)
-        assert search_input.has_focus
+        inp = pilot.app.query_one("#issues-filter-input", Input)
+        assert inp.has_focus
 
 
-async def test_ctrl_l_clears_filters(tmp_path: Path) -> None:
-    tracker = FakeIssueTracker([_item("1"), _item("2", state="closed")])
+# ---------------------------------------------------------------------------
+# Lazy-fetch closed
+# ---------------------------------------------------------------------------
+
+
+async def test_lazy_fetch_closed_triggered_on_state_widening(tmp_path: Path) -> None:
+    open_item = _item("1", state="open")
+    closed_item = _item("2", state="closed")
+    tracker = FakeIssueTracker([open_item, closed_item])
+    async with _IssuesApp(tracker, tmp_path).run_test(headless=True) as pilot:
+        await pilot.pause(0.2)
+        initial_calls = len(tracker.list_calls)
+        # Widen to closed by changing input
+        inp = pilot.app.query_one("#issues-filter-input", Input)
+        inp.value = "state:all"
+        await pilot.pause(0.3)
+        # Should have fetched closed
+        assert len(tracker.list_calls) > initial_calls
+
+
+async def test_lazy_fetch_closed_not_repeated(tmp_path: Path) -> None:
+    tracker = FakeIssueTracker([_item("1")])
     async with _IssuesApp(tracker, tmp_path).run_test(headless=True) as pilot:
         await pilot.pause(0.2)
         view = pilot.app.query_one(IssuesView)
-        view.action_clear_filters()
-        await pilot.pause(0.1)
-        from cog.core.tracker import ItemListFilter
+        # Manually mark closed as loaded
+        view._closed_loaded = True
+        calls_before = len(tracker.list_calls)
+        inp = pilot.app.query_one("#issues-filter-input", Input)
+        inp.value = "state:all"
+        await pilot.pause(0.2)
+        # No new closed fetch because already loaded
+        assert len(tracker.list_calls) == calls_before
 
-        assert view._active_filter == ItemListFilter(state="open")
+
+# ---------------------------------------------------------------------------
+# Status row
+# ---------------------------------------------------------------------------
 
 
-async def test_closed_toggle_shows_closed_items(tmp_path: Path) -> None:
-    items = [_item("1", state="open"), _item("2", state="closed")]
+async def test_status_row_shows_count(tmp_path: Path) -> None:
+    items = [_item("1"), _item("2")]
     tracker = FakeIssueTracker(items)
     async with _IssuesApp(tracker, tmp_path).run_test(headless=True) as pilot:
         await pilot.pause(0.2)
-        view = pilot.app.query_one(IssuesView)
-        # Default: closed hidden
-        from cog.ui.widgets.issues_browser import IssueFilterRow
+        statusbar = pilot.app.query_one("#issues-statusbar")
+        text = str(statusbar.renderable)
+        assert "of" in text
+        assert "issues" in text
 
-        filter_row = view.query_one(IssueFilterRow)
-        assert not filter_row.show_closed
 
-        # Toggle closed on
-        filter_row.toggle_closed()
+# ---------------------------------------------------------------------------
+# In-session filter persistence
+# ---------------------------------------------------------------------------
+
+
+async def test_filter_persists_to_app(tmp_path: Path) -> None:
+    tracker = FakeIssueTracker([_item("1")])
+    async with _IssuesApp(tracker, tmp_path).run_test(headless=True) as pilot:
+        await pilot.pause(0.2)
+        inp = pilot.app.query_one("#issues-filter-input", Input)
+        inp.value = "label:bug"
         await pilot.pause(0.1)
-        assert view._active_filter.state == "all"
+        assert pilot.app.issues_filter_query == "label:bug"
+
+
+# ---------------------------------------------------------------------------
+# Comments
+# ---------------------------------------------------------------------------
 
 
 async def test_side_pane_comments_fetched_after_debounce(tmp_path: Path) -> None:
@@ -180,17 +246,13 @@ async def test_side_pane_comments_fetched_after_debounce(tmp_path: Path) -> None
         item_id="1",
         comments=(Comment(author="alice", body="great issue", created_at=_BASE_DT),),
     )
-    tracker = FakeIssueTracker([_item("1")])
-    # Override get to return item with comments
-    tracker._items = [item_with_comments]
+    tracker = FakeIssueTracker([item_with_comments])
 
     async with _IssuesApp(tracker, tmp_path).run_test(headless=True) as pilot:
         await pilot.pause(0.2)
         view = pilot.app.query_one(IssuesView)
-        # Simulate focus on item 1
         view._load_comments(item_with_comments)
         await pilot.pause(0.3)
-        # get should have been called
         assert "1" in tracker.get_calls
 
 
@@ -203,13 +265,12 @@ async def test_side_pane_comments_cache_hit_no_refetch(tmp_path: Path) -> None:
         view._load_comments(item)
         await pilot.pause(0.3)
         initial_get_calls = len(tracker.get_calls)
-        # Second load for same item+updated_at should use cache
         view._load_comments(item)
         await pilot.pause(0.1)
         assert len(tracker.get_calls) == initial_get_calls
 
 
-async def test_side_pane_get_error_shows_per_item_error(tmp_path: Path) -> None:
+async def test_side_pane_get_error_does_not_affect_statusbar(tmp_path: Path) -> None:
     item = _item("1")
     tracker = FakeIssueTracker([item], get_error=TrackerError("forbidden"))
     async with _IssuesApp(tracker, tmp_path).run_test(headless=True) as pilot:
@@ -217,6 +278,5 @@ async def test_side_pane_get_error_shows_per_item_error(tmp_path: Path) -> None:
         view = pilot.app.query_one(IssuesView)
         view._load_comments(item)
         await pilot.pause(0.3)
-        # Status bar in view should be unaffected (no error text there)
         statusbar = view.query_one("#issues-statusbar")
-        assert "forbidden" not in (statusbar.renderable or "")
+        assert "forbidden" not in str(statusbar.renderable or "")

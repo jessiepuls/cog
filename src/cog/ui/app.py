@@ -15,6 +15,9 @@ class CogApp(App):
     CSS_PATH = "cog.tcss"
     TITLE = "Cog"
 
+    issues_filter_query: str = "state:open"
+    current_user_login: str | None = None
+
     def __init__(self, initial_screen: Screen, project_dir: Path) -> None:
         super().__init__()
         self._initial = initial_screen
@@ -22,6 +25,35 @@ class CogApp(App):
 
     def on_mount(self) -> None:
         self.push_screen(self._initial)
+        self.run_worker(self._resolve_current_user(), exclusive=False, group="resolve-user")
+
+    async def _resolve_current_user(self) -> None:
+        import asyncio
+        from subprocess import PIPE
+
+        proc = None
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "gh",
+                "api",
+                "user",
+                "--jq",
+                ".login",
+                stdout=PIPE,
+                stderr=PIPE,
+            )
+            stdout, _ = await proc.communicate()
+            if proc.returncode == 0:
+                login = stdout.decode().strip()
+                if login:
+                    self.current_user_login = login
+        except asyncio.CancelledError:
+            if proc is not None and proc.returncode is None:
+                proc.kill()
+                await proc.wait()
+            raise
+        except Exception:  # noqa: BLE001
+            pass
 
 
 async def run_textual(

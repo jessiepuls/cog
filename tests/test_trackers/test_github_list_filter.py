@@ -1,33 +1,61 @@
-"""Tests for GitHubIssueTracker.list(ItemListFilter)."""
+"""Tests for GitHubIssueTracker.list(ItemListFilter) — search API shape (#200)."""
 
+from __future__ import annotations
+
+import json
 from pathlib import Path
 
 import pytest
 
-from cog.core.tracker import ItemListFilter
+from cog.core.tracker import ItemListFilter, ItemListResult
 from cog.trackers.github import GitHubIssueTracker
 from tests.fakes import FakeSubprocessRegistry
-from tests.test_trackers.conftest import load_fixture, register_repo
+from tests.test_trackers.conftest import register_repo
 
-LIST_FIELDS = "number,title,body,labels,assignees,state,createdAt,updatedAt,url"
+_REPO = "jessiepuls/cog"
+
+_SAMPLE_RECORD = {
+    "number": 1,
+    "title": "t",
+    "body": "b",
+    "labels": [],
+    "assignees": [],
+    "state": "open",
+    "created_at": "2026-01-01T00:00:00Z",
+    "updated_at": "2026-01-01T00:00:00Z",
+    "html_url": "https://github.com/jessiepuls/cog/issues/1",
+}
+
+_EMPTY_RESPONSE = json.dumps({"total_count": 0, "incomplete_results": False, "items": []}).encode()
 
 
-def _base_argv(
-    state: str = "open",
-    limit: str = "1000",
-    *extra: str,
-) -> tuple[str, ...]:
+def _search_response(items: list[dict], total: int | None = None) -> bytes:
+    return json.dumps(
+        {
+            "total_count": total if total is not None else len(items),
+            "incomplete_results": False,
+            "items": items,
+        }
+    ).encode()
+
+
+def _search_argv(query: str, page: int = 1) -> tuple[str, ...]:
     return (
         "gh",
-        "issue",
-        "list",
-        "--state",
-        state,
-        "--limit",
-        limit,
-        "--json",
-        LIST_FIELDS,
-        *extra,
+        "api",
+        "search/issues",
+        "-X",
+        "GET",
+        "-f",
+        f"q={query}",
+        "-f",
+        "sort=updated",
+        "-f",
+        "order=desc",
+        "-f",
+        "per_page=100",
+        "-f",
+        f"page={page}",
     )
 
 
@@ -36,53 +64,91 @@ async def _call_list(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     filter: ItemListFilter | None = None,
-) -> list:
+) -> ItemListResult:
     monkeypatch.setattr("asyncio.create_subprocess_exec", registry.create_subprocess_exec)
     tracker = GitHubIssueTracker(tmp_path)
     return await tracker.list(filter)
 
 
-async def test_list_default_filter_uses_open_and_limit_1000(
+# ---------------------------------------------------------------------------
+# Return type
+# ---------------------------------------------------------------------------
+
+
+async def test_list_returns_item_list_result(
     registry: FakeSubprocessRegistry, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     register_repo(registry)
-    registry.expect(_base_argv(), stdout=b"[]")
+    registry.expect(
+        _search_argv(f"repo:{_REPO} is:issue is:open"),
+        stdout=_empty_response_with_total(0),
+    )
+    result = await _call_list(registry, tmp_path, monkeypatch)
+    assert isinstance(result, ItemListResult)
+
+
+async def test_list_total_comes_from_api(
+    registry: FakeSubprocessRegistry, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    register_repo(registry)
+    registry.expect(
+        _search_argv(f"repo:{_REPO} is:issue is:open"),
+        stdout=_search_response([_SAMPLE_RECORD], total=42),
+    )
+    result = await _call_list(registry, tmp_path, monkeypatch)
+    assert result.total == 42
+    assert len(result.items) == 1
+
+
+# ---------------------------------------------------------------------------
+# State qualifier
+# ---------------------------------------------------------------------------
+
+
+async def test_list_default_uses_open(
+    registry: FakeSubprocessRegistry, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    register_repo(registry)
+    registry.expect(
+        _search_argv(f"repo:{_REPO} is:issue is:open"),
+        stdout=_EMPTY_RESPONSE,
+    )
     await _call_list(registry, tmp_path, monkeypatch)
-    list_call = next(c for c in registry.calls if "issue" in c and "list" in c)
-    assert "--state" in list_call
-    assert "open" in list_call
-    assert "--limit" in list_call
-    assert "1000" in list_call
-
-
-async def test_list_none_filter_same_as_default(
-    registry: FakeSubprocessRegistry, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    register_repo(registry)
-    registry.expect(_base_argv(), stdout=b"[]")
-    await _call_list(registry, tmp_path, monkeypatch, filter=None)
-    list_call = next(c for c in registry.calls if "issue" in c and "list" in c)
-    assert "--state" in list_call
-
-
-async def test_list_state_all(
-    registry: FakeSubprocessRegistry, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    register_repo(registry)
-    registry.expect(_base_argv(state="all"), stdout=b"[]")
-    await _call_list(registry, tmp_path, monkeypatch, filter=ItemListFilter(state="all"))
-    list_call = next(c for c in registry.calls if "issue" in c and "list" in c)
-    assert "all" in list_call
+    search_call = _find_search_call(registry)
+    assert "is:open" in _query_from_call(search_call)
 
 
 async def test_list_state_closed(
     registry: FakeSubprocessRegistry, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     register_repo(registry)
-    registry.expect(_base_argv(state="closed"), stdout=b"[]")
+    registry.expect(
+        _search_argv(f"repo:{_REPO} is:issue is:closed"),
+        stdout=_EMPTY_RESPONSE,
+    )
     await _call_list(registry, tmp_path, monkeypatch, filter=ItemListFilter(state="closed"))
-    list_call = next(c for c in registry.calls if "issue" in c and "list" in c)
-    assert "closed" in list_call
+    query = _query_from_call(_find_search_call(registry))
+    assert "is:closed" in query
+    assert "is:open" not in query
+
+
+async def test_list_state_all_omits_is_qualifier(
+    registry: FakeSubprocessRegistry, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    register_repo(registry)
+    registry.expect(
+        _search_argv(f"repo:{_REPO} is:issue"),
+        stdout=_EMPTY_RESPONSE,
+    )
+    await _call_list(registry, tmp_path, monkeypatch, filter=ItemListFilter(state="all"))
+    query = _query_from_call(_find_search_call(registry))
+    assert "is:open" not in query
+    assert "is:closed" not in query
+
+
+# ---------------------------------------------------------------------------
+# Label qualifier
+# ---------------------------------------------------------------------------
 
 
 async def test_list_single_label(
@@ -90,133 +156,183 @@ async def test_list_single_label(
 ) -> None:
     register_repo(registry)
     registry.expect(
-        _base_argv() + ("--label", "bug"),
-        stdout=b"[]",
+        _search_argv(f'repo:{_REPO} is:issue is:open label:"bug"'),
+        stdout=_EMPTY_RESPONSE,
     )
     await _call_list(registry, tmp_path, monkeypatch, filter=ItemListFilter(labels=("bug",)))
-    list_call = next(c for c in registry.calls if "issue" in c and "list" in c)
-    assert "--label" in list_call
-    assert "bug" in list_call
+    query = _query_from_call(_find_search_call(registry))
+    assert 'label:"bug"' in query
 
 
-async def test_list_multiple_labels_repeated_flag(
+async def test_list_multiple_labels(
     registry: FakeSubprocessRegistry, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     register_repo(registry)
     registry.expect(
-        _base_argv() + ("--label", "bug", "--label", "needs-refinement"),
-        stdout=b"[]",
+        _search_argv(f'repo:{_REPO} is:issue is:open label:"bug" label:"docs"'),
+        stdout=_EMPTY_RESPONSE,
     )
     await _call_list(
         registry,
         tmp_path,
         monkeypatch,
-        filter=ItemListFilter(labels=("bug", "needs-refinement")),
+        filter=ItemListFilter(labels=("bug", "docs")),
     )
-    list_call = next(c for c in registry.calls if "issue" in c and "list" in c)
-    label_indices = [i for i, t in enumerate(list_call) if t == "--label"]
-    assert len(label_indices) == 2
+    query = _query_from_call(_find_search_call(registry))
+    assert 'label:"bug"' in query
+    assert 'label:"docs"' in query
 
 
-async def test_list_no_label_omits_label_flag(
+async def test_list_no_label_omits_qualifier(
     registry: FakeSubprocessRegistry, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     register_repo(registry)
-    registry.expect(_base_argv(), stdout=b"[]")
+    registry.expect(
+        _search_argv(f"repo:{_REPO} is:issue is:open"),
+        stdout=_EMPTY_RESPONSE,
+    )
     await _call_list(registry, tmp_path, monkeypatch, filter=ItemListFilter())
-    list_call = next(c for c in registry.calls if "issue" in c and "list" in c)
-    assert "--label" not in list_call
+    query = _query_from_call(_find_search_call(registry))
+    assert "label:" not in query
+
+
+# ---------------------------------------------------------------------------
+# Assignee qualifier
+# ---------------------------------------------------------------------------
 
 
 async def test_list_assignee(
     registry: FakeSubprocessRegistry, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     register_repo(registry)
-    registry.expect(_base_argv() + ("--assignee", "@me"), stdout=b"[]")
-    await _call_list(registry, tmp_path, monkeypatch, filter=ItemListFilter(assignee="@me"))
-    list_call = next(c for c in registry.calls if "issue" in c and "list" in c)
-    assert "--assignee" in list_call
-    assert "@me" in list_call
+    registry.expect(
+        _search_argv(f"repo:{_REPO} is:issue is:open assignee:alice"),
+        stdout=_EMPTY_RESPONSE,
+    )
+    await _call_list(registry, tmp_path, monkeypatch, filter=ItemListFilter(assignee="alice"))
+    query = _query_from_call(_find_search_call(registry))
+    assert "assignee:alice" in query
 
 
-async def test_list_no_assignee_omits_flag(
+async def test_list_no_assignee_omits_qualifier(
     registry: FakeSubprocessRegistry, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     register_repo(registry)
-    registry.expect(_base_argv(), stdout=b"[]")
+    registry.expect(
+        _search_argv(f"repo:{_REPO} is:issue is:open"),
+        stdout=_EMPTY_RESPONSE,
+    )
     await _call_list(registry, tmp_path, monkeypatch, filter=ItemListFilter(assignee=None))
-    list_call = next(c for c in registry.calls if "issue" in c and "list" in c)
-    assert "--assignee" not in list_call
+    query = _query_from_call(_find_search_call(registry))
+    assert "assignee:" not in query
 
 
-async def test_list_search(
+# ---------------------------------------------------------------------------
+# Search term
+# ---------------------------------------------------------------------------
+
+
+async def test_list_search_term(
     registry: FakeSubprocessRegistry, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     register_repo(registry)
-    registry.expect(_base_argv() + ("--search", "login bug"), stdout=b"[]")
+    registry.expect(
+        _search_argv(f"repo:{_REPO} is:issue is:open login bug"),
+        stdout=_EMPTY_RESPONSE,
+    )
     await _call_list(registry, tmp_path, monkeypatch, filter=ItemListFilter(search="login bug"))
-    list_call = next(c for c in registry.calls if "issue" in c and "list" in c)
-    assert "--search" in list_call
-    assert "login bug" in list_call
+    query = _query_from_call(_find_search_call(registry))
+    assert "login bug" in query
 
 
-async def test_list_no_search_omits_flag(
+# ---------------------------------------------------------------------------
+# Item mapping
+# ---------------------------------------------------------------------------
+
+
+async def test_list_maps_search_fields(
     registry: FakeSubprocessRegistry, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    register_repo(registry)
-    registry.expect(_base_argv(), stdout=b"[]")
-    await _call_list(registry, tmp_path, monkeypatch, filter=ItemListFilter(search=None))
-    list_call = next(c for c in registry.calls if "issue" in c and "list" in c)
-    assert "--search" not in list_call
-
-
-async def test_list_custom_limit(
-    registry: FakeSubprocessRegistry, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    register_repo(registry)
-    registry.expect(_base_argv(limit="500"), stdout=b"[]")
-    await _call_list(registry, tmp_path, monkeypatch, filter=ItemListFilter(limit=500))
-    list_call = next(c for c in registry.calls if "issue" in c and "list" in c)
-    assert "500" in list_call
-
-
-async def test_list_returns_items(
-    registry: FakeSubprocessRegistry, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+    record = {
+        "number": 99,
+        "title": "Test issue",
+        "body": "some body",
+        "labels": [{"name": "bug", "color": "ee0701"}],
+        "assignees": [{"login": "alice"}],
+        "state": "open",
+        "created_at": "2026-01-01T00:00:00Z",
+        "updated_at": "2026-02-01T00:00:00Z",
+        "html_url": "https://github.com/jessiepuls/cog/issues/99",
+    }
     register_repo(registry)
     registry.expect(
-        _base_argv(state="all"),
-        stdout=load_fixture("list_by_label_happy.json"),
+        _search_argv(f"repo:{_REPO} is:issue is:open"),
+        stdout=_search_response([record]),
     )
-    items = await _call_list(registry, tmp_path, monkeypatch, filter=ItemListFilter(state="all"))
-    assert len(items) == 3
-    assert all(item.comments == () for item in items)
+    result = await _call_list(registry, tmp_path, monkeypatch)
+    assert len(result.items) == 1
+    item = result.items[0]
+    assert item.item_id == "99"
+    assert item.title == "Test issue"
+    assert item.labels == ("bug",)
+    assert item.assignees == ("alice",)
+    assert item.state == "open"
+    assert item.comments == ()
 
 
-async def test_list_all_flags_combined(
+async def test_list_maps_closed_state(
     registry: FakeSubprocessRegistry, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    record = {**_SAMPLE_RECORD, "state": "closed"}
     register_repo(registry)
     registry.expect(
-        _base_argv(state="all", limit="50")
-        + ("--label", "bug", "--assignee", "alice", "--search", "crash"),
-        stdout=b"[]",
+        _search_argv(f"repo:{_REPO} is:issue is:open"),
+        stdout=_search_response([record]),
     )
-    await _call_list(
+    result = await _call_list(registry, tmp_path, monkeypatch)
+    assert result.items[0].state == "closed"
+
+
+# ---------------------------------------------------------------------------
+# Limit
+# ---------------------------------------------------------------------------
+
+
+async def test_list_limit_caps_results(
+    registry: FakeSubprocessRegistry, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    records = [{**_SAMPLE_RECORD, "number": i} for i in range(1, 6)]
+    register_repo(registry)
+    registry.expect(
+        _search_argv(f"repo:{_REPO} is:issue is:open"),
+        stdout=_search_response(records, total=100),
+    )
+    result = await _call_list(
         registry,
         tmp_path,
         monkeypatch,
-        filter=ItemListFilter(
-            labels=("bug",),
-            state="all",
-            assignee="alice",
-            search="crash",
-            limit=50,
-        ),
+        filter=ItemListFilter(limit=3),
     )
-    list_call = next(c for c in registry.calls if "issue" in c and "list" in c)
-    assert "--label" in list_call
-    assert "--assignee" in list_call
-    assert "--search" in list_call
-    assert "all" in list_call
-    assert "50" in list_call
+    assert len(result.items) == 3
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _empty_response_with_total(total: int) -> bytes:
+    return json.dumps({"total_count": total, "incomplete_results": False, "items": []}).encode()
+
+
+def _find_search_call(registry: FakeSubprocessRegistry) -> tuple[str, ...]:
+    return next(c for c in registry.calls if "api" in c and "search/issues" in c)
+
+
+def _query_from_call(call: tuple[str, ...]) -> str:
+    """Extract the q= value from an argv tuple."""
+    args = list(call)
+    for i, arg in enumerate(args):
+        if arg == "-f" and i + 1 < len(args) and args[i + 1].startswith("q="):
+            return args[i + 1][2:]
+    return ""
