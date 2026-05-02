@@ -29,6 +29,7 @@ from textual.worker import Worker
 
 from cog.core.context import ExecutionContext
 from cog.core.item import Item
+from cog.core.runner import RunEvent, StageStartEvent
 from cog.core.tracker import IssueTracker
 from cog.state import JsonFileStateCache
 from cog.state_paths import project_state_dir
@@ -54,8 +55,21 @@ class _SlotAttentionInputProvider:
         return await self._inner.prompt()
 
 
-class _AbortConfirmScreen:
-    pass  # imported lazily to avoid circular deps at module level
+class _StageForwardingSink:
+    """Forwards events to ``inner`` and updates the slot's stage label on
+    StageStartEvent so the sidebar dot reflects the current workflow stage
+    (build → review → document for implement; rewrite for refine)."""
+
+    def __init__(self, inner: object, registry: DynamicSlotRegistry, run_id: str) -> None:
+        self._inner = inner
+        self._registry = registry
+        self._run_id = run_id
+
+    async def emit(self, event: RunEvent) -> None:
+        if isinstance(event, StageStartEvent):
+            self._registry.update_stage(self._run_id, event.stage_name)
+        if hasattr(self._inner, "emit"):
+            await self._inner.emit(event)
 
 
 class DynamicSlotView(Widget, can_focus=True):
@@ -218,7 +232,8 @@ class DynamicSlotView(Widget, can_focus=True):
         running.display = True
 
         self._sink = StageCountingSink(log, on_cost=self._add_cost)
-        ctx = self._make_ctx(event_sink=self._sink)
+        forwarding = _StageForwardingSink(self._sink, self._registry, self._slot.run_id)
+        ctx = self._make_ctx(event_sink=forwarding)
 
         from cog.hosts.github import GitHubGitHost
         from cog.runners.claude_cli import ClaudeCliRunner
@@ -319,8 +334,9 @@ class DynamicSlotView(Widget, can_focus=True):
         title_strip.display = False
         running.display = True
 
+        forwarding = _StageForwardingSink(chat, self._registry, self._slot.run_id)
         ctx = self._make_ctx(
-            event_sink=chat,
+            event_sink=forwarding,
             input_provider=_SlotAttentionInputProvider(chat, self),
             review_provider=self,
         )
@@ -338,6 +354,11 @@ class DynamicSlotView(Widget, can_focus=True):
         try:
             await StageExecutor().run(workflow, ctx)
         except asyncio.CancelledError:
+            # Abort path: dismiss the slot so it doesn't zombie. A richer
+            # in-slot dismiss panel (matching implement) is a follow-up;
+            # for now the toast on launch and the silent removal are the
+            # only feedback.
+            self.post_message(SlotDismissed(self._slot.run_id))
             raise
         except Exception as e:  # noqa: BLE001
             self._set_status(f"[red]refine failed on #{self._item.item_id}: {e}[/red]")
@@ -463,7 +484,10 @@ class DynamicSlotView(Widget, can_focus=True):
             msg = f"Abort refine #{item_id}? Interview state will be discarded."
         from cog.ui.screens.launch_confirm import LaunchConfirmScreen
 
-        self.app.push_screen(LaunchConfirmScreen(msg), self._on_abort_confirmed)
+        self.app.push_screen(
+            LaunchConfirmScreen(msg, yes_label="abort"),
+            self._on_abort_confirmed,
+        )
 
     def _on_abort_confirmed(self, confirmed: bool | None) -> None:
         if not confirmed:
