@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from collections.abc import AsyncIterator, Iterator, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
@@ -11,6 +13,7 @@ from cog.core.item import Comment, Item
 from cog.core.outcomes import StageResult
 from cog.core.runner import AgentRunner, ResultEvent, RunEvent, RunResult, ToolUseEvent
 from cog.core.stage import Stage
+from cog.core.tracker import IssueTracker, ItemListFilter
 
 _EPOCH = datetime(2024, 1, 1, tzinfo=UTC)
 
@@ -321,6 +324,73 @@ class FakeEditor:
     async def edit(self, app: object, initial_text: str, tmp_dir: object) -> str | None:
         self.called_with.append(initial_text)
         return self.body_after_edit
+
+
+class FakeIssueTracker(IssueTracker):
+    """In-memory IssueTracker for UI tests.
+
+    Constructor takes a canned Item list. Set `list_error` or `get_error` to
+    make those calls raise TrackerError.
+    """
+
+    can_read = True
+    can_comment = False
+    can_swap_labels = False
+    can_create_linked = False
+
+    def __init__(
+        self,
+        items: list[Item] | None = None,
+        *,
+        list_error: Exception | None = None,
+        get_error: Exception | None = None,
+    ) -> None:
+        self._items = list(items or [])
+        self._list_error = list_error
+        self._get_error = get_error
+        self.list_calls: list[ItemListFilter | None] = []
+        self.get_calls: list[str] = []
+
+    async def list(self, filter: ItemListFilter | None = None) -> list[Item]:
+        self.list_calls.append(filter)
+        if self._list_error is not None:
+            raise self._list_error
+        return list(self._items)
+
+    async def list_by_label(self, label: str, *, assignee: str | None = None) -> list[Item]:
+        return [i for i in self._items if label in i.labels]
+
+    async def get(self, item_id: str) -> Item:
+        self.get_calls.append(item_id)
+        if self._get_error is not None:
+            raise self._get_error
+        for item in self._items:
+            if item.item_id == item_id:
+                return item
+        from cog.core.errors import TrackerError
+
+        raise TrackerError(f"item {item_id} not found")
+
+    async def comment(self, item: Item, body: str) -> None:
+        pass
+
+    async def add_label(self, item: Item, label: str) -> None:
+        pass
+
+    async def remove_label(self, item: Item, label: str) -> None:
+        pass
+
+    async def update_body(self, item: Item, body: str, *, title: str | None = None) -> None:
+        pass
+
+    async def ensure_label(
+        self,
+        name: str,
+        *,
+        color: str = "cccccc",
+        description: str = "",
+    ) -> None:
+        pass
 
 
 class FakeSubprocessRegistry:

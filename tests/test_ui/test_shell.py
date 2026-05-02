@@ -64,9 +64,12 @@ class _ShellApp(App):
 
 
 async def test_shell_mounts_all_views_on_startup(tmp_path: Path) -> None:
+    from cog.ui.views.issues import IssuesView
+
     async with _ShellApp(tmp_path).run_test(headless=True) as pilot:
         await pilot.pause()
         pilot.app.query_one("#view-dashboard", DashboardView)
+        pilot.app.query_one("#view-issues", IssuesView)
         pilot.app.query_one("#view-refine", RefineView)
         pilot.app.query_one("#view-ralph", RalphView)
 
@@ -76,7 +79,7 @@ async def test_shell_displays_only_active_view(tmp_path: Path) -> None:
         await pilot.pause()
         displayed = [
             v
-            for v in ("dashboard", "refine", "ralph")
+            for v in ("dashboard", "issues", "refine", "ralph")
             if pilot.app.query_one(f"#view-{v}", Widget).display
         ]
         assert displayed == ["dashboard"]  # default active
@@ -86,12 +89,14 @@ async def test_shell_ctrl_1_2_3_switch_views(tmp_path: Path) -> None:
     async with _ShellApp(tmp_path).run_test(headless=True) as pilot:
         await pilot.pause()
 
-        await pilot.press("ctrl+2")
+        # ctrl+2 is now Issues (shifted from Refine)
+        await pilot.press("ctrl+3")
         await pilot.pause()
         assert pilot.app.query_one("#view-refine", Widget).display is True
         assert pilot.app.query_one("#view-dashboard", Widget).display is False
 
-        await pilot.press("ctrl+3")
+        # ctrl+4 is now Ralph (shifted)
+        await pilot.press("ctrl+4")
         await pilot.pause()
         assert pilot.app.query_one("#view-ralph", Widget).display is True
         assert pilot.app.query_one("#view-refine", Widget).display is False
@@ -105,7 +110,7 @@ async def test_shell_ctrl_1_2_3_switch_views(tmp_path: Path) -> None:
 async def test_shell_focuses_refine_queue_after_switching_to_refine(tmp_path: Path) -> None:
     async with _ShellApp(tmp_path).run_test(headless=True) as pilot:
         await pilot.pause()
-        await pilot.press("ctrl+2")
+        await pilot.press("ctrl+3")  # Refine is now ctrl+3
         # call_after_refresh runs on the next frame; pause a few times.
         for _ in range(3):
             await pilot.pause()
@@ -117,7 +122,7 @@ async def test_shell_focuses_refine_queue_after_switching_to_refine(tmp_path: Pa
 async def test_shell_focuses_ralph_queue_after_switching_to_ralph(tmp_path: Path) -> None:
     async with _ShellApp(tmp_path).run_test(headless=True) as pilot:
         await pilot.pause()
-        await pilot.press("ctrl+3")
+        await pilot.press("ctrl+4")  # Ralph is now ctrl+4
         for _ in range(3):
             await pilot.pause()
         focused = pilot.app.focused
@@ -129,7 +134,7 @@ async def test_shell_sidebar_click_switches_view(tmp_path: Path) -> None:
     async with _ShellApp(tmp_path).run_test(headless=True) as pilot:
         await pilot.pause()
         list_view = pilot.app.query_one("#sidebar-nav", ListView)
-        list_view.index = 2
+        list_view.index = 3  # 0=Dashboard,1=Issues,2=Refine,3=Ralph
         list_view.action_select_cursor()
         await pilot.pause()
         assert pilot.app.query_one("#view-ralph", Widget).display is True
@@ -141,9 +146,9 @@ async def test_shell_preserves_widget_state_across_view_switches(tmp_path: Path)
         ralph_view = pilot.app.query_one("#view-ralph", RalphView)
         ralph_view._marker = "preserved"  # type: ignore[attr-defined]
 
-        await pilot.press("ctrl+2")
+        await pilot.press("ctrl+2")  # Issues
         await pilot.pause()
-        await pilot.press("ctrl+3")
+        await pilot.press("ctrl+4")  # Ralph
         await pilot.pause()
 
         same_ralph = pilot.app.query_one("#view-ralph", RalphView)
@@ -283,7 +288,7 @@ async def test_shell_active_row_gets_highlighted_class(tmp_path: Path) -> None:
         assert len(active) == 1
         assert active[0].id == "nav-dashboard"
 
-        await pilot.press("ctrl+3")
+        await pilot.press("ctrl+4")  # Ralph is now ctrl+4
         await pilot.pause()
 
         active = [r for r in list_view.children if r.has_class("-active")]
@@ -319,7 +324,7 @@ async def test_shell_sidebar_clears_dot_when_switching_to_view(tmp_path: Path) -
         assert "refine" in sidebar._attention
 
         # Switch to refine — dot should clear.
-        await pilot.press("ctrl+2")
+        await pilot.press("ctrl+3")  # Refine is now ctrl+3
         await pilot.pause()
         assert "refine" not in sidebar._attention
 
@@ -351,7 +356,7 @@ async def test_shell_marks_previous_view_on_switch_if_it_needs_attention(
         refine_view._substate = "review"
         # Not on refine, so we switch FROM dashboard to refine (clears) and
         # then away again to trigger the re-check.
-        await pilot.press("ctrl+2")  # switch to refine → clears
+        await pilot.press("ctrl+3")  # switch to refine (now ctrl+3) → clears
         await pilot.pause()
         assert "refine" not in pilot.app.query_one(Sidebar)._attention
         await pilot.press("ctrl+1")  # back to dashboard → re-check refine
@@ -468,7 +473,7 @@ async def test_sidebar_row_layout_keybind_left_count_right(tmp_path: Path) -> No
         await pilot.pause()
 
         rendered = str(sidebar.query_one("#nav-ralph").query_one("Label").renderable)
-        keybind_idx = rendered.index("^3")
+        keybind_idx = rendered.index("^4")  # Ralph is now ctrl+4
         name_idx = rendered.index("Ralph")
         count_idx = rendered.index("7")
         assert keybind_idx < name_idx < count_idx
@@ -485,7 +490,7 @@ async def test_sidebar_renders_blank_slot_for_none_count(tmp_path: Path) -> None
         ralph_label = sidebar.query_one("#nav-ralph").query_one("Label")
         rendered = str(ralph_label.renderable)
         # No digit in the count slot area — keybind still present.
-        assert "^3" in rendered
+        assert "^4" in rendered  # Ralph is now ctrl+4
 
 
 async def test_sidebar_renders_blank_slot_for_non_workflow_rows(tmp_path: Path) -> None:

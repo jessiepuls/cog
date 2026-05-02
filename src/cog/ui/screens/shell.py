@@ -28,6 +28,7 @@ from cog.core.tracker import IssueTracker
 from cog.ui.messages import QueueCountsStale, ViewAttention
 from cog.ui.views.chat import ChatView
 from cog.ui.views.dashboard import DashboardView
+from cog.ui.views.issues import IssuesView
 from cog.ui.views.ralph import RalphView
 from cog.ui.views.refine import RefineView
 from cog.workflows import WORKFLOWS
@@ -45,9 +46,10 @@ class ShellView:
 # Order here == sidebar order + keybind assignment (Ctrl+1..N).
 _VIEWS: tuple[ShellView, ...] = (
     ShellView(id="dashboard", label="Dashboard", keybind="ctrl+1"),
-    ShellView(id="refine", label="Refine", keybind="ctrl+2"),
-    ShellView(id="ralph", label="Ralph", keybind="ctrl+3"),
-    ShellView(id="chat", label="Chat", keybind="ctrl+4"),
+    ShellView(id="issues", label="Issues", keybind="ctrl+2"),
+    ShellView(id="refine", label="Refine", keybind="ctrl+3"),
+    ShellView(id="ralph", label="Ralph", keybind="ctrl+4"),
+    ShellView(id="chat", label="Chat", keybind="ctrl+5"),
 )
 
 
@@ -216,6 +218,7 @@ class CogShellScreen(Screen):
             yield Sidebar(_VIEWS)
             with Container(id="content-area"):
                 yield DashboardView(self._project_dir, self._tracker)
+                yield IssuesView(self._project_dir, self._tracker)
                 yield RefineView(self._project_dir, self._tracker)
                 yield RalphView(self._project_dir, self._tracker)
                 yield ChatView(self._project_dir)
