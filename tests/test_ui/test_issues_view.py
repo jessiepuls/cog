@@ -298,3 +298,46 @@ async def test_side_pane_get_error_does_not_affect_statusbar(tmp_path: Path) -> 
         await pilot.pause(0.3)
         statusbar = view.query_one("#issues-statusbar")
         assert "forbidden" not in str(statusbar.renderable or "")
+
+
+# ---------------------------------------------------------------------------
+# Close
+# ---------------------------------------------------------------------------
+
+
+async def test_close_confirmed_calls_tracker(tmp_path: Path) -> None:
+    item = _item("42", title="Bug to close")
+    tracker = FakeIssueTracker([item])
+    async with _IssuesApp(tracker, tmp_path).run_test(headless=True) as pilot:
+        await pilot.pause(0.2)
+        view = pilot.app.query_one(IssuesView)
+        # Simulate a confirmed close.
+        view._on_close_confirmed(True, item)
+        await pilot.pause(0.2)
+        assert tracker.close_calls == ["42"]
+        # Cache reflects new state.
+        cached = next(it for it in view._cache if it.item_id == "42")
+        assert cached.state == "closed"
+
+
+async def test_close_cancelled_does_not_call_tracker(tmp_path: Path) -> None:
+    item = _item("42")
+    tracker = FakeIssueTracker([item])
+    async with _IssuesApp(tracker, tmp_path).run_test(headless=True) as pilot:
+        await pilot.pause(0.2)
+        view = pilot.app.query_one(IssuesView)
+        view._on_close_confirmed(False, item)
+        await pilot.pause(0.1)
+        assert tracker.close_calls == []
+
+
+async def test_close_action_skips_already_closed_items(tmp_path: Path) -> None:
+    item = _item("42", state="closed")
+    tracker = FakeIssueTracker([item])
+    async with _IssuesApp(tracker, tmp_path).run_test(headless=True) as pilot:
+        await pilot.pause(0.2)
+        view = pilot.app.query_one(IssuesView)
+        # No focused item should be closeable when the row is already closed.
+        view.action_close_issue()
+        await pilot.pause(0.1)
+        assert tracker.close_calls == []

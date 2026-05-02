@@ -121,6 +121,9 @@ class GitHubIssueTracker(IssueTracker):
             args += ["--title", title]
         await self._gh_run(args, stdin=body.encode("utf-8"))
 
+    async def close(self, item: Item) -> None:
+        await self._gh_run(["issue", "close", item.item_id])
+
     async def ensure_label(
         self,
         name: str,

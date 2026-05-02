@@ -181,6 +181,13 @@ issues" in prompts and non-GitHub-specific code.
 >30KB tool-output persistence behavior. Preserve that warning in any new
 prompt.
 
+## UI / Textual conventions
+
+When adding a view or interactive widget, read [docs/STYLEGUIDE.md](docs/STYLEGUIDE.md)
+for the bug-discovered rules (markup escaping, parent-binding-vs-child-Input,
+ListView batch mount, filter debounce, in-place cache update after mutation,
+confirmation-modal shape, split-pane keys, Input height/border).
+
 ## Style / conventions
 
 - **Tracker-agnostic language** outside `trackers/` and `hosts/`. Prefer

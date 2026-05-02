@@ -18,7 +18,7 @@ _COG_LABELS = frozenset({"needs-refinement", "agent-ready", "agent-failed", "par
 
 
 def _row_text(item: Item, width: int = 80) -> str:
-    """Render a single-line row for IssueList."""
+    """Render a row for IssueList: title on line 1, labels indented on line 2."""
     num = f"#{item.item_id:<4}"
     cog = [lbl for lbl in item.labels if lbl in _COG_LABELS]
     other = [lbl for lbl in item.labels if lbl not in _COG_LABELS]
@@ -26,16 +26,25 @@ def _row_text(item: Item, width: int = 80) -> str:
     glyph = " ⚠" if has_failed else ""
 
     label_parts = cog + other
-    chips_str = " ".join(f"[{lbl}]" for lbl in label_parts) + glyph
+    # Only `[` is special in Textual markup; `]` only matters when paired with
+    # an opening `[`, so escaping it would render a literal backslash.
+    chips_str = " ".join(rf"\[{lbl}]" for lbl in label_parts) + glyph
 
-    # Account for number (6), space, chips, trailing spaces
-    title_budget = max(10, width - 6 - len(chips_str) - 2)
+    # Title gets the full row (minus the number prefix and a couple chars padding)
+    title_budget = max(10, width - 6 - 2)
     title = item.title if len(item.title) <= title_budget else item.title[: title_budget - 1] + "…"
+
+    # Indent label line under the title (after the "#NNNN " number column)
+    indent = " " * 6
 
     dim = item.state == "closed"
     if dim:
-        return f"[dim]{num} [strike]{title}[/strike]  {chips_str}[/dim]"
-    return f"{num} {title}  {chips_str}"
+        if chips_str:
+            return f"[dim]{num} [strike]{title}[/strike]\n{indent}{chips_str}[/dim]"
+        return f"[dim]{num} [strike]{title}[/strike][/dim]"
+    if chips_str:
+        return f"{num} {title}\n{indent}{chips_str}"
+    return f"{num} {title}"
 
 
 class IssueList(Widget):
@@ -98,8 +107,13 @@ class IssueList(Widget):
         overlay.remove_class("visible")
         lv.display = True
         width = self.size.width or 80
-        for item in self._items:
-            await lv.append(ListItem(Label(_row_text(item, width)), id=f"issue-{item.item_id}"))
+        new_items = [
+            ListItem(Label(_row_text(item, width)), id=f"issue-{item.item_id}")
+            for item in self._items
+        ]
+        # Single mount() call instead of N awaited appends — one DOM update,
+        # one re-layout, instead of yielding to the event loop per item.
+        await lv.extend(new_items)
         if preserve_id:
             for i, it in enumerate(self._items):
                 if it.item_id == preserve_id:
