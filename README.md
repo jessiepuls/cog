@@ -117,14 +117,16 @@ cog doctor
 
 ## TUI
 
-Running `cog` with no args launches a Textual shell with four views:
+Running `cog` with no args launches a Textual shell with five static
+views plus dynamic slots for parallel workflow runs:
 
 | Shortcut | View | What you see |
 |----------|------|--------------|
 | `Ctrl+1` | Dashboard | Project status, queue counts, recent-runs strip, cost totals |
-| `Ctrl+2` | Refine | `needs-refinement` queue → inline interview → inline review |
-| `Ctrl+3` | Ralph | `agent-ready` queue → live log pane → completion panel |
-| `Ctrl+4` | Chat | Freeform multi-turn chat with Claude over the current project |
+| `Ctrl+2` | Issues | Filterable issue browser; launch refine/implement from here |
+| `Ctrl+3` | Refine | `needs-refinement` queue → inline interview → inline review |
+| `Ctrl+4` | Ralph | `agent-ready` queue → live log pane → completion panel |
+| `Ctrl+5` | Chat | Freeform multi-turn chat with Claude over the current project |
 | `Ctrl+Q` | Quit | Confirms if a workflow is in flight |
 
 Workers persist across view switches — start a ralph run, flip to
@@ -133,6 +135,31 @@ a sidebar row indicates that view needs attention (interview awaiting
 reply, run complete, etc.). Refine and Ralph rows also show a dim
 right-aligned queue count (items in their respective queues) so you
 can see queue depth without opening the Dashboard.
+
+### Issues view — parallel workflow launches
+
+From the Issues view (`Ctrl+2`), select any item and press:
+
+- **`r`** — start a refine session on the selected item
+- **`i`** — start an implement (ralph) run on the selected item
+
+Each launch creates a **dynamic slot** appended below the static sidebar
+rows. Slots are numbered `Ctrl+6`, `Ctrl+7`, … in order. The sidebar
+label shows the workflow prefix (`R` / `I`), item number, current stage,
+and a state dot (`●` running, `◐` awaiting dismiss, `✕` errored).
+
+If the item's label matches the workflow (`needs-refinement` → refine,
+`agent-ready` → implement), the launch is immediate. Mismatched labels
+prompt a confirmation modal before proceeding.
+
+Multiple implement runs can run in parallel (default cap: 3, configurable
+via `COG_MAX_CONCURRENT_IMPLEMENTS`). Refine slots are not capped. A slot
+for the same `(workflow, item)` pair cannot be launched twice; pressing the
+key again focuses the existing slot.
+
+Press **`x`** inside a slot view to abort the run (confirmation required).
+Press **`Enter`** to dismiss a completed implement slot. A completed refine
+slot dismisses automatically after the review decision.
 
 ## Commands
 
