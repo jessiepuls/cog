@@ -13,7 +13,7 @@ from cog.core.item import Comment, Item
 from cog.core.outcomes import StageResult
 from cog.core.runner import AgentRunner, ResultEvent, RunEvent, RunResult, ToolUseEvent
 from cog.core.stage import Stage
-from cog.core.tracker import IssueTracker, ItemListFilter
+from cog.core.tracker import IssueTracker, ItemListFilter, ItemListResult
 
 _EPOCH = datetime(2024, 1, 1, tzinfo=UTC)
 
@@ -351,11 +351,11 @@ class FakeIssueTracker(IssueTracker):
         self.list_calls: list[ItemListFilter | None] = []
         self.get_calls: list[str] = []
 
-    async def list(self, filter: ItemListFilter | None = None) -> list[Item]:
+    async def list(self, filter: ItemListFilter | None = None) -> ItemListResult:
         self.list_calls.append(filter)
         if self._list_error is not None:
             raise self._list_error
-        return list(self._items)
+        return ItemListResult(items=list(self._items), total=len(self._items))
 
     async def list_by_label(self, label: str, *, assignee: str | None = None) -> list[Item]:
         return [i for i in self._items if label in i.labels]
