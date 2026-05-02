@@ -183,7 +183,7 @@ prompt.
 
 ## UI / Textual conventions
 
-When adding a view or interactive widget, read [docs/UI_CONVENTIONS.md](docs/UI_CONVENTIONS.md)
+When adding a view or interactive widget, read [docs/STYLEGUIDE.md](docs/STYLEGUIDE.md)
 for the bug-discovered rules (markup escaping, parent-binding-vs-child-Input,
 ListView batch mount, filter debounce, in-place cache update after mutation,
 confirmation-modal shape, split-pane keys, Input height/border).
