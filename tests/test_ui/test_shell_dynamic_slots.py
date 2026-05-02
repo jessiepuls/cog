@@ -357,8 +357,11 @@ async def test_concurrency_cap_refuses_extra_implement(tmp_path: Path, monkeypat
 async def test_cap_does_not_apply_to_refine(tmp_path: Path, monkeypatch) -> None:
     """The cap is implement-only — refine is uncapped."""
     from cog.ui.messages import LaunchSlotRequest
+    from cog.ui.widgets.dynamic_slot_view import DynamicSlotView
 
     monkeypatch.setenv("COG_MAX_CONCURRENT_IMPLEMENTS", "1")
+    # Prevent start_run from launching a real subprocess in the test process.
+    monkeypatch.setattr(DynamicSlotView, "start_run", lambda self: None)
 
     async with _ShellApp(tmp_path).run_test(headless=True) as pilot:
         await pilot.pause()
@@ -368,12 +371,10 @@ async def test_cap_does_not_apply_to_refine(tmp_path: Path, monkeypatch) -> None
         # An implement at cap should not block refines
         screen._registry.add(_slot("imp", workflow="implement", item_id="1"))
 
-        # Posting a refine launch must not be refused for cap reasons; we
-        # can't easily verify the slot was created without running the
-        # workflow, so assert that the cap-refusal path didn't fire by
-        # checking active_count("implement") stays at 1.
         screen.post_message(LaunchSlotRequest("refine", _fake_item("99")))
         for _ in range(5):
             await pilot.pause()
 
+        # Cap-refusal is implement-only; refine slot was created, not refused.
         assert screen._registry.active_count("implement") == 1
+        assert screen._registry.active_count("refine") == 1
