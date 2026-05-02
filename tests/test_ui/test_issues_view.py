@@ -141,6 +141,24 @@ async def test_refresh_error_keeps_last_known_rows(tmp_path: Path) -> None:
         assert len(view._cache) == 1
 
 
+async def test_refresh_retries_closed_after_lazy_fetch_failure(tmp_path: Path) -> None:
+    """If the closed lazy fetch failed, R should retry it (the status row tells the user to)."""
+    tracker = FakeIssueTracker([_item("1", state="open")])
+    async with _IssuesApp(tracker, tmp_path).run_test(headless=True) as pilot:
+        await pilot.pause(0.2)
+        view = pilot.app.query_one(IssuesView)
+        # Simulate a failed lazy-fetch of closed
+        view._closed_fetch_failed = True
+        view._closed_loaded = False
+        calls_before = len(tracker.list_calls)
+        await view.action_refresh()
+        await pilot.pause(0.2)
+        # Two list calls: open + retry of closed
+        assert len(tracker.list_calls) - calls_before == 2
+        assert view._closed_loaded is True
+        assert view._closed_fetch_failed is False
+
+
 # ---------------------------------------------------------------------------
 # Error states
 # ---------------------------------------------------------------------------

@@ -16,21 +16,6 @@ from cog.core.item import Item
 _COG_LABELS = frozenset({"needs-refinement", "agent-ready", "agent-failed", "partially-refined"})
 
 
-def _luminance(hex_color: str) -> float:
-    """WCAG relative luminance from a 6-char hex color string."""
-    r, g, b = (int(hex_color[i : i + 2], 16) / 255 for i in (0, 2, 4))
-
-    def _channel(c: float) -> float:
-        return c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
-
-    return 0.2126 * _channel(r) + 0.7152 * _channel(g) + 0.0722 * _channel(b)
-
-
-def _fg_for_bg(hex_color: str) -> str:
-    """Return 'black' or 'white' for best contrast on the given hex background."""
-    return "black" if _luminance(hex_color) > 0.179 else "white"
-
-
 def _row_text(item: Item, width: int = 80) -> str:
     """Render a single-line row for IssueList."""
     num = f"#{item.item_id:<4}"

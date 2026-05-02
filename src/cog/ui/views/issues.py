@@ -177,13 +177,15 @@ class IssuesView(Widget, can_focus=True):
             self._set_status(f"[red]Refresh failed: {e}[/red]")
             return
 
-        if self._closed_loaded:
+        if self._closed_loaded or self._closed_fetch_failed:
             try:
                 closed_result = await self._tracker.list(_CLOSED_FILTER)
             except Exception as e:  # noqa: BLE001
                 self._set_status(f"[red]Refresh failed: {e}[/red]")
                 return
             self._closed_total = closed_result.total
+            self._closed_loaded = True
+            self._closed_fetch_failed = False
             closed_items = closed_result.items
         else:
             closed_items = []
