@@ -107,8 +107,13 @@ class IssueList(Widget):
         overlay.remove_class("visible")
         lv.display = True
         width = self.size.width or 80
-        for item in self._items:
-            await lv.append(ListItem(Label(_row_text(item, width)), id=f"issue-{item.item_id}"))
+        new_items = [
+            ListItem(Label(_row_text(item, width)), id=f"issue-{item.item_id}")
+            for item in self._items
+        ]
+        # Single mount() call instead of N awaited appends — one DOM update,
+        # one re-layout, instead of yielding to the event loop per item.
+        await lv.extend(new_items)
         if preserve_id:
             for i, it in enumerate(self._items):
                 if it.item_id == preserve_id:

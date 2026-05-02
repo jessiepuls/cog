@@ -29,6 +29,8 @@ class IssuesView(Widget, can_focus=True):
     BINDINGS = [
         Binding("r", "refresh", "Refresh"),
         Binding("/", "focus_search", "Search"),
+        Binding("ctrl+comma", "narrow_list", "Narrow list"),
+        Binding("ctrl+full_stop", "widen_list", "Widen list"),
     ]
 
     def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:
@@ -86,6 +88,10 @@ class IssuesView(Widget, can_focus=True):
         self._comments_cache: dict[tuple[str, str], Item] = {}
         self._focus_debounce: Timer | None = None
         self._status_reset_timer: Timer | None = None
+        self._filter_debounce: Timer | None = None
+        # List pane width as a percentage of the body width. Adjustable via
+        # ctrl+comma / ctrl+full_stop, matching the refine view's convention.
+        self._split_pct: int = 67
 
     def compose(self) -> ComposeResult:
         suggester = FilterSuggester(
@@ -221,14 +227,35 @@ class IssuesView(Widget, can_focus=True):
         inp = self.query_one("#issues-filter-input", Input)
         inp.focus()
 
+    def action_narrow_list(self) -> None:
+        self._split_pct = max(20, self._split_pct - 5)
+        self._apply_split()
+
+    def action_widen_list(self) -> None:
+        self._split_pct = min(80, self._split_pct + 5)
+        self._apply_split()
+
+    def _apply_split(self) -> None:
+        try:
+            issue_list = self.query_one(IssueList)
+            issue_list.styles.width = f"{self._split_pct}%"
+        except Exception:  # noqa: BLE001
+            pass
+
     def on_input_changed(self, event: Input.Changed) -> None:
         if event.input.id != "issues-filter-input":
             return
         event.stop()
         query = event.value
-        # Persist to app level
+        # Persist immediately so a view-switch mid-typing doesn't lose state.
         if hasattr(self.app, "issues_filter_query"):
             self.app.issues_filter_query = query
+        # Debounce the actual filter+rebuild — every keystroke would otherwise
+        # cancel the in-flight ListView rebuild via exclusive workers.
+        self._cancel_timer(self._filter_debounce)
+        self._filter_debounce = self.set_timer(0.12, lambda q=query: self._apply_query(q))
+
+    def _apply_query(self, query: str) -> None:
         prev_parsed = self._parsed
         self._parsed = parse_query(query)
 
