@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import Literal
 
 from textual.app import ComposeResult
 from textual.binding import Binding
@@ -43,11 +44,7 @@ def _chip_markup(name: str, color: str, *, dim: bool = False) -> str:
     return f"[{style}on #{color}][{fg}] {name} [/{fg}][/{style}on #{color}]"
 
 
-def _apply_filter(
-    items: list[Item],
-    filter: ItemListFilter,
-    current_user_login: str | None = None,
-) -> list[Item]:
+def _apply_filter(items: list[Item], filter: ItemListFilter) -> list[Item]:
     """Pure client-side filter. All criteria are AND-combined."""
     result = items
 
@@ -302,22 +299,11 @@ class IssueFilterRow(Widget):
             yield Label("Search: ", id="search-label")
             yield Input(placeholder="title or #number…", id="filter-search")
 
-    def on_click(self, event: object) -> None:
-        pass
-
-    def on_label_click(self, event: object) -> None:
-        pass
-
-    def on_key(self, event: object) -> None:
-        pass
-
     def _emit_filter(self) -> None:
         labels_ci = self.query_one("#filter-labels", ChipInput)
         assignee_ci = self.query_one("#filter-assignee", ChipInput)
         search_val = self.query_one("#filter-search", Input).value.strip() or None
         assignee: str | None = assignee_ci.chips[0] if assignee_ci.chips else None
-        from typing import Literal
-
         state: Literal["open", "closed", "all"] = "all" if self._show_closed else "open"
         f = ItemListFilter(
             labels=labels_ci.chips,
