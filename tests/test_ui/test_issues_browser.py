@@ -97,3 +97,11 @@ def test_row_text_open_no_dim() -> None:
     row = _row_text(_item("1", title="Open issue", state="open"))
     # Should not wrap entire row in [dim]
     assert not row.startswith("[dim]")
+
+
+def test_row_text_title_fits_at_wider_width() -> None:
+    title = "A" * 100
+    narrow = _row_text(_item("1", title=title), width=80)
+    wide = _row_text(_item("1", title=title), width=200)
+    assert "…" in narrow
+    assert "…" not in wide
