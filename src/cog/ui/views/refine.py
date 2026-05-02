@@ -23,6 +23,7 @@ from textual import events
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Container, Horizontal, ScrollableContainer
+from textual.reactive import reactive
 from textual.widget import Widget
 from textual.widgets import Label, ListItem, ListView, Static
 
@@ -33,7 +34,7 @@ from cog.state import JsonFileStateCache
 from cog.state_paths import project_state_dir
 from cog.telemetry import TelemetryWriter
 from cog.ui.editor import suspend_and_edit
-from cog.ui.messages import QueueCountsStale, ViewAttention
+from cog.ui.messages import ViewAttention
 from cog.ui.picker import _format_assignees
 from cog.ui.widgets.chat_pane import ChatPaneWidget
 from cog.workflows.refine import RefineWorkflow, ReviewDecision, ReviewOutcome
@@ -57,6 +58,8 @@ class _AttentionInputProvider:
 
 class RefineView(Widget, can_focus=True):
     """Host of the refine workflow's inline flow."""
+
+    queue_count: reactive[int | None] = reactive(None)
 
     BINDINGS = [
         Binding("r", "refresh_queue", "Refresh", show=False),
@@ -218,9 +221,11 @@ class RefineView(Widget, can_focus=True):
             items = await self._tracker.list_by_label("needs-refinement")
         except Exception as e:  # noqa: BLE001
             self._set_status(f"[red]error listing queue: {e}[/red]")
+            self.queue_count = None
             return
         items.sort(key=lambda i: i.created_at)
         self._items = items
+        self.queue_count = len(items)
         list_view = self.query_one("#refine-queue", ListView)
         await list_view.clear()
         if not items:
@@ -296,7 +301,6 @@ class RefineView(Widget, can_focus=True):
         try:
             await StageExecutor().run(workflow, ctx)
             self._set_status(self._format_status("Completed", item=item))
-            self.post_message(QueueCountsStale())
         except Exception as e:  # noqa: BLE001
             self._set_status(
                 f"[red]{self._format_status('Failed', item=item, suffix=f': {e}')}[/red]"

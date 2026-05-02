@@ -23,6 +23,7 @@ from typing import Literal
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Container
+from textual.reactive import reactive
 from textual.screen import ModalScreen
 from textual.widget import Widget
 from textual.widgets import Button, Label, ListItem, ListView, Static
@@ -36,7 +37,7 @@ from cog.git.worktree import discard_worktree, is_dirty
 from cog.state import JsonFileStateCache
 from cog.state_paths import project_state_dir
 from cog.telemetry import TelemetryWriter
-from cog.ui.messages import QueueCountsStale, ViewAttention
+from cog.ui.messages import ViewAttention
 from cog.ui.picker import (
     PickerHistory,
     _format_assignees,
@@ -96,6 +97,8 @@ class DirtyWorktreeModal(ModalScreen[bool]):
 
 class RalphView(Widget, can_focus=True):
     """Host of the ralph workflow's inline flow."""
+
+    queue_count: reactive[int | None] = reactive(None)
 
     BINDINGS = [
         Binding("r", "refresh_queue", "Refresh", show=False),
@@ -239,12 +242,15 @@ class RalphView(Widget, can_focus=True):
             items = await self._tracker.list_by_label("agent-ready")
         except TrackerError as e:
             self._set_status(f"[red]error listing queue: {e}[/red]")
+            self.queue_count = None
             return
         except Exception as e:  # noqa: BLE001
             self._set_status(f"[red]error: {e}[/red]")
+            self.queue_count = None
             return
         items.sort(key=lambda i: i.created_at)
         self._items = items
+        self.queue_count = len(items)
         self._history = load_picker_history(self._project_dir)
 
         list_view = self.query_one("#ralph-queue", ListView)
@@ -434,7 +440,6 @@ class RalphView(Widget, can_focus=True):
         self.call_after_refresh(self.focus_content)
         if substate == "post_run":
             self.post_message(ViewAttention("ralph", reason="run complete"))
-            self.post_message(QueueCountsStale())
 
     def _set_status(self, text: str) -> None:
         self.query_one("#ralph-status", Static).update(text)

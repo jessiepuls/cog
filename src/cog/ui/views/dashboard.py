@@ -23,7 +23,6 @@ import cog.git as git
 from cog.core.errors import GitError
 from cog.core.tracker import IssueTracker
 from cog.state_paths import project_state_dir
-from cog.ui.messages import QueueCountsStale
 from cog.ui.widgets.recent_runs import RecentRunsWidget
 from cog.workflows import WORKFLOWS
 
@@ -75,17 +74,12 @@ class DashboardView(Widget):
         yield RecentRunsWidget(self._project_dir)
 
     async def on_mount(self) -> None:
-        if hasattr(self.screen, "queue_counts"):
-            self.watch(self.screen, "queue_counts", self._render_queues)
         await self.refresh_all()
 
     async def on_show(self) -> None:
-        # Textual fires Show when display toggles from False → True — i.e.
-        # when the user switches back to the dashboard tab. Post stale signal
-        # so the shell refreshes queue counts; refresh non-queue data directly.
-        self.post_message(QueueCountsStale())
         await asyncio.gather(
             self._refresh_project_status(),
+            self._refresh_queue_counts(),
             self._refresh_cost_totals(),
             self._refresh_recent_runs(),
         )
@@ -128,11 +122,6 @@ class DashboardView(Widget):
         widget.update(f"branch: [bold]{branch}[/bold]  ·  {tree_line}")
 
     def _render_queues(self, counts: dict[str, int | None]) -> None:
-        # Empty dict = shell hasn't run its initial fetch yet (the reactive's
-        # default fires through watch on mount). Distinct from "fetched but
-        # got None (error)" — only the latter renders a red ?.
-        if not counts:
-            return
         lines: list[str] = []
         for cls in WORKFLOWS:
             count = counts.get(cls.name)
@@ -147,9 +136,6 @@ class DashboardView(Widget):
         widget.update("\n".join(lines))
 
     async def _refresh_queue_counts(self) -> None:
-        # Used when not inside CogShellScreen (e.g. standalone tests).
-        if hasattr(self.screen, "queue_counts"):
-            return
         results = await asyncio.gather(
             *(self._safe_count(w.queue_label) for w in WORKFLOWS),
             return_exceptions=True,

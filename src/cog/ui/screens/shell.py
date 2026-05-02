@@ -19,19 +19,17 @@ from pathlib import Path
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Container, Horizontal
-from textual.reactive import reactive
 from textual.screen import Screen
 from textual.widget import Widget
 from textual.widgets import Footer, Header, Label, ListItem, ListView, Static
 
 from cog.core.tracker import IssueTracker
-from cog.ui.messages import QueueCountsStale, ViewAttention
+from cog.ui.messages import ViewAttention
 from cog.ui.views.chat import ChatView
 from cog.ui.views.dashboard import DashboardView
 from cog.ui.views.issues import IssuesView
 from cog.ui.views.ralph import RalphView
 from cog.ui.views.refine import RefineView
-from cog.workflows import WORKFLOWS
 
 
 @dataclass(frozen=True)
@@ -106,14 +104,9 @@ class Sidebar(Widget):
         self._attention: set[str] = set()
         self._counts: dict[str, int | None] = {}
 
-    def on_mount(self) -> None:
-        if hasattr(self.screen, "queue_counts"):
-            self.watch(self.screen, "queue_counts", self._on_counts_changed)
-
-    def _on_counts_changed(self, counts: dict[str, int | None]) -> None:
-        self._counts = counts
-        for v in self._views:
-            self._rerender_row(v.id)
+    def set_count(self, view_id: str, count: int | None) -> None:
+        self._counts[view_id] = count
+        self._rerender_row(view_id)
 
     def _label_for(self, v: ShellView) -> str:
         # Layout: [keybind][space][name + dot][padding][count slot (3)]
@@ -172,9 +165,6 @@ class CogShellScreen(Screen):
     stay in the tree.
     """
 
-    # key: workflow.name ("ralph", "refine") | value: count or None (error/loading)
-    queue_counts: reactive[dict[str, int | None]] = reactive({})
-
     DEFAULT_CSS = """
     CogShellScreen {
         layout: vertical;
@@ -199,19 +189,6 @@ class CogShellScreen(Screen):
         self._tracker = tracker
         self._active_view_id: str = _VIEWS[0].id
 
-    async def refresh_queue_counts(self) -> None:
-        new_counts: dict[str, int | None] = {}
-        for workflow_cls in WORKFLOWS:
-            try:
-                items = await self._tracker.list_by_label(workflow_cls.queue_label)
-                new_counts[workflow_cls.name] = len(items)
-            except Exception:  # noqa: BLE001
-                new_counts[workflow_cls.name] = None
-        self.queue_counts = new_counts
-
-    def on_queue_counts_stale(self, message: QueueCountsStale) -> None:
-        self.run_worker(self.refresh_queue_counts(), exclusive=True, group="queue_counts")
-
     def compose(self) -> ComposeResult:
         yield Header()
         with Horizontal(id="shell-body"):
@@ -227,7 +204,22 @@ class CogShellScreen(Screen):
     def on_mount(self) -> None:
         self._apply_active_view()
         self._highlight_sidebar_row(self._active_view_id)
-        self.run_worker(self.refresh_queue_counts(), exclusive=True, group="queue_counts")
+        ralph_view = self.query_one(RalphView)
+        refine_view = self.query_one(RefineView)
+        self.watch(ralph_view, "queue_count", self._on_ralph_count_changed)
+        self.watch(refine_view, "queue_count", self._on_refine_count_changed)
+
+    def _on_ralph_count_changed(self, count: int | None) -> None:
+        try:
+            self.query_one(Sidebar).set_count("ralph", count)
+        except Exception:  # noqa: BLE001 — not yet mounted
+            pass
+
+    def _on_refine_count_changed(self, count: int | None) -> None:
+        try:
+            self.query_one(Sidebar).set_count("refine", count)
+        except Exception:  # noqa: BLE001 — not yet mounted
+            pass
 
     def action_quit_app(self) -> None:
         busy: list[str] = []
