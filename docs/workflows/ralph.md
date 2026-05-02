@@ -43,6 +43,23 @@ Override each via `COG_RALPH_BUILD_MODEL` / `COG_RALPH_REVIEW_MODEL` /
 Prompts live in [`src/cog/prompts/claude/ralph/`](../../src/cog/prompts/claude/ralph/)
 as markdown. Change prompt behavior by editing the markdown, not Python.
 
+### Stewardship
+
+The build stage is expected to fold small adjacent improvements into the same
+PR rather than leave them behind. A noticed fix belongs in the PR only when all
+three of the following hold; otherwise it goes under `### Follow-up items`:
+
+- **Small** — roughly one function or a handful of lines; must not grow the
+  diff by more than ~30% or pull in a new module.
+- **Adjacent** — the file or area is already open as part of the primary work.
+- **Same-shape** — a bug fix, a missing test, or a local refactor.
+  Abstraction redesigns or public interface changes are not same-shape.
+
+The review stage is briefed on these criteria and will not flag stewardship
+folds as scope creep. Changes that cross into unrelated areas of the codebase
+or that modify a public interface unrelated to the primary task are still
+genuine scope concerns and will be flagged.
+
 ## PR body
 
 Each main stage ends its final message with four structured sections that
