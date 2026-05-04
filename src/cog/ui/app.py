@@ -84,9 +84,11 @@ async def run_textual(
 
 
 async def _run_main_menu(project_dir: Path) -> None:
+    from cog.diagnostics import install_asyncio_handler
     from cog.trackers.github import GitHubIssueTracker
     from cog.ui.screens.shell import CogShellScreen
 
+    install_asyncio_handler()
     tracker = GitHubIssueTracker(project_dir)
     app = CogApp(CogShellScreen(project_dir, tracker), project_dir)
     await app.run_async()
