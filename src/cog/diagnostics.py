@@ -81,7 +81,13 @@ def setup_diagnostics(project_dir: Path) -> Path:
             pass
 
     def log_exit() -> None:
-        logger.info(f"=== session exit (pid={pid}) ===")
+        # Dump the current stack so we can see who triggered the exit when no
+        # signal / exception was logged. Python's atexit fires inside whatever
+        # frame called sys.exit / completed run_async / etc.
+        import traceback
+
+        stack = "".join(traceback.format_stack())
+        logger.info(f"=== session exit (pid={pid}) ===\nexit stack:\n{stack}")
         for h in logger.handlers:
             h.flush()
 
@@ -92,15 +98,22 @@ def setup_diagnostics(project_dir: Path) -> Path:
 
 
 def install_asyncio_handler() -> None:
-    """Install an asyncio exception handler on the running loop.
+    """Install asyncio-level exception handler, signal handlers, and a liveness heartbeat.
 
     Must be called from inside an async function (a running loop must exist).
-    Captures unhandled task exceptions that would otherwise be swallowed.
+
+    - Exception handler catches unhandled task exceptions Textual would swallow.
+    - asyncio signal handlers catch SIGHUP/SIGTERM that bypass `signal.signal()`
+      because Textual / asyncio installs loop-level signal handlers that take
+      precedence.
+    - Heartbeat task logs every 60s so we can distinguish "process was alive
+      up until the moment of death" from "process was stuck for N minutes
+      before the exit log fired."
     """
     logger = logging.getLogger("cog.diagnostics")
     loop = asyncio.get_running_loop()
 
-    def handler(_loop: asyncio.AbstractEventLoop, context: dict[str, object]) -> None:
+    def exc_handler(_loop: asyncio.AbstractEventLoop, context: dict[str, object]) -> None:
         msg = context.get("message", "<no message>")
         exc = context.get("exception")
         if isinstance(exc, BaseException):
@@ -110,4 +123,33 @@ def install_asyncio_handler() -> None:
         for h in logger.handlers:
             h.flush()
 
-    loop.set_exception_handler(handler)
+    loop.set_exception_handler(exc_handler)
+
+    def asyncio_signal_handler(sig: int) -> None:
+        try:
+            sig_name = signal.Signals(sig).name
+        except (ValueError, AttributeError):
+            sig_name = str(sig)
+        logger.warning(f"asyncio received signal {sig_name} ({sig}); allowing default exit")
+        for h in logger.handlers:
+            h.flush()
+        # Stop the loop so the app exits cleanly. Don't re-raise — that'd
+        # potentially fight whatever Textual was doing.
+        loop.stop()
+
+    for sig in (signal.SIGHUP, signal.SIGTERM):
+        try:
+            loop.add_signal_handler(sig, asyncio_signal_handler, sig)
+        except (NotImplementedError, RuntimeError):
+            # NotImplementedError on Windows; RuntimeError if loop isn't main-thread
+            pass
+
+    async def heartbeat() -> None:
+        while True:
+            await asyncio.sleep(60)
+            logger.debug("heartbeat")
+            for h in logger.handlers:
+                h.flush()
+
+    # Keep a reference so the task isn't GC'd
+    loop.create_task(heartbeat(), name="cog-diagnostics-heartbeat")
