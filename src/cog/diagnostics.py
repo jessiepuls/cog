@@ -97,6 +97,43 @@ def setup_diagnostics(project_dir: Path) -> Path:
     return log_path
 
 
+def patch_app_exit(app: object) -> None:
+    """Monkey-patch app.exit / app._exit to log the call stack at trigger time.
+
+    The atexit hook fires after Python shutdown begins, by which point the
+    frame that triggered exit is no longer on the stack. Wrapping at the
+    actual exit-call entry point captures who pulled the trigger.
+    """
+    logger = logging.getLogger("cog.diagnostics")
+
+    for attr in ("exit", "_exit", "_handle_exception"):
+        if not hasattr(app, attr):
+            continue
+        original = getattr(app, attr)
+        if not callable(original):
+            continue
+
+        def _make_wrapper(method_name: str, original_method: object) -> object:
+            def wrapper(*args: object, **kwargs: object) -> object:
+                import traceback as _tb
+
+                stack = "".join(_tb.format_stack())
+                logger.warning(
+                    f"app.{method_name}() called with args={args!r} kwargs={kwargs!r}"
+                    f"\ntrigger stack:\n{stack}"
+                )
+                for h in logger.handlers:
+                    h.flush()
+                return original_method(*args, **kwargs)  # type: ignore[operator]
+
+            return wrapper
+
+        try:
+            setattr(app, attr, _make_wrapper(attr, original))
+        except (AttributeError, TypeError):
+            pass
+
+
 def install_asyncio_handler() -> None:
     """Install asyncio-level exception handler, signal handlers, and a liveness heartbeat.
 
