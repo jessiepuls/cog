@@ -142,7 +142,11 @@ def patch_app_exit(app: object) -> None:
     """
     logger = logging.getLogger("cog.diagnostics")
 
-    for attr in ("exit", "_exit", "_handle_exception"):
+    # `panic` is the path Textual's driver thread takes when run_input_thread()
+    # raises (linux_driver.py:_key_thread_target). It calls _close_messages_no_wait
+    # which shuts down the message pump cleanly — run_async returns normally
+    # without our other wrappers seeing anything. Wrap panic too.
+    for attr in ("exit", "_exit", "_handle_exception", "panic", "_fatal_error"):
         if not hasattr(app, attr):
             continue
         original = getattr(app, attr)
@@ -151,11 +155,28 @@ def patch_app_exit(app: object) -> None:
 
         def _make_wrapper(method_name: str, original_method: object) -> object:
             def wrapper(*args: object, **kwargs: object) -> object:
+                import io as _io
                 import traceback as _tb
 
                 stack = "".join(_tb.format_stack())
+                # `panic` is called with rich Traceback / renderables that
+                # capture the original exception. Render them so the log
+                # shows the actual exception, not just `<Traceback object>`.
+                rendered_args: list[str] = []
+                for arg in args:
+                    try:
+                        # Rich renderables have a __rich_console__ method;
+                        # rendering to a string captures the traceback text.
+                        from rich.console import Console as _RichConsole
+
+                        _buf = _io.StringIO()
+                        _RichConsole(file=_buf, force_terminal=False, width=120).print(arg)
+                        rendered_args.append(_buf.getvalue())
+                    except Exception:  # noqa: BLE001
+                        rendered_args.append(repr(arg))
                 logger.warning(
-                    f"app.{method_name}() called with args={args!r} kwargs={kwargs!r}"
+                    f"app.{method_name}() called with kwargs={kwargs!r}"
+                    f"\nargs (rendered):\n{chr(10).join(rendered_args)}"
                     f"\ntrigger stack:\n{stack}"
                 )
                 for h in logger.handlers:
