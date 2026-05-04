@@ -77,6 +77,9 @@ async def build_and_run(
     max_iterations: int | None = None,
     restart: bool = False,
 ) -> int:
+    from cog.diagnostics import install_asyncio_handler
+
+    install_asyncio_handler()
     # 1. Preflight
     results: list[PreflightResult] = await run_checks(workflow_cls.preflight_checks, project_dir)
     print_results(results)
