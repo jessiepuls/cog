@@ -64,7 +64,7 @@ async def run_textual(
     max_iterations: int | None = None,
     tracker: IssueTracker | None = None,
 ) -> int:
-    from cog.diagnostics import patch_app_exit
+    from cog.diagnostics import patch_app_exit, run_app_traced
 
     run_screen = RunScreen(workflow, ctx, loop=loop, max_iterations=max_iterations)
     app = CogApp(run_screen, ctx.project_dir)
@@ -82,12 +82,12 @@ async def run_textual(
     from cog.ui.screens.review import ModalReviewProvider
 
     ctx.review_provider = ModalReviewProvider(app)
-    await app.run_async()
+    await run_app_traced(app)
     return 0 if run_screen._state in ("completed", "cancelled") else 1
 
 
 async def _run_main_menu(project_dir: Path) -> None:
-    from cog.diagnostics import install_asyncio_handler, patch_app_exit
+    from cog.diagnostics import install_asyncio_handler, patch_app_exit, run_app_traced
     from cog.trackers.github import GitHubIssueTracker
     from cog.ui.screens.shell import CogShellScreen
 
@@ -95,4 +95,4 @@ async def _run_main_menu(project_dir: Path) -> None:
     tracker = GitHubIssueTracker(project_dir)
     app = CogApp(CogShellScreen(project_dir, tracker), project_dir)
     patch_app_exit(app)
-    await app.run_async()
+    await run_app_traced(app)

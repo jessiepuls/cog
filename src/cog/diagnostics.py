@@ -97,6 +97,42 @@ def setup_diagnostics(project_dir: Path) -> Path:
     return log_path
 
 
+async def run_app_traced(app: object) -> object:
+    """Run `app.run_async()` with diagnostic logging on every return path.
+
+    Captures exception types, app.return_value, and tracebacks for any path
+    out of run_async — including paths that don't go through app.exit() (e.g.,
+    KeyboardInterrupt, asyncio CancelledError, app._exit set directly).
+    """
+    import logging as _logging
+    import traceback as _tb
+
+    logger = _logging.getLogger("cog.diagnostics")
+    logger.info("entering app.run_async()")
+    for h in logger.handlers:
+        h.flush()
+    try:
+        result = await app.run_async()  # type: ignore[attr-defined]
+    except BaseException as exc:
+        logger.warning(
+            f"app.run_async() raised {type(exc).__name__}: {exc!r}"
+            f"\nreturn_value={getattr(app, 'return_value', '<unset>')!r}"
+            f"\ntraceback:\n{_tb.format_exc()}"
+        )
+        for h in logger.handlers:
+            h.flush()
+        raise
+    logger.warning(
+        f"app.run_async() returned normally."
+        f" result={result!r}"
+        f" return_value={getattr(app, 'return_value', '<unset>')!r}"
+        f" _exit={getattr(app, '_exit', '<unset>')!r}"
+    )
+    for h in logger.handlers:
+        h.flush()
+    return result
+
+
 def patch_app_exit(app: object) -> None:
     """Monkey-patch app.exit / app._exit to log the call stack at trigger time.
 
