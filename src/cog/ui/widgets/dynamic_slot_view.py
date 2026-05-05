@@ -185,13 +185,19 @@ class DynamicSlotView(Widget, can_focus=True):
         self._worker = self.run_worker(self._run_workflow(), exclusive=True)
 
     def focus_content(self) -> None:
+        # In reviewing / post_run states the chat pane is hidden; focus has to
+        # move to the slot itself so the review actions (a/e/Shift+Q) and
+        # post-run actions (enter to dismiss) reach DynamicSlotView's bindings.
+        if self._substate != "running":
+            self.focus()
+            return
         if self._slot.workflow == "refine" and self._chat_pane is not None:
             try:
                 from textual.widgets import TextArea
 
                 self._chat_pane.query_one("#input-area", TextArea).focus()
             except Exception:  # noqa: BLE001
-                pass
+                self.focus()
         else:
             self.focus()
 
