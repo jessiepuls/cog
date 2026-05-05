@@ -172,6 +172,98 @@ def patch_message_loop() -> None:
     _mp.MessagePump._process_messages_loop = traced  # type: ignore[method-assign]
 
 
+async def run_app_traced(app: object) -> object:
+    """Run `app.run_async()` and log how it returns.
+
+    `run_async` can return normally without our other wrappers seeing
+    anything when the message pump is closed via a path that doesn't
+    raise (e.g. None put on the queue, app.exit, _shutdown). This
+    captures `app._exit` / `app.return_value` / any propagating
+    exception.
+    """
+    import logging as _logging
+    import traceback as _tb
+
+    logger = _logging.getLogger("cog.diagnostics")
+    logger.info("entering app.run_async()")
+    for h in logger.handlers:
+        h.flush()
+    try:
+        result = await app.run_async()  # type: ignore[attr-defined]
+    except BaseException as exc:
+        logger.error(
+            f"app.run_async() raised {type(exc).__name__}: {exc!r}\ntraceback:\n{_tb.format_exc()}"
+        )
+        for h in logger.handlers:
+            h.flush()
+        raise
+    logger.warning(
+        f"app.run_async() returned normally."
+        f" result={result!r}"
+        f" return_value={getattr(app, 'return_value', '<unset>')!r}"
+        f" _exit={getattr(app, '_exit', '<unset>')!r}"
+    )
+    for h in logger.handlers:
+        h.flush()
+    return result
+
+
+def patch_pump_shutdown_paths(app: object) -> None:
+    """Wrap every path that can close the message pump silently.
+
+    The message-pump loop exits cleanly (no exception) when None is put
+    on its queue. Several paths reach there:
+    - `_close_messages` (line 484 puts None)
+    - `_close_messages_no_wait` (posts CloseMessages → handler does the put)
+    - `_on_exit_app` (puts None directly)
+    - `panic` / `_fatal_error` (call _close_messages_no_wait)
+
+    Wrap them all so we know which path actually closed the pump.
+    Also wrap the queue's put_nowait directly as a backstop for any
+    path we missed.
+    """
+    import traceback as _tb
+
+    logger = logging.getLogger("cog.diagnostics")
+
+    queue = getattr(app, "_message_queue", None)
+    if queue is not None and hasattr(queue, "put_nowait"):
+        original_put = queue.put_nowait
+
+        def _put_nowait_wrapper(item: object) -> object:
+            if item is None:
+                logger.warning(
+                    f"_message_queue.put_nowait(None) — pump shutdown"
+                    f"\nstack:\n{''.join(_tb.format_stack())}"
+                )
+                for h in logger.handlers:
+                    h.flush()
+            return original_put(item)
+
+        queue.put_nowait = _put_nowait_wrapper
+
+    def _make_wrapper(method_name: str, original_method: object) -> object:
+        def wrapper(*args: object, **kwargs: object) -> object:
+            logger.warning(
+                f"app.{method_name}() called — pump shutdown path"
+                f"\nstack:\n{''.join(_tb.format_stack())}"
+            )
+            for h in logger.handlers:
+                h.flush()
+            return original_method(*args, **kwargs)  # type: ignore[operator]
+
+        return wrapper
+
+    for attr in ("exit", "panic", "_fatal_error", "_close_messages", "_close_messages_no_wait"):
+        original = getattr(app, attr, None)
+        if not callable(original):
+            continue
+        try:
+            setattr(app, attr, _make_wrapper(attr, original))
+        except (AttributeError, TypeError):
+            pass
+
+
 def patch_handle_exception(app: object) -> None:
     """Wrap `App._handle_exception` to log worker exceptions to disk.
 
