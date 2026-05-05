@@ -441,6 +441,11 @@ class RefineWorkflow(Workflow):
         transcript: list[InterviewTurn] = []
         preamble = self._build_preamble(ctx.item)
         model = os.environ.get("COG_REFINE_INTERVIEW_MODEL", "claude-opus-4-7")
+        # Diagnostic: COG_REFINE_INTERVIEW_MAX_TURNS=1 cuts the interview short
+        # after N user replies, forcing the workflow into the rewrite/review
+        # transition for fast crash reproduction.
+        _max_turns_env = os.environ.get("COG_REFINE_INTERVIEW_MAX_TURNS")
+        _max_turns: int | None = int(_max_turns_env) if _max_turns_env else None
         while True:
             prompt = self._build_turn_prompt(preamble, transcript)
             start = time.monotonic()
@@ -482,12 +487,15 @@ class RefineWorkflow(Workflow):
                     )
                 )
                 return transcript
+            ended_by_cap = _max_turns is not None and len(transcript) + 1 >= _max_turns
             transcript.append(
                 InterviewTurn(
                     assistant_message=final_message,
                     user_message=user_reply,
                     cost_usd=total_cost,
                     duration_seconds=duration,
-                    end=InterviewEnd.NOT_ENDED,
+                    end=InterviewEnd.SENTINEL if ended_by_cap else InterviewEnd.NOT_ENDED,
                 )
             )
+            if ended_by_cap:
+                return transcript
