@@ -134,15 +134,23 @@ def install_asyncio_handler() -> None:
 
 
 def patch_await_remove_logging() -> None:
-    """Wrap AwaitRemove to log which widget removal raised CancelledError.
+    """Wrap AwaitRemove to swallow CancelledError surgically + log diagnostics.
 
-    AwaitRemove records the caller file/line where `.remove()` was called.
-    When its gather sees a cancellation, log the caller and the list of
-    tasks being gathered. This identifies WHICH widget is being removed
-    when the cancellation cascade fires.
+    Textual's `AwaitRemove.await_prune` does `await gather(*tasks)` to wait
+    for child cleanup tasks during widget removal. When cog's
+    `update_dynamic_slots` runs as exclusive=True and is cancelled mid-remove,
+    the cancellation cascades into gather, cancelling the widget's own pump
+    task. The next attempt to remove that widget then gathers the
+    already-cancelled-and-done task; gather re-raises `CancelledError`,
+    propagates up through the message loop, and silently kills the app.
 
-    Does NOT swallow the cancellation — it propagates up as before, so
-    Textual's normal shutdown happens. We just learn the source.
+    Workaround: use `gather(*tasks, return_exceptions=True)` and swallow ONLY
+    CancelledError (cancellation is how Textual stops pumps anyway). Real
+    exceptions still propagate. Logs which widget removal hit the
+    cancellation so we know it's still happening.
+
+    Safe to apply now that PR #222 fixed the DuplicateIds race that was
+    making the half-removed state fatal.
     """
     import asyncio
 
@@ -155,26 +163,31 @@ def patch_await_remove_logging() -> None:
         tasks = [t for t in self._tasks if t is not current_task]  # type: ignore[attr-defined]
         caller = getattr(self, "_caller", "<unknown>")
 
-        async def await_prune_with_logging() -> None:
-            try:
-                await asyncio.gather(*tasks)
-            except BaseException as exc:
-                # Log which AwaitRemove this was; then re-raise as Textual expects.
+        async def await_prune_safe() -> None:
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            real_errors = [
+                r
+                for r in results
+                if isinstance(r, BaseException) and not isinstance(r, asyncio.CancelledError)
+            ]
+            cancelled = [r for r in results if isinstance(r, asyncio.CancelledError)]
+            if cancelled:
                 task_info = [(t.get_name(), t.done(), t.cancelled()) for t in tasks]
-                logger.error(
-                    f"AwaitRemove gather raised {type(exc).__name__}: {exc!r}\n"
-                    f"caller (widget.remove() site): {caller}\n"
-                    f"tasks: {task_info}"
+                logger.warning(
+                    f"AwaitRemove: {len(cancelled)} child cleanup task(s) cancelled; "
+                    f"swallowing (cancellation is normal teardown)\n"
+                    f"caller: {caller}\ntasks: {task_info}"
                 )
                 for h in logger.handlers:
                     h.flush()
-                raise
+            if real_errors:
+                raise real_errors[0]
             if self._post_remove is not None:  # type: ignore[attr-defined]
                 from textual._callback import invoke as _invoke
 
                 await _invoke(self._post_remove)  # type: ignore[attr-defined]
 
-        return await_prune_with_logging().__await__()
+        return await_prune_safe().__await__()
 
     _ar.AwaitRemove.__await__ = patched_await  # type: ignore[method-assign,assignment]
 
