@@ -142,11 +142,20 @@ def patch_app_exit(app: object) -> None:
     """
     logger = logging.getLogger("cog.diagnostics")
 
-    # `panic` is the path Textual's driver thread takes when run_input_thread()
-    # raises (linux_driver.py:_key_thread_target). It calls _close_messages_no_wait
-    # which shuts down the message pump cleanly — run_async returns normally
-    # without our other wrappers seeing anything. Wrap panic too.
-    for attr in ("exit", "_exit", "_handle_exception", "panic", "_fatal_error"):
+    # All paths to a clean shutdown ultimately call _close_messages or
+    # _close_messages_no_wait. Wrap those directly to catch any path,
+    # including paths we haven't traced.
+    for attr in (
+        "exit",
+        "_exit",
+        "_handle_exception",
+        "panic",
+        "_fatal_error",
+        "_close_messages",
+        "_close_messages_no_wait",
+        "_on_exit_app",
+        "_on_close_messages",
+    ):
         if not hasattr(app, attr):
             continue
         original = getattr(app, attr)
