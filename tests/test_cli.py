@@ -196,5 +196,3 @@ def test_cog_ralph_without_restart_defaults_to_false(monkeypatch, tmp_path):
     result = runner.invoke(app, ["ralph", "--project-dir", str(tmp_path)])
     assert result.exit_code == 0
     assert calls[0]["restart"] is False
-
-

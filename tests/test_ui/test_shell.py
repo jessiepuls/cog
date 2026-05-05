@@ -96,14 +96,16 @@ async def test_shell_ctrl_q_exits_when_idle(tmp_path: Path) -> None:
 async def test_shell_active_row_gets_highlighted_class(tmp_path: Path) -> None:
     async with _ShellApp(tmp_path).run_test(headless=True) as pilot:
         await pilot.pause()
+        # Default: dashboard is active. Re-query each time — recompose replaces
+        # the ListView instance, so cached references go stale.
         list_view = pilot.app.query_one("#sidebar-nav", ListView)
-        # Default: dashboard is active
         active = [c for c in list_view.children if c.has_class("-active")]
         assert len(active) == 1
         assert active[0].id == "nav-dashboard"
 
         await pilot.press("ctrl+2")
         await pilot.pause()
+        list_view = pilot.app.query_one("#sidebar-nav", ListView)
         active = [c for c in list_view.children if c.has_class("-active")]
         assert len(active) == 1
         assert active[0].id == "nav-issues"

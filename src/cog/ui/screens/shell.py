@@ -20,6 +20,7 @@ from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Container, Horizontal
 from textual.events import Key
+from textual.reactive import reactive
 from textual.screen import Screen
 from textual.widget import Widget
 from textual.widgets import Footer, Header, Label, ListItem, ListView
@@ -55,9 +56,21 @@ _STATIC_COUNT = len(_VIEWS)
 class Sidebar(Widget):
     """Left sidebar listing views with keybind hints.
 
-    Static rows are rendered once and updated in-place. Dynamic rows
-    (slots) are rebuilt asynchronously whenever the registry changes.
+    State is held in three reactive attributes (`active_slots`, `active_id`,
+    `attention`); changes trigger a `recompose` of the whole sidebar. The
+    rebuild is atomic relative to the event loop — there's no in-flight
+    DOM mutation that can be interrupted, which is what made the previous
+    `exclusive=True` worker pattern unsafe.
+
+    To update sidebar state from outside, just set the reactive:
+        sidebar.active_slots = tuple(...)
+        sidebar.active_id = "issues"
+        sidebar.attention = sidebar.attention | {"issues"}
     """
+
+    active_slots: reactive[tuple[DynamicSlot, ...]] = reactive((), recompose=True)
+    active_id: reactive[str] = reactive("dashboard", recompose=True)
+    attention: reactive[frozenset[str]] = reactive(frozenset(), recompose=True)
 
     _SIDEBAR_WIDTH = 28
     # Content width inside a row = sidebar width - ListView scroll/padding
@@ -95,110 +108,47 @@ class Sidebar(Widget):
     def __init__(self, views: Iterable[ShellView]) -> None:
         super().__init__()
         self._views = tuple(views)
-        self._attention: set[str] = set()
-        self._counts: dict[str, int | None] = {}
-
-    def set_count(self, view_id: str, count: int | None) -> None:
-        self._counts[view_id] = count
-        self._rerender_row(view_id)
 
     def _label_for(self, v: ShellView) -> str:
-        # Layout: [keybind][space][name + dot][padding][count slot (3)]
-        dot = " [yellow]●[/yellow]" if v.id in self._attention else "  "
+        # Layout: [keybind][space][name + dot][padding]
+        dot = " [yellow]●[/yellow]" if v.id in self.attention else "  "
         name = f"{v.label}{dot}"
         keybind = v.keybind.replace("ctrl+", "^")
         visible_name_len = len(v.label) + 2  # name + dot/spacer
-
-        count = self._counts.get(v.id)
-        count_slot = f"[dim]{count:>3}[/dim]" if count is not None else "   "
-
-        # Reserve len(keybind) + 1 (gap) on the left, 3 for count slot on the right.
-        pad = max(1, self._ROW_CONTENT_WIDTH - len(keybind) - 1 - visible_name_len - 3)
-        return f"[dim]{keybind}[/dim] {name}{' ' * pad}{count_slot}"
+        pad = max(1, self._ROW_CONTENT_WIDTH - len(keybind) - 1 - visible_name_len)
+        return f"[dim]{keybind}[/dim] {name}{' ' * pad}"
 
     def compose(self) -> ComposeResult:
-        yield ListView(
-            *(
+        items: list[ListItem] = []
+        for v in self._views:
+            classes = "-active" if v.id == self.active_id else None
+            items.append(
                 ListItem(
                     Label(self._label_for(v)),
                     id=f"nav-{v.id}",
+                    classes=classes,
                 )
-                for v in self._views
-            ),
-            id="sidebar-nav",
-        )
-
-    def set_attention(self, view_id: str, on: bool) -> None:
-        if on:
-            if view_id in self._attention:
-                return
-            self._attention.add(view_id)
-        else:
-            if view_id not in self._attention:
-                return
-            self._attention.discard(view_id)
-        self._rerender_row(view_id)
-
-    def _rerender_row(self, view_id: str) -> None:
-        target = next((v for v in self._views if v.id == view_id), None)
-        if target is None:
-            return
-        try:
-            row = self.query_one(f"#nav-{view_id}", ListItem)
-        except Exception:  # noqa: BLE001 — not yet mounted
-            return
-        label = row.query_one(Label)
-        label.update(self._label_for(target))
-
-    async def update_dynamic_slots(self, slots: list[DynamicSlot]) -> None:
-        """Rebuild the dynamic section (divider + slot rows) below the static rows.
-
-        Re-queries children each iteration to tolerate state left behind by a
-        cancelled prior worker (this method runs as exclusive=True; cancellation
-        of an in-flight rebuild can leave widgets the worker had already mounted
-        but hadn't gotten to remove). Otherwise a stale `list(children)` snapshot
-        leads to a second pass missing those widgets and trying to append them
-        again — which raises DuplicateIds and crashes the app.
-        """
-        list_view = self.query_one("#sidebar-nav", ListView)
-        # Remove all dynamic children. Re-query each iteration: a cancelled
-        # prior worker may have left widgets we didn't see in our first snapshot.
-        while True:
-            extras = list(list_view.children)[_STATIC_COUNT:]
-            if not extras:
-                break
-            await extras[0].remove()
-
-        if not slots:
-            return
-
-        items: list[ListItem] = [
-            ListItem(
-                Label("[dim]──────────[/dim]"),
-                id="nav-divider",
-                disabled=True,
-                classes="-divider",
             )
-        ]
-        for i, slot in enumerate(slots):
-            keybind = f"ctrl+{_STATIC_COUNT + 1 + i}"
+        if self.active_slots:
             items.append(
                 ListItem(
-                    Label(slot.sidebar_label(keybind)),
-                    id=f"nav-slot-{slot.run_id}",
+                    Label("[dim]──────────[/dim]"),
+                    id="nav-divider",
+                    disabled=True,
+                    classes="-divider",
                 )
             )
-        # Single mount: one DOM mutation, atomic relative to event-loop yields.
-        await list_view.extend(items)
-
-    def rerender_slot_row(self, slot: DynamicSlot, index: int) -> None:
-        """Update an existing dynamic slot row label in-place (no DOM changes)."""
-        try:
-            row = self.query_one(f"#nav-slot-{slot.run_id}", ListItem)
-        except Exception:  # noqa: BLE001
-            return
-        keybind = f"ctrl+{_STATIC_COUNT + 1 + index}"
-        row.query_one(Label).update(slot.sidebar_label(keybind))
+            for i, slot in enumerate(self.active_slots):
+                keybind = f"ctrl+{_STATIC_COUNT + 1 + i}"
+                slot_classes = "-active" if self.active_id == f"slot-{slot.run_id}" else None
+                items.append(
+                    ListItem(
+                        Label(slot.sidebar_label(keybind)),
+                        id=f"nav-slot-{slot.run_id}",
+                        classes=slot_classes,
+                    )
+                )
+        yield ListView(*items, id="sidebar-nav")
 
 
 class CogShellScreen(Screen):
@@ -246,47 +196,29 @@ class CogShellScreen(Screen):
 
     def on_mount(self) -> None:
         self._apply_active_view()
-        self._highlight_sidebar_row(self._active_view_id)
+        self._sync_sidebar_active()
 
     # -------------------------------------------------------------------------
     # Dynamic slot management
     # -------------------------------------------------------------------------
 
     def _on_registry_changed(self) -> None:
-        """Called synchronously by the registry; schedule async sidebar rebuild.
+        """Called synchronously by the registry. Pushes the new slot list into
+        the Sidebar's reactive — Textual handles the rebuild atomically."""
+        self._sync_sidebar_slots()
 
-        Pass the callable (not the coroutine) so that if the worker is
-        cancelled before it runs, no "coroutine was never awaited" warning fires.
-        """
-        self.run_worker(
-            self._rebuild_sidebar_dynamic,  # type: ignore[arg-type]
-            exclusive=True,
-            group="sidebar-dynamic",
-        )
-
-    async def _rebuild_sidebar_dynamic(self) -> None:
+    def _sync_sidebar_slots(self) -> None:
         try:
             sidebar = self.query_one(Sidebar)
-        except Exception:  # noqa: BLE001
+        except Exception:  # noqa: BLE001 — sidebar not mounted yet
             return
-        await sidebar.update_dynamic_slots(self._registry.active_slots)
-        # Re-apply active highlight (the row may have been re-created).
-        self._highlight_sidebar_row(self._active_view_id)
+        sidebar.active_slots = tuple(self._registry.active_slots)
 
     def on_slot_state_changed(self, msg: SlotStateChanged) -> None:
         self._registry.update_state(msg.run_id, msg.state, errored=msg.errored)
         self._registry.update_stage(msg.run_id, msg.stage)
-        # In-place label update for the affected slot (avoids full rebuild)
-        active = self._registry.active_slots
-        try:
-            idx = next(i for i, s in enumerate(active) if s.run_id == msg.run_id)
-            slot = active[idx]
-            try:
-                self.query_one(Sidebar).rerender_slot_row(slot, idx)
-            except Exception:  # noqa: BLE001
-                pass
-        except StopIteration:
-            pass
+        # The slot's label depends on state/stage; rebuild via reactive setter.
+        self._sync_sidebar_slots()
 
     def on_slot_dismissed(self, msg: SlotDismissed) -> None:
         self._registry.remove(msg.run_id)
@@ -295,11 +227,11 @@ class CogShellScreen(Screen):
             view.remove()
         except Exception:  # noqa: BLE001
             pass
-        # If this was the active view, fall back to dashboard
+        # If this was the active view, fall back to dashboard.
         if self._active_view_id == f"slot-{msg.run_id}":
             self._active_view_id = _VIEWS[0].id
             self._apply_active_view()
-            self._highlight_sidebar_row(self._active_view_id)
+            self._sync_sidebar_active()
 
     def on_launch_slot_request(self, msg: LaunchSlotRequest) -> None:
         self.run_worker(
@@ -380,7 +312,7 @@ class CogShellScreen(Screen):
             return
         self._active_view_id = view_id
         self._apply_active_view()
-        self._highlight_sidebar_row(view_id)
+        self._sync_sidebar_active()
 
     def action_quit_app(self) -> None:
         busy: list[str] = []
@@ -428,44 +360,48 @@ class CogShellScreen(Screen):
         previous_id = self._active_view_id
         self._active_view_id = view_id
         self._apply_active_view()
-        self._highlight_sidebar_row(view_id)
+        self._sync_sidebar_active()
         # Target view just became active — clear its attention (user is looking).
-        self._clear_attention(view_id)
+        self._set_attention(view_id, on=False)
         # Previous view just became inactive — if it's in an attention-worthy
-        # state (e.g. refine chat pending) re-mark the sidebar so the user
-        # sees they need to come back.
+        # state, re-mark the sidebar so the user sees they need to come back.
         self._refresh_attention_for(previous_id)
 
     def on_view_attention(self, event: ViewAttention) -> None:
         # Don't mark the currently-active view — user is already looking at it.
         if event.view_id == self._active_view_id:
             return
-        try:
-            sidebar = self.query_one(Sidebar)
-        except Exception:  # noqa: BLE001 — not yet mounted
-            return
-        sidebar.set_attention(event.view_id, True)
+        self._set_attention(event.view_id, on=True)
         if event.reason:
             self.app.notify(f"{event.view_id}: {event.reason}", timeout=4)
 
-    def _clear_attention(self, view_id: str) -> None:
+    def _set_attention(self, view_id: str, *, on: bool) -> None:
         try:
             sidebar = self.query_one(Sidebar)
         except Exception:  # noqa: BLE001
             return
-        sidebar.set_attention(view_id, False)
+        if on:
+            sidebar.attention = sidebar.attention | {view_id}
+        else:
+            sidebar.attention = sidebar.attention - {view_id}
 
     def _refresh_attention_for(self, view_id: str) -> None:
         """Poll a view's current needs_attention() and update the sidebar."""
         try:
             widget = self.query_one(f"#view-{view_id}")
-            sidebar = self.query_one(Sidebar)
         except Exception:  # noqa: BLE001
             return
         if not hasattr(widget, "needs_attention"):
             return
         state = widget.needs_attention()
-        sidebar.set_attention(view_id, state is not None)
+        self._set_attention(view_id, on=state is not None)
+
+    def _sync_sidebar_active(self) -> None:
+        try:
+            sidebar = self.query_one(Sidebar)
+        except Exception:  # noqa: BLE001
+            return
+        sidebar.active_id = self._active_view_id
 
     def on_list_view_selected(self, event: ListView.Selected) -> None:
         item_id = event.item.id or ""
@@ -497,17 +433,3 @@ class CogShellScreen(Screen):
             view.display = f"slot-{slot.run_id}" == active
             if f"slot-{slot.run_id}" == active and hasattr(view, "focus_content"):
                 self.call_after_refresh(view.focus_content)
-
-    def _highlight_sidebar_row(self, view_id: str) -> None:
-        """Set the -active class on nav-{view_id}, clear all others."""
-        try:
-            list_view = self.query_one("#sidebar-nav", ListView)
-        except Exception:  # noqa: BLE001
-            return
-        target_id = f"nav-{view_id}"
-        for i, child in enumerate(list_view.children):
-            if child.id == target_id:
-                child.add_class("-active")
-                list_view.index = i
-            else:
-                child.remove_class("-active")
