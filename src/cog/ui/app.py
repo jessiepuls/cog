@@ -64,22 +64,12 @@ async def run_textual(
     max_iterations: int | None = None,
     tracker: IssueTracker | None = None,
 ) -> int:
-    from cog.diagnostics import (
-        install_asyncio_handler,
-        patch_await_remove_logging,
-        patch_handle_exception,
-        patch_message_loop,
-        patch_pump_shutdown_paths,
-        run_app_traced,
-    )
+    from cog.diagnostics import install_asyncio_handler, patch_handle_exception
 
     install_asyncio_handler()
-    patch_message_loop()
-    patch_await_remove_logging()
     run_screen = RunScreen(workflow, ctx, loop=loop, max_iterations=max_iterations)
     app = CogApp(run_screen, ctx.project_dir)
     patch_handle_exception(app)
-    patch_pump_shutdown_paths(app)
     ctx.app = app
     if type(workflow).needs_item_picker:
         assert tracker is not None, (
@@ -93,27 +83,17 @@ async def run_textual(
     from cog.ui.screens.review import ModalReviewProvider
 
     ctx.review_provider = ModalReviewProvider(app)
-    await run_app_traced(app)
+    await app.run_async()
     return 0 if run_screen._state in ("completed", "cancelled") else 1
 
 
 async def _run_main_menu(project_dir: Path) -> None:
-    from cog.diagnostics import (
-        install_asyncio_handler,
-        patch_await_remove_logging,
-        patch_handle_exception,
-        patch_message_loop,
-        patch_pump_shutdown_paths,
-        run_app_traced,
-    )
+    from cog.diagnostics import install_asyncio_handler, patch_handle_exception
     from cog.trackers.github import GitHubIssueTracker
     from cog.ui.screens.shell import CogShellScreen
 
     install_asyncio_handler()
-    patch_message_loop()
-    patch_await_remove_logging()
     tracker = GitHubIssueTracker(project_dir)
     app = CogApp(CogShellScreen(project_dir, tracker), project_dir)
     patch_handle_exception(app)
-    patch_pump_shutdown_paths(app)
-    await run_app_traced(app)
+    await app.run_async()
