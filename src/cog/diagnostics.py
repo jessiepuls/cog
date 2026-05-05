@@ -286,7 +286,11 @@ def install_asyncio_handler() -> None:
         # potentially fight whatever Textual was doing.
         loop.stop()
 
-    for sig in (signal.SIGHUP, signal.SIGTERM):
+    # Add SIGINT too. Python's default SIGINT handler raises KeyboardInterrupt,
+    # but asyncio.Runner intercepts it and converts to silent task cancellation
+    # in some configurations. Logging via the asyncio handler tells us if SIGINT
+    # is what's cancelling tasks.
+    for sig in (signal.SIGHUP, signal.SIGTERM, signal.SIGINT, signal.SIGUSR1, signal.SIGUSR2):
         try:
             loop.add_signal_handler(sig, asyncio_signal_handler, sig)
         except (NotImplementedError, RuntimeError):
