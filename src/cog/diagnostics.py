@@ -143,6 +143,7 @@ def patch_app_exit(app: object) -> None:
     there catches every path regardless of which method led to the put.
     """
     logger = logging.getLogger("cog.diagnostics")
+    install_log: list[str] = []
 
     # Wrap the message queue's put_nowait. Putting None is the universal
     # signal for "close the pump"; everything else is a path that ends here.
@@ -162,7 +163,13 @@ def patch_app_exit(app: object) -> None:
                     h.flush()
             return original_put(item)
 
-        queue.put_nowait = _put_nowait_wrapper
+        try:
+            queue.put_nowait = _put_nowait_wrapper
+            install_log.append(f"queue.put_nowait wrapped (queue id={id(queue)})")
+        except (AttributeError, TypeError) as e:
+            install_log.append(f"queue.put_nowait wrap FAILED: {e}")
+    else:
+        install_log.append(f"queue.put_nowait wrap SKIPPED (queue={queue!r})")
 
     # Patch class-level methods (for dispatched handlers like _on_exit_app)
     # and instance-level methods (for direct calls like panic).
@@ -203,11 +210,13 @@ def patch_app_exit(app: object) -> None:
     for attr in ("_on_exit_app", "_on_close_messages"):
         original = app_cls.__dict__.get(attr)
         if original is None or not callable(original):
+            install_log.append(f"class.{attr} SKIPPED (not in {app_cls.__name__}.__dict__)")
             continue
         try:
             setattr(app_cls, attr, _make_wrapper(attr, original.__get__(app, app_cls)))
-        except (AttributeError, TypeError):
-            pass
+            install_log.append(f"class.{attr} wrapped")
+        except (AttributeError, TypeError) as e:
+            install_log.append(f"class.{attr} wrap FAILED: {e}")
 
     # Instance-level patch: catches direct self.method() calls
     # (panic, _close_messages, etc.) where instance dict wins.
@@ -220,14 +229,21 @@ def patch_app_exit(app: object) -> None:
         "_close_messages_no_wait",
     ):
         if not hasattr(app, attr):
+            install_log.append(f"app.{attr} SKIPPED (no such attr)")
             continue
         original = getattr(app, attr)
         if not callable(original):
+            install_log.append(f"app.{attr} SKIPPED (not callable)")
             continue
         try:
             setattr(app, attr, _make_wrapper(attr, original))
-        except (AttributeError, TypeError):
-            pass
+            install_log.append(f"app.{attr} wrapped")
+        except (AttributeError, TypeError) as e:
+            install_log.append(f"app.{attr} wrap FAILED: {e}")
+
+    logger.warning("patch_app_exit install report:\n  " + "\n  ".join(install_log))
+    for h in logger.handlers:
+        h.flush()
 
 
 def install_asyncio_handler() -> None:
