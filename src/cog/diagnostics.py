@@ -133,6 +133,54 @@ async def run_app_traced(app: object) -> object:
     return result
 
 
+def patch_await_remove() -> None:
+    """Workaround Textual brittleness in AwaitRemove.
+
+    AwaitRemove.__await__ uses `await gather(*tasks)` to wait for child
+    widget cleanup tasks. If ANY one of those gathered tasks is cancelled,
+    gather re-raises CancelledError, which propagates up through the
+    message-pump loop and silently kills the app (Textual's outer
+    `except CancelledError: pass` swallows it).
+
+    Replace with a version that uses `return_exceptions=True` so individual
+    task cancellations are reported but don't cascade. This is what
+    Textual probably should do anyway — a brittle widget-cleanup
+    cancellation shouldn't take down the whole app.
+    """
+    import asyncio
+
+    import textual.await_remove as _ar
+
+    logger = logging.getLogger("cog.diagnostics")
+
+    def patched_await(self: object) -> object:
+        current_task = asyncio.current_task()
+        tasks = [t for t in self._tasks if t is not current_task]  # type: ignore[attr-defined]
+
+        async def await_prune_safe() -> None:
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            for r in results:
+                if isinstance(r, asyncio.CancelledError):
+                    logger.warning(
+                        "AwaitRemove: a child cleanup task was cancelled; "
+                        "swallowing to keep the app alive"
+                    )
+                    for h in logger.handlers:
+                        h.flush()
+                elif isinstance(r, BaseException):
+                    logger.warning(f"AwaitRemove: child task raised {type(r).__name__}: {r!r}")
+                    for h in logger.handlers:
+                        h.flush()
+            if self._post_remove is not None:  # type: ignore[attr-defined]
+                from textual._callback import invoke as _invoke
+
+                await _invoke(self._post_remove)  # type: ignore[attr-defined]
+
+        return await_prune_safe().__await__()
+
+    _ar.AwaitRemove.__await__ = patched_await  # type: ignore[method-assign,assignment]
+
+
 def patch_message_loop() -> None:
     """Monkey-patch MessagePump._process_messages_loop to log how it exits.
 
