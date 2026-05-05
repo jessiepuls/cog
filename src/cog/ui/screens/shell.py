@@ -155,34 +155,45 @@ class Sidebar(Widget):
         label.update(self._label_for(target))
 
     async def update_dynamic_slots(self, slots: list[DynamicSlot]) -> None:
-        """Rebuild the dynamic section (divider + slot rows) below the static rows."""
+        """Rebuild the dynamic section (divider + slot rows) below the static rows.
+
+        Re-queries children each iteration to tolerate state left behind by a
+        cancelled prior worker (this method runs as exclusive=True; cancellation
+        of an in-flight rebuild can leave widgets the worker had already mounted
+        but hadn't gotten to remove). Otherwise a stale `list(children)` snapshot
+        leads to a second pass missing those widgets and trying to append them
+        again — which raises DuplicateIds and crashes the app.
+        """
         list_view = self.query_one("#sidebar-nav", ListView)
-        # Remove all children after the static rows
-        children = list(list_view.children)
-        for child in children[_STATIC_COUNT:]:
-            await child.remove()
+        # Remove all dynamic children. Re-query each iteration: a cancelled
+        # prior worker may have left widgets we didn't see in our first snapshot.
+        while True:
+            extras = list(list_view.children)[_STATIC_COUNT:]
+            if not extras:
+                break
+            await extras[0].remove()
 
         if not slots:
             return
 
-        # Divider (non-selectable)
-        await list_view.append(
+        items: list[ListItem] = [
             ListItem(
                 Label("[dim]──────────[/dim]"),
                 id="nav-divider",
                 disabled=True,
                 classes="-divider",
             )
-        )
-        # Slot rows
+        ]
         for i, slot in enumerate(slots):
             keybind = f"ctrl+{_STATIC_COUNT + 1 + i}"
-            await list_view.append(
+            items.append(
                 ListItem(
                     Label(slot.sidebar_label(keybind)),
                     id=f"nav-slot-{slot.run_id}",
                 )
             )
+        # Single mount: one DOM mutation, atomic relative to event-loop yields.
+        await list_view.extend(items)
 
     def rerender_slot_row(self, slot: DynamicSlot, index: int) -> None:
         """Update an existing dynamic slot row label in-place (no DOM changes)."""
