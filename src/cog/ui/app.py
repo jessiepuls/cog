@@ -64,8 +64,12 @@ async def run_textual(
     max_iterations: int | None = None,
     tracker: IssueTracker | None = None,
 ) -> int:
+    from cog.diagnostics import install_asyncio_handler, patch_handle_exception
+
+    install_asyncio_handler()
     run_screen = RunScreen(workflow, ctx, loop=loop, max_iterations=max_iterations)
     app = CogApp(run_screen, ctx.project_dir)
+    patch_handle_exception(app)
     ctx.app = app
     if type(workflow).needs_item_picker:
         assert tracker is not None, (
@@ -84,9 +88,12 @@ async def run_textual(
 
 
 async def _run_main_menu(project_dir: Path) -> None:
+    from cog.diagnostics import install_asyncio_handler, patch_handle_exception
     from cog.trackers.github import GitHubIssueTracker
     from cog.ui.screens.shell import CogShellScreen
 
+    install_asyncio_handler()
     tracker = GitHubIssueTracker(project_dir)
     app = CogApp(CogShellScreen(project_dir, tracker), project_dir)
+    patch_handle_exception(app)
     await app.run_async()

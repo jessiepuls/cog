@@ -25,6 +25,9 @@ def callback(
     version: bool = typer.Option(False, "--version", callback=_version_callback, is_eager=True),
 ) -> None:
     """cog — TUI for managing refine → ralph workflows."""
+    from cog.diagnostics import setup_diagnostics
+
+    setup_diagnostics(Path.cwd())
     if ctx.invoked_subcommand is None:
         from cog.ui.app import _run_main_menu
 
