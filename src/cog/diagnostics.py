@@ -134,66 +134,96 @@ async def run_app_traced(app: object) -> object:
 
 
 def patch_app_exit(app: object) -> None:
-    """Monkey-patch app.exit / app._exit to log the call stack at trigger time.
+    """Monkey-patch app methods + the message queue to log every shutdown path.
 
-    The atexit hook fires after Python shutdown begins, by which point the
-    frame that triggered exit is no longer on the stack. Wrapping at the
-    actual exit-call entry point captures who pulled the trigger.
+    Textual's message dispatcher uses class-dict lookup (message_pump.py:742),
+    bypassing instance-level attributes — so we patch the *class*, not the
+    instance, for the dispatched handlers. Plus we wrap _message_queue.put_nowait
+    directly: every clean Textual shutdown puts None on that queue, so a wrapper
+    there catches every path regardless of which method led to the put.
     """
     logger = logging.getLogger("cog.diagnostics")
+
+    # Wrap the message queue's put_nowait. Putting None is the universal
+    # signal for "close the pump"; everything else is a path that ends here.
+    queue = getattr(app, "_message_queue", None)
+    if queue is not None and hasattr(queue, "put_nowait"):
+        original_put = queue.put_nowait
+
+        def _put_nowait_wrapper(item: object) -> object:
+            if item is None:
+                import traceback as _tb
+
+                logger.warning(
+                    f"app._message_queue.put_nowait(None) — pump shutdown trigger"
+                    f"\nstack:\n{''.join(_tb.format_stack())}"
+                )
+                for h in logger.handlers:
+                    h.flush()
+            return original_put(item)
+
+        queue.put_nowait = _put_nowait_wrapper
+
+    # Patch class-level methods (for dispatched handlers like _on_exit_app)
+    # and instance-level methods (for direct calls like panic).
+    app_cls = type(app)
 
     # All paths to a clean shutdown ultimately call _close_messages or
     # _close_messages_no_wait. Wrap those directly to catch any path,
     # including paths we haven't traced.
+    def _make_wrapper(method_name: str, original_method: object) -> object:
+        def wrapper(*args: object, **kwargs: object) -> object:
+            import io as _io
+            import traceback as _tb
+
+            stack = "".join(_tb.format_stack())
+            rendered_args: list[str] = []
+            for arg in args:
+                try:
+                    from rich.console import Console as _RichConsole
+
+                    _buf = _io.StringIO()
+                    _RichConsole(file=_buf, force_terminal=False, width=120).print(arg)
+                    rendered_args.append(_buf.getvalue())
+                except Exception:  # noqa: BLE001
+                    rendered_args.append(repr(arg))
+            logger.warning(
+                f"app.{method_name}() called with kwargs={kwargs!r}"
+                f"\nargs (rendered):\n{chr(10).join(rendered_args)}"
+                f"\ntrigger stack:\n{stack}"
+            )
+            for h in logger.handlers:
+                h.flush()
+            return original_method(*args, **kwargs)  # type: ignore[operator]
+
+        return wrapper
+
+    # Class-level patch: catches dispatched handlers (_on_exit_app, etc.)
+    # whose lookup goes through cls.__dict__ and bypasses instance attrs.
+    for attr in ("_on_exit_app", "_on_close_messages"):
+        original = app_cls.__dict__.get(attr)
+        if original is None or not callable(original):
+            continue
+        try:
+            setattr(app_cls, attr, _make_wrapper(attr, original.__get__(app, app_cls)))
+        except (AttributeError, TypeError):
+            pass
+
+    # Instance-level patch: catches direct self.method() calls
+    # (panic, _close_messages, etc.) where instance dict wins.
     for attr in (
         "exit",
-        "_exit",
         "_handle_exception",
         "panic",
         "_fatal_error",
         "_close_messages",
         "_close_messages_no_wait",
-        "_on_exit_app",
-        "_on_close_messages",
     ):
         if not hasattr(app, attr):
             continue
         original = getattr(app, attr)
         if not callable(original):
             continue
-
-        def _make_wrapper(method_name: str, original_method: object) -> object:
-            def wrapper(*args: object, **kwargs: object) -> object:
-                import io as _io
-                import traceback as _tb
-
-                stack = "".join(_tb.format_stack())
-                # `panic` is called with rich Traceback / renderables that
-                # capture the original exception. Render them so the log
-                # shows the actual exception, not just `<Traceback object>`.
-                rendered_args: list[str] = []
-                for arg in args:
-                    try:
-                        # Rich renderables have a __rich_console__ method;
-                        # rendering to a string captures the traceback text.
-                        from rich.console import Console as _RichConsole
-
-                        _buf = _io.StringIO()
-                        _RichConsole(file=_buf, force_terminal=False, width=120).print(arg)
-                        rendered_args.append(_buf.getvalue())
-                    except Exception:  # noqa: BLE001
-                        rendered_args.append(repr(arg))
-                logger.warning(
-                    f"app.{method_name}() called with kwargs={kwargs!r}"
-                    f"\nargs (rendered):\n{chr(10).join(rendered_args)}"
-                    f"\ntrigger stack:\n{stack}"
-                )
-                for h in logger.handlers:
-                    h.flush()
-                return original_method(*args, **kwargs)  # type: ignore[operator]
-
-            return wrapper
-
         try:
             setattr(app, attr, _make_wrapper(attr, original))
         except (AttributeError, TypeError):
