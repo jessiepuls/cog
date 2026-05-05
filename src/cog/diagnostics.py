@@ -133,6 +133,52 @@ def install_asyncio_handler() -> None:
             pass
 
 
+def patch_await_remove_logging() -> None:
+    """Wrap AwaitRemove to log which widget removal raised CancelledError.
+
+    AwaitRemove records the caller file/line where `.remove()` was called.
+    When its gather sees a cancellation, log the caller and the list of
+    tasks being gathered. This identifies WHICH widget is being removed
+    when the cancellation cascade fires.
+
+    Does NOT swallow the cancellation — it propagates up as before, so
+    Textual's normal shutdown happens. We just learn the source.
+    """
+    import asyncio
+
+    import textual.await_remove as _ar
+
+    logger = logging.getLogger("cog.diagnostics")
+
+    def patched_await(self: object) -> object:
+        current_task = asyncio.current_task()
+        tasks = [t for t in self._tasks if t is not current_task]  # type: ignore[attr-defined]
+        caller = getattr(self, "_caller", "<unknown>")
+
+        async def await_prune_with_logging() -> None:
+            try:
+                await asyncio.gather(*tasks)
+            except BaseException as exc:
+                # Log which AwaitRemove this was; then re-raise as Textual expects.
+                task_info = [(t.get_name(), t.done(), t.cancelled()) for t in tasks]
+                logger.error(
+                    f"AwaitRemove gather raised {type(exc).__name__}: {exc!r}\n"
+                    f"caller (widget.remove() site): {caller}\n"
+                    f"tasks: {task_info}"
+                )
+                for h in logger.handlers:
+                    h.flush()
+                raise
+            if self._post_remove is not None:  # type: ignore[attr-defined]
+                from textual._callback import invoke as _invoke
+
+                await _invoke(self._post_remove)  # type: ignore[attr-defined]
+
+        return await_prune_with_logging().__await__()
+
+    _ar.AwaitRemove.__await__ = patched_await  # type: ignore[method-assign,assignment]
+
+
 def patch_message_loop() -> None:
     """Wrap `MessagePump._process_messages_loop` to log CancelledError exits.
 

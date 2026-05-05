@@ -66,6 +66,7 @@ async def run_textual(
 ) -> int:
     from cog.diagnostics import (
         install_asyncio_handler,
+        patch_await_remove_logging,
         patch_handle_exception,
         patch_message_loop,
         patch_pump_shutdown_paths,
@@ -74,6 +75,7 @@ async def run_textual(
 
     install_asyncio_handler()
     patch_message_loop()
+    patch_await_remove_logging()
     run_screen = RunScreen(workflow, ctx, loop=loop, max_iterations=max_iterations)
     app = CogApp(run_screen, ctx.project_dir)
     patch_handle_exception(app)
@@ -98,6 +100,7 @@ async def run_textual(
 async def _run_main_menu(project_dir: Path) -> None:
     from cog.diagnostics import (
         install_asyncio_handler,
+        patch_await_remove_logging,
         patch_handle_exception,
         patch_message_loop,
         patch_pump_shutdown_paths,
@@ -108,6 +111,7 @@ async def _run_main_menu(project_dir: Path) -> None:
 
     install_asyncio_handler()
     patch_message_loop()
+    patch_await_remove_logging()
     tracker = GitHubIssueTracker(project_dir)
     app = CogApp(CogShellScreen(project_dir, tracker), project_dir)
     patch_handle_exception(app)
