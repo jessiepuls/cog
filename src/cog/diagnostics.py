@@ -133,6 +133,57 @@ async def run_app_traced(app: object) -> object:
     return result
 
 
+def patch_message_loop() -> None:
+    """Monkey-patch MessagePump._process_messages_loop to log how it exits.
+
+    Three exit paths are possible:
+    - while-condition false: self._closed became True somehow.
+    - MessagePumpClosed: queue returned None.
+    - CancelledError: task was cancelled.
+
+    Past iterations have ruled out queue.put_nowait(None) and direct method
+    calls, so this is the only way to learn which of the remaining paths
+    is firing on the user's crashes.
+    """
+    import textual.message_pump as _mp
+
+    logger = logging.getLogger("cog.diagnostics")
+    original = _mp.MessagePump._process_messages_loop
+
+    async def traced(self: object) -> None:
+        import traceback as _tb
+
+        # Only trace the App's own pump; children would be too noisy.
+        if type(self).__name__ != "CogApp":
+            await original(self)  # type: ignore[arg-type]
+            return
+        logger.warning(f"_process_messages_loop ENTERED on {type(self).__name__}")
+        for h in logger.handlers:
+            h.flush()
+        try:
+            await original(self)  # type: ignore[arg-type]
+        except BaseException as exc:
+            logger.warning(
+                f"_process_messages_loop RAISED {type(exc).__name__}: {exc!r}"
+                f"\n_closed={getattr(self, '_closed', '?')!r}"
+                f"\n_closing={getattr(self, '_closing', '?')!r}"
+                f"\ntraceback:\n{_tb.format_exc()}"
+            )
+            for h in logger.handlers:
+                h.flush()
+            raise
+        logger.warning(
+            f"_process_messages_loop RETURNED normally."
+            f" _closed={getattr(self, '_closed', '?')!r}"
+            f" _closing={getattr(self, '_closing', '?')!r}"
+            f"\nexit stack:\n{''.join(_tb.format_stack())}"
+        )
+        for h in logger.handlers:
+            h.flush()
+
+    _mp.MessagePump._process_messages_loop = traced  # type: ignore[method-assign]
+
+
 def patch_app_exit(app: object) -> None:
     """Monkey-patch app methods + the message queue to log every shutdown path.
 
