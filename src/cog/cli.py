@@ -76,26 +76,6 @@ def ralph(
 
 
 @app.command()
-def refine(
-    item: int | None = typer.Option(None, "--item"),
-    project_dir: Path | None = typer.Option(None, "--project-dir"),  # noqa: B008
-) -> None:
-    """Interactive: grill the user about a needs-refinement issue and rewrite it."""
-    from cog.workflows.refine import RefineWorkflow
-
-    exit_code = asyncio.run(
-        build_and_run(
-            RefineWorkflow,
-            project_dir or Path.cwd(),
-            item_id=item,
-            loop=item is None,
-            headless=False,
-        )
-    )
-    raise typer.Exit(exit_code)
-
-
-@app.command()
 def doctor(
     project_dir: Path = typer.Option(  # noqa: B008
         None, "--project-dir", help="Directory to run checks from."

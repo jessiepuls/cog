@@ -1,4 +1,4 @@
-"""Tests for CLI dispatch — ralph/refine subcommands and main menu invocation."""
+"""Tests for CLI dispatch — ralph subcommand and main menu invocation."""
 
 import re
 from unittest.mock import AsyncMock, patch
@@ -32,12 +32,6 @@ def test_cog_ralph_dispatches_ralph_class_to_build_and_run() -> None:
     build_mock.assert_awaited_once()
     called_cls = build_mock.call_args[0][0]
     assert called_cls.__name__ == "RalphWorkflow"
-
-
-def test_cog_refine_rejects_headless_flag() -> None:
-    # --headless is not a valid option for `cog refine` — typer exits 2
-    result = runner.invoke(app, ["refine", "--headless"])
-    assert result.exit_code == 2
 
 
 def test_cog_ralph_loop_forwards_flag() -> None:

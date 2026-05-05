@@ -31,8 +31,6 @@ from cog.ui.messages import LaunchSlotRequest, SlotDismissed, SlotStateChanged, 
 from cog.ui.views.chat import ChatView
 from cog.ui.views.dashboard import DashboardView
 from cog.ui.views.issues import IssuesView
-from cog.ui.views.ralph import RalphView
-from cog.ui.views.refine import RefineView
 
 
 @dataclass(frozen=True)
@@ -48,9 +46,7 @@ class ShellView:
 _VIEWS: tuple[ShellView, ...] = (
     ShellView(id="dashboard", label="Dashboard", keybind="ctrl+1"),
     ShellView(id="issues", label="Issues", keybind="ctrl+2"),
-    ShellView(id="refine", label="Refine", keybind="ctrl+3"),
-    ShellView(id="ralph", label="Ralph", keybind="ctrl+4"),
-    ShellView(id="chat", label="Chat", keybind="ctrl+5"),
+    ShellView(id="chat", label="Chat", keybind="ctrl+3"),
 )
 
 _STATIC_COUNT = len(_VIEWS)
@@ -245,30 +241,12 @@ class CogShellScreen(Screen):
             with Container(id="content-area"):
                 yield DashboardView(self._project_dir, self._tracker)
                 yield IssuesView(self._project_dir, self._tracker)
-                yield RefineView(self._project_dir, self._tracker)
-                yield RalphView(self._project_dir, self._tracker)
                 yield ChatView(self._project_dir)
         yield Footer()
 
     def on_mount(self) -> None:
         self._apply_active_view()
         self._highlight_sidebar_row(self._active_view_id)
-        ralph_view = self.query_one(RalphView)
-        refine_view = self.query_one(RefineView)
-        self.watch(ralph_view, "queue_count", self._on_ralph_count_changed)
-        self.watch(refine_view, "queue_count", self._on_refine_count_changed)
-
-    def _on_ralph_count_changed(self, count: int | None) -> None:
-        try:
-            self.query_one(Sidebar).set_count("ralph", count)
-        except Exception:  # noqa: BLE001 — not yet mounted
-            pass
-
-    def _on_refine_count_changed(self, count: int | None) -> None:
-        try:
-            self.query_one(Sidebar).set_count("refine", count)
-        except Exception:  # noqa: BLE001 — not yet mounted
-            pass
 
     # -------------------------------------------------------------------------
     # Dynamic slot management

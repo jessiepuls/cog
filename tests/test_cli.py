@@ -198,34 +198,3 @@ def test_cog_ralph_without_restart_defaults_to_false(monkeypatch, tmp_path):
     assert calls[0]["restart"] is False
 
 
-# --- refine subcommand ---
-
-
-def test_cog_refine_defaults_to_loop_true_when_no_item(monkeypatch, tmp_path):
-    calls: list[dict] = []
-
-    async def fake_build_and_run(*args: Any, **kwargs: Any) -> int:
-        calls.append({"args": args, **kwargs})
-        return 0
-
-    monkeypatch.setattr("cog.cli.build_and_run", fake_build_and_run)
-    result = runner.invoke(app, ["refine", "--project-dir", str(tmp_path)])
-    assert result.exit_code == 0
-    assert len(calls) == 1
-    assert calls[0]["loop"] is True
-    assert calls[0]["item_id"] is None
-
-
-def test_cog_refine_defaults_to_loop_false_when_item_given(monkeypatch, tmp_path):
-    calls: list[dict] = []
-
-    async def fake_build_and_run(*args: Any, **kwargs: Any) -> int:
-        calls.append({"args": args, **kwargs})
-        return 0
-
-    monkeypatch.setattr("cog.cli.build_and_run", fake_build_and_run)
-    result = runner.invoke(app, ["refine", "--project-dir", str(tmp_path), "--item", "42"])
-    assert result.exit_code == 0
-    assert len(calls) == 1
-    assert calls[0]["loop"] is False
-    assert calls[0]["item_id"] == 42
