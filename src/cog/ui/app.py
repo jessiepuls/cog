@@ -64,9 +64,14 @@ async def run_textual(
     max_iterations: int | None = None,
     tracker: IssueTracker | None = None,
 ) -> int:
-    from cog.diagnostics import install_asyncio_handler, patch_handle_exception
+    from cog.diagnostics import (
+        install_asyncio_handler,
+        patch_handle_exception,
+        patch_message_loop,
+    )
 
     install_asyncio_handler()
+    patch_message_loop()
     run_screen = RunScreen(workflow, ctx, loop=loop, max_iterations=max_iterations)
     app = CogApp(run_screen, ctx.project_dir)
     patch_handle_exception(app)

@@ -133,6 +133,45 @@ def install_asyncio_handler() -> None:
             pass
 
 
+def patch_message_loop() -> None:
+    """Wrap `MessagePump._process_messages_loop` to log CancelledError exits.
+
+    Cancellations propagating into the App's message-pump loop are silently
+    swallowed by Textual's outer `except CancelledError: pass`. The app
+    shuts down cleanly with no exception ever surfacing — `_handle_exception`
+    isn't called, so `patch_handle_exception` doesn't catch it.
+
+    Wrap the loop method itself so the cancellation+traceback lands in
+    cog.log before the silent exit. Only traces the App's own pump (not
+    every Widget) to keep noise down.
+
+    Call once before `app.run_async()`.
+    """
+    import textual.message_pump as _mp
+
+    logger = logging.getLogger("cog.diagnostics")
+    original = _mp.MessagePump._process_messages_loop
+
+    async def traced(self: _mp.MessagePump) -> None:
+        if type(self).__name__ != "CogApp":
+            await original(self)
+            return
+        try:
+            await original(self)
+        except BaseException as exc:
+            import traceback as _tb
+
+            logger.error(
+                f"_process_messages_loop raised {type(exc).__name__}: {exc!r}"
+                f"\ntraceback:\n{_tb.format_exc()}"
+            )
+            for h in logger.handlers:
+                h.flush()
+            raise
+
+    _mp.MessagePump._process_messages_loop = traced  # type: ignore[method-assign]
+
+
 def patch_handle_exception(app: object) -> None:
     """Wrap `App._handle_exception` to log worker exceptions to disk.
 
