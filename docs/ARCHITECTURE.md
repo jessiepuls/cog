@@ -15,7 +15,7 @@ the event stream.
 
 ```
 src/cog/
-├── cli.py                  Typer entry point (cog, cog ralph, cog refine, cog doctor)
+├── cli.py                  Typer entry point (cog, cog ralph, cog doctor)
 ├── core/                   Abstract interfaces (no backend assumptions)
 │   ├── workflow.py         Workflow, StageExecutor, ExecutionContext
 │   ├── tracker.py          IssueTracker
@@ -64,7 +64,7 @@ on the seam, backends implement it.
 | `IssueTracker` | Read / write items on a tracker | `GitHubIssueTracker` |
 | `GitHost` | Push branches, open PRs, read CI status | `GitHubGitHost` |
 | `ItemPicker` | Solicit item selection from the user | `TextualItemPicker`, in-view pickers |
-| `ReviewProvider` | Solicit accept / edit / abandon for a rewrite | `ModalReviewProvider`, `RefineView` |
+| `ReviewProvider` | Solicit accept / edit / abandon for a rewrite | `ModalReviewProvider` |
 | `RunEventSink` | Consume `RunEvent`s during a stage | `LogPaneWidget`, `ChatPaneWidget`, `StderrEventSink` |
 | `UserInputProvider` | Solicit a line of text (interactive workflows) | `ChatPaneWidget` |
 
@@ -127,33 +127,30 @@ ctx)` per iteration with a fresh `ExecutionContext`.
 The root screen is `CogShellScreen` — a persistent sidebar + content
 layout. All views are mounted always; visibility toggles via `display`.
 Workers owned by a view stay alive across view switches, so you can
-start a ralph run, flip to refine mid-interview, and come back to ralph
-with the log caught up.
+start a refine, flip to issues, and come back to refine with the
+chat caught up.
 
 ```
 ┌──────────┬──────────────────────────────────────────────────┐
 │ sidebar  │ active view (content area)                       │
 │ ^1 Dash  │                                                  │
-│ ^2 Iss   │  <DashboardView / IssuesView / RefineView /      │
-│ ^3 Ref●  3│   RalphView / ChatView /                        │
-│ ^4 Ral   1│   DynamicSlotView …>                            │
-│ ^5 Chat  │                                                  │
+│ ^2 Iss   │  <DashboardView / IssuesView / ChatView /        │
+│ ^3 Chat  │   DynamicSlotView …>                             │
 │ ──────── │                                                  │
-│ ^6 R #42 │                                                  │
-│ ^7 I #17 │                                                  │
+│ ^4 R #42 │                                                  │
+│ ^5 I #17 │                                                  │
 └──────────┴──────────────────────────────────────────────────┘
  ^Q Quit
 ```
 
-- **Ctrl+1/2/3/4/5** — switch static views
-- **Ctrl+6..N** — switch to dynamic slots (parallel workflow runs)
+- **Ctrl+1/2/3** — switch static views
+- **Ctrl+4..N** — switch to dynamic slots (parallel workflow runs)
 - **Ctrl+Q** — quit (confirm if workflows in-flight)
 - Sidebar yellow `●` — attention indicator (refine awaiting reply, run
   complete, etc.)
-- Sidebar dim count — queue depth for Refine (`needs-refinement`) and
-  Ralph (`agent-ready`), refreshed on mount and whenever a view posts
-  `QueueCountsStale`. Owned by `CogShellScreen.queue_counts` reactive;
-  the Dashboard reads the same reactive instead of fetching independently.
+- Sidebar state (`active_slots`, `active_id`, `attention`) lives in
+  three reactive attributes on `Sidebar` declared with `recompose=True`;
+  setters trigger an atomic recompose.
 - Each view exposes `focus_content()` and `busy_description()` hooks
   the shell uses
 
@@ -165,11 +162,11 @@ Pressing `r` (refine) or `i` (implement) in the Issues view posts a
 (`COG_MAX_CONCURRENT_IMPLEMENTS`, default 3), then mounts a
 `DynamicSlotView` and adds a `DynamicSlot` to `DynamicSlotRegistry`.
 
-The registry fires `on_change` on every mutation; the shell schedules an
-`exclusive=True` worker (`sidebar-dynamic` group) to rebuild the dynamic
-section of the sidebar (divider + slot rows). In-flight label updates
-(stage/state changes) bypass the full rebuild and use `rerender_slot_row`
-for single-row in-place updates.
+The registry fires `on_change` on every mutation; the shell pushes the
+new slot tuple into `sidebar.active_slots` (a `reactive(recompose=True)`),
+and Textual rebuilds the sidebar atomically. The shell holds no
+imperative DOM-mutation logic — all sidebar updates flow through the
+three Sidebar reactives (`active_slots`, `active_id`, `attention`).
 
 `DynamicSlotView` manages one slot's full lifecycle:
 - **implement**: `running` (log pane + footer) → `post_run` (summary

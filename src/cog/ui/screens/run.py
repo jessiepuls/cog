@@ -1,9 +1,9 @@
 """RunScreen — multi-iteration lifecycle (#16).
 
-Used by the CLI path (`cog ralph --item N` / `cog refine --item N` without
-`--headless`). The shell path (`cog` → refine/ralph view) hosts workflows
-inline in view widgets instead; those views reuse the stage-breakdown
-helpers exported from this module (`StageSummary`, `StageCountingSink`).
+Used by the CLI path (`cog ralph --item N` without `--headless`). The
+shell path (`cog` → Issues → launch slot) hosts workflows inline in
+DynamicSlotView instead; that view reuses the stage-breakdown helpers
+exported from this module (`StageSummary`, `StageCountingSink`).
 """
 
 import asyncio

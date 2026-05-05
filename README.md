@@ -11,9 +11,9 @@ captures cost + events, and drives a state machine across issue labels
 and git branches. The refine + ralph workflows are one configuration of
 that harness:
 
-- **[`cog refine`](docs/workflows/refine.md)** — interactive chat that
-  walks the decision tree on a `needs-refinement` issue, rewrites the
-  body, and promotes it to `agent-ready`.
+- **[Refine](docs/workflows/refine.md)** — launched from the Issues view,
+  an interactive chat that walks the decision tree on a `needs-refinement`
+  issue, rewrites the body, and promotes it to `agent-ready`.
 - **[`cog ralph`](docs/workflows/ralph.md)** — autonomous agent that
   picks an `agent-ready` issue, runs `build → review → document` inside
   a Docker sandbox, pushes the branch, opens the PR, waits for CI, and
@@ -108,7 +108,6 @@ cog
 cog ralph --loop --headless
 
 # Specific item
-cog refine --item 42
 cog ralph --item 42
 
 # Check preflight without launching a workflow
@@ -117,24 +116,20 @@ cog doctor
 
 ## TUI
 
-Running `cog` with no args launches a Textual shell with five static
+Running `cog` with no args launches a Textual shell with three static
 views plus dynamic slots for parallel workflow runs:
 
 | Shortcut | View | What you see |
 |----------|------|--------------|
-| `Ctrl+1` | Dashboard | Project status, queue counts, recent-runs strip, cost totals |
+| `Ctrl+1` | Dashboard | Project status, recent-runs strip, cost totals |
 | `Ctrl+2` | Issues | Filterable issue browser; launch refine/implement from here |
-| `Ctrl+3` | Refine | `needs-refinement` queue → inline interview → inline review |
-| `Ctrl+4` | Ralph | `agent-ready` queue → live log pane → completion panel |
-| `Ctrl+5` | Chat | Freeform multi-turn chat with Claude over the current project |
+| `Ctrl+3` | Chat | Freeform multi-turn chat with Claude over the current project |
 | `Ctrl+Q` | Quit | Confirms if a workflow is in flight |
 
-Workers persist across view switches — start a ralph run, flip to
-refine mid-work, come back and the log is caught up. A yellow `●` on
-a sidebar row indicates that view needs attention (interview awaiting
-reply, run complete, etc.). Refine and Ralph rows also show a dim
-right-aligned queue count (items in their respective queues) so you
-can see queue depth without opening the Dashboard.
+Workers persist across view switches — start a refine, flip to issues,
+come back and the chat is caught up. A yellow `●` on a sidebar row
+indicates that view needs attention (interview awaiting reply, run
+complete, etc.).
 
 ### Issues view — parallel workflow launches
 
@@ -144,7 +139,7 @@ From the Issues view (`Ctrl+2`), select any item and press:
 - **`i`** — start an implement (ralph) run on the selected item
 
 Each launch creates a **dynamic slot** appended below the static sidebar
-rows. Slots are numbered `Ctrl+6`, `Ctrl+7`, … in order. The sidebar
+rows. Slots are numbered `Ctrl+4`, `Ctrl+5`, … in order. The sidebar
 label shows the workflow prefix (`R` / `I`), item number, current stage,
 and a state dot (`●` running, `◐` awaiting dismiss, `✕` errored).
 
@@ -166,10 +161,11 @@ slot dismisses automatically after the review decision.
 ```
 cog                      Launch the TUI
 cog ralph [options]      Autonomous agent (see docs/workflows/ralph.md)
-cog refine [options]     Interactive refinement (see docs/workflows/refine.md)
 cog doctor               Run preflight checks and exit
 cog auth refresh         Sync Claude Code credentials from macOS keychain
 ```
+
+Refine runs only inside the TUI (Ctrl+2 → select item → `r`).
 
 ### `cog ralph`
 
@@ -181,15 +177,6 @@ cog auth refresh         Sync Claude Code credentials from macOS keychain
 | `--headless` | Bypass Textual; stream events to stderr |
 | `--restart` | Delete and recreate `cog/N-*` branch instead of resuming |
 | `--project-dir PATH` | Project directory (default: cwd) |
-
-### `cog refine`
-
-| Flag | Description |
-|------|-------------|
-| `--item N` | Skip selection; run on issue number N |
-| `--project-dir PATH` | Project directory (default: cwd) |
-
-Refine requires the TUI (no `--headless`).
 
 ### `cog doctor`
 

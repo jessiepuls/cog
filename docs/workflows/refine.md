@@ -89,8 +89,8 @@ Exiting without saving returns to the review prompt — **not** abandon.
   removed, `agent-ready` applied. If the interview ended early,
   `partially-refined` is also applied and the body gains a ⚠ warning.
 - **Abandon** — no label changes. A comment is posted on the item
-  explaining the rewrite was not applied. Re-run `cog refine --item N`
-  to retry.
+  explaining the rewrite was not applied. Re-launch refine on the item
+  from the Issues view to retry.
 
 ## Reports
 
@@ -101,39 +101,26 @@ output (verbatim from the rewrite stage, useful for forensics when the
 parsed title/body differs from what was generated), the complete interview
 transcript, and a per-stage cost table.
 
-## Commands
+## Launching
 
-```bash
-# Pick from the needs-refinement queue (interactive)
-cog refine
+Refine runs as a dynamic slot launched from the **Issues view** (Ctrl+2).
+Pick an issue with the `needs-refinement` label and start a refine on it;
+a sidebar slot appears (Ctrl+4..N) for the active interview.
 
-# Specific item
-cog refine --item 42
-```
+The slot view shows:
 
-Without `--item`, the CLI path loops through the queue until you cancel
-the picker.
-
-## In the TUI
-
-Within the shell, **Ctrl+2** opens the Refine view:
-
-- Idle: queue list showing all `needs-refinement` items (team-wide,
-  not filtered to `@me`). Each row shows the item title and an
-  assignee suffix `(@login)` when assigned. Enter to start.
-- Running: split pane — issue body + comments (left) / chat (right).
-  Resize with `Ctrl+,` / `Ctrl+.`. Panes stack vertically on narrow
+- A split pane — issue body + comments (left) / chat (right).
+- Resize with `Ctrl+,` / `Ctrl+.`. Panes stack vertically on narrow
   terminals (< 100 columns).
-- Review: left pane keeps the original body; right pane switches to the
-  proposed body. A title strip above shows old → new title.
+- After the interview ends, a review pane showing the proposed body.
   `a / e / Shift+Q` as above.
 
-Worker persists across view switches — flip to Ralph (Ctrl+3) or the
-dashboard (Ctrl+1) mid-interview and the chat scrollback + pending
-reply state survive.
+The slot persists across view switches — flip to the dashboard
+(Ctrl+1) or a different slot mid-interview and the chat scrollback +
+pending reply state survive.
 
-A yellow `●` appears on the Refine sidebar row when the chat is awaiting
-your reply or the review is ready (attention indicator).
+A yellow `●` appears on the slot's sidebar row when the chat is
+awaiting your reply or the review is ready (attention indicator).
 
 ## Related
 
