@@ -258,6 +258,7 @@ Run `cog doctor` to check without launching a workflow.
 | `COG_CI_POLL_INTERVAL_SECONDS` | `15` | Interval between `gh pr checks` polls |
 | `COG_CI_TIMEOUT_SECONDS` | `1800` | Total CI wait before timing out |
 | `COG_CI_MAX_RETRIES` | `2` | Max fix-on-CI-failure retries |
+| `COG_REFINE_INTERVIEW_MAX_TURNS` | unset | Diagnostic: cap refine interviews at N turns and force-end (returns SENTINEL). For reproducing post-interview crashes quickly without a real conversation. |
 | `XDG_STATE_HOME` | `~/.local/state` | Base directory for state files |
 | `EDITOR` | unset | Editor for `e` binding in review (falls back to `nano`, then `vi`) |
 | `ANTHROPIC_API_KEY` | unset | Required if not using macOS keychain |
