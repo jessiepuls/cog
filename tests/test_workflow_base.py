@@ -1,9 +1,9 @@
 """Tests for Workflow base class ClassVar defaults."""
 
 from cog.core.workflow import Workflow
-from cog.workflows.dummy import DummyWorkflow
 from cog.workflows.ralph import RalphWorkflow
 from cog.workflows.refine import RefineWorkflow
+from tests.fakes import DummyWorkflow
 
 
 def test_workflow_needs_item_picker_defaults_false():

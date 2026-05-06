@@ -28,7 +28,7 @@ the event stream.
 
 ```
 src/cog/
-├── cli.py            Typer CLI entry point (cog, cog ralph, cog refine, cog doctor)
+├── cli.py            Typer CLI entry point (cog, cog ralph, cog doctor)
 ├── core/             Abstract interfaces: Workflow, StageExecutor, ExecutionContext,
 │                     IssueTracker, GitHost, Sandbox, AgentRunner, RunEvent, errors
 ├── workflows/        RalphWorkflow, RefineWorkflow (and a DummyWorkflow for tests)

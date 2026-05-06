@@ -231,8 +231,8 @@ class RefineWorkflow(Workflow):
         await self._tracker.comment(
             ctx.item,
             "🤖 Cog ran a refinement interview but you chose not to apply the "
-            "proposed rewrite. The `needs-refinement` label is preserved; run "
-            "`cog refine --item <N>` to try again.",
+            "proposed rewrite. The `needs-refinement` label is preserved; "
+            "re-launch refine on this item from the Issues view to try again.",
         )
 
         if ctx.telemetry is not None and transcript:

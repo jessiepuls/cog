@@ -8,7 +8,6 @@ import pytest
 from cog.core.errors import GitError
 from cog.git import (
     branch_exists,
-    checkout_branch,
     commits_between,
     create_branch,
     current_branch,
@@ -16,7 +15,6 @@ from cog.git import (
     default_branch,
     delete_branch,
     fetch_origin,
-    merge_ff_only,
     rebase_abort,
     rebase_in_progress,
 )
@@ -107,40 +105,12 @@ async def test_commits_between_nonzero(tmp_path: Path) -> None:
     assert result == 3
 
 
-async def test_checkout_branch_argv(tmp_path: Path) -> None:
-    registry = FakeSubprocessRegistry()
-    registry.expect(("git", "checkout", "main"), stdout=b"")
-    with _patch_exec(registry):
-        await checkout_branch(tmp_path, "main")
-    assert ("git", "checkout", "main") in registry.calls
-
-
 async def test_fetch_origin_argv(tmp_path: Path) -> None:
     registry = FakeSubprocessRegistry()
     registry.expect(("git", "fetch", "origin"), stdout=b"")
     with _patch_exec(registry):
         await fetch_origin(tmp_path)
     assert ("git", "fetch", "origin") in registry.calls
-
-
-async def test_merge_ff_only_argv(tmp_path: Path) -> None:
-    registry = FakeSubprocessRegistry()
-    registry.expect(("git", "merge", "--ff-only", "origin/main"), stdout=b"")
-    with _patch_exec(registry):
-        await merge_ff_only(tmp_path, "origin/main")
-    assert ("git", "merge", "--ff-only", "origin/main") in registry.calls
-
-
-async def test_merge_ff_only_raises_on_nonff(tmp_path: Path) -> None:
-    registry = FakeSubprocessRegistry()
-    registry.expect(
-        ("git", "merge", "--ff-only", "origin/main"),
-        returncode=1,
-        stderr=b"fatal: Not possible to fast-forward, aborting.\n",
-    )
-    with _patch_exec(registry):
-        with pytest.raises(GitError):
-            await merge_ff_only(tmp_path, "origin/main")
 
 
 async def test_create_branch_argv(tmp_path: Path) -> None:

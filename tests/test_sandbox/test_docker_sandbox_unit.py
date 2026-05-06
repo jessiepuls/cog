@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from cog.core.errors import DockerImageBuildError, DockerUnavailableError, SandboxError
+from cog.core.errors import DockerImageBuildError, DockerUnavailableError
 from cog.runners.docker_sandbox import _EXPECTED_IMAGE_VERSION, DockerSandbox
 
 _PATCH_DOCKERFILE = "cog.runners.docker_sandbox._read_bundled_dockerfile"
@@ -440,24 +440,6 @@ async def test_keychain_security_binary_missing_warns(
 
 
 # ---------------------------------------------------------------------------
-# Smoke test
-# ---------------------------------------------------------------------------
-
-
-async def test_smoke_test_succeeds() -> None:
-    with _patch_exec(FakeProc(0)):
-        sandbox = DockerSandbox()
-        await sandbox.smoke_test()  # must not raise
-
-
-async def test_smoke_test_raises_on_failure() -> None:
-    with _patch_exec(FakeProc(1)):
-        sandbox = DockerSandbox()
-        with pytest.raises(SandboxError, match="smoke test failed"):
-            await sandbox.smoke_test()
-
-
-# ---------------------------------------------------------------------------
 # Error cases
 # ---------------------------------------------------------------------------
 
@@ -534,21 +516,3 @@ async def test_image_exists_returns_false_when_tag_not_found() -> None:
     with _patch_exec(FakeProc(1)):
         sandbox = DockerSandbox()
         assert await sandbox._image_exists() is False
-
-
-async def test_smoke_test_includes_python_version_check() -> None:
-    captured: list[tuple[str, ...]] = []
-
-    async def tracking_exec(*args: str, **kwargs: Any) -> FakeProc:
-        captured.append(args)
-        return FakeProc(0)
-
-    with patch(
-        "cog.runners.docker_sandbox.asyncio.create_subprocess_exec",
-        new=AsyncMock(side_effect=tracking_exec),
-    ):
-        sandbox = DockerSandbox()
-        await sandbox.smoke_test()
-
-    shell_cmd = captured[0][-1]
-    assert "sys.version_info >= (3, 12)" in shell_cmd

@@ -79,12 +79,19 @@ class DynamicSlotView(Widget, can_focus=True):
     exactly like them.
     """
 
+    # All footer-visible bindings use show=True; check_action gates each one
+    # by substate so the footer only displays bindings that actually do
+    # something in the current state. Note `x` is shared between abort
+    # (running) and review_abandon (reviewing) — same semantic, different
+    # state — and check_action ensures only one is active per state.
     BINDINGS = [
         Binding("x", "abort", "Abort", show=True),
-        Binding("enter", "dismiss", "Dismiss", show=False),
-        Binding("a", "review_accept", "Accept", show=False),
-        Binding("e", "review_edit", "Edit", show=False),
-        Binding("shift+q", "review_abandon", "Abandon", show=False),
+        Binding("x", "review_abandon", "Abandon", show=True),
+        Binding("escape", "end_interview", "End interview", show=True, priority=True),
+        Binding("ctrl+d", "end_interview", "End interview", show=False, priority=True),
+        Binding("enter", "dismiss", "Dismiss", show=True),
+        Binding("a", "review_accept", "Accept", show=True),
+        Binding("e", "review_edit", "Edit", show=True),
         Binding("ctrl+comma", "narrow_pane", "Narrow", show=False),
         Binding("ctrl+full_stop", "widen_pane", "Widen", show=False),
     ]
@@ -185,21 +192,21 @@ class DynamicSlotView(Widget, can_focus=True):
         self._worker = self.run_worker(self._run_workflow(), exclusive=True)
 
     def focus_content(self) -> None:
+        # In reviewing / post_run states the chat pane is hidden; focus has to
+        # move to the slot itself so the review actions (a/e/Shift+Q) and
+        # post-run actions (enter to dismiss) reach DynamicSlotView's bindings.
+        if self._substate != "running":
+            self.focus()
+            return
         if self._slot.workflow == "refine" and self._chat_pane is not None:
             try:
                 from textual.widgets import TextArea
 
                 self._chat_pane.query_one("#input-area", TextArea).focus()
             except Exception:  # noqa: BLE001
-                pass
+                self.focus()
         else:
             self.focus()
-
-    def busy_description(self) -> str | None:
-        if self._substate == "running":
-            wf = self._slot.workflow.capitalize()
-            return f"{wf} #{self._slot.item_id}"
-        return None
 
     # -------------------------------------------------------------------------
     # Workflow dispatch
@@ -473,6 +480,12 @@ class DynamicSlotView(Widget, can_focus=True):
                 str(self._review_state.get("proposed_title", "")),
             )
 
+    def action_end_interview(self) -> None:
+        if self._substate != "running" or self._slot.workflow != "refine":
+            return
+        if self._worker is not None:
+            self._worker.cancel()
+
     def action_abort(self) -> None:
         if self._substate != "running":
             return
@@ -511,20 +524,20 @@ class DynamicSlotView(Widget, can_focus=True):
             pass
 
     def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:
+        # Return False (not None) when an action doesn't apply so the footer
+        # hides its binding entirely. Returning None defaults to "shown +
+        # enabled," which surfaces non-applicable actions (e.g. `x Abort`
+        # in review state).
         if action == "abort":
-            return True if self._substate == "running" else None
+            return self._substate == "running"
         if action == "dismiss":
-            return True if self._substate == "post_run" else None
+            return self._substate == "post_run"
         if action in ("review_accept", "review_edit", "review_abandon"):
-            return (
-                True if self._substate == "reviewing" and self._review_future is not None else None
-            )
+            return self._substate == "reviewing" and self._review_future is not None
         if action in ("narrow_pane", "widen_pane"):
-            return (
-                True
-                if self._substate in ("running", "reviewing") and self._slot.workflow == "refine"
-                else None
-            )
+            return self._substate in ("running", "reviewing") and self._slot.workflow == "refine"
+        if action == "end_interview":
+            return self._substate == "running" and self._slot.workflow == "refine"
         return True
 
     # -------------------------------------------------------------------------

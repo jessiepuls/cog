@@ -6,7 +6,7 @@ import pytest
 
 from cog.core.errors import RunnerError, RunnerStalledError, RunnerTimeoutError
 from cog.runners.claude_cli import ClaudeCliRunner
-from cog.runners.sandbox import NullSandbox
+from tests.fakes import NullSandbox
 from tests.test_runners.helpers import PausingMockProc, StreamEvent, patch_pausing_exec
 
 # ---------------------------------------------------------------------------

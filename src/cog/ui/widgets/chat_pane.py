@@ -23,14 +23,12 @@ from cog.ui.widgets._shared import tool_preview
 class ChatPaneWidget(Widget):
     """Multi-turn chat with Claude. Implements RunEventSink + UserInputProvider."""
 
-    # Priority bindings run BEFORE the focused TextArea processes the key, so
+    # Priority binding runs BEFORE the focused TextArea processes the key, so
     # Enter submits instead of being consumed by TextArea as a newline insert.
     # shift+enter is not bound here, so it falls through to TextArea's default
-    # (insert newline).
+    # (insert newline). Esc/Ctrl+D are handled at the slot level.
     BINDINGS = [
         Binding("enter", "submit", "Submit", priority=True),
-        Binding("escape", "end_interview", "End interview", priority=True),
-        Binding("ctrl+d", "end_interview", "End interview", priority=True, show=False),
     ]
 
     DEFAULT_CSS = """
@@ -89,9 +87,6 @@ class ChatPaneWidget(Widget):
     def action_submit(self) -> None:
         self._submit()
 
-    def action_end_interview(self) -> None:
-        self._end_interview()
-
     def _submit(self) -> None:
         area = self.query_one("#input-area", TextArea)
         text = area.text.strip()
@@ -106,11 +101,6 @@ class ChatPaneWidget(Widget):
         future = self._ensure_future()
         if not future.done():
             future.set_result(text)
-
-    def _end_interview(self) -> None:
-        future = self._ensure_future()
-        if not future.done():
-            future.set_result(None)
 
     async def emit(self, event: RunEvent) -> None:
         if isinstance(event, AssistantTextEvent):
@@ -130,8 +120,7 @@ class ChatPaneWidget(Widget):
             self._append_tool_line(f"[dim]{event.message}[/dim]")
 
     async def prompt(self) -> str | None:
-        """Block until the user submits a message via Enter (str, possibly empty),
-        or ends the interview via Escape / Ctrl+D (None)."""
+        """Block until the user submits a message via Enter."""
         self._hide_thinking_indicator()
         future = self._ensure_future()
         result = await future

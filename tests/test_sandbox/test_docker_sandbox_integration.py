@@ -23,12 +23,6 @@ async def test_real_image_builds() -> None:
     assert sandbox._built
 
 
-async def test_real_smoke_test_passes() -> None:
-    sandbox = DockerSandbox()
-    await sandbox.prepare()
-    await sandbox.smoke_test()  # raises SandboxError if any tool is missing
-
-
 async def test_real_wrap_and_exec_runs_true() -> None:
     sandbox = DockerSandbox()
     await sandbox.prepare()

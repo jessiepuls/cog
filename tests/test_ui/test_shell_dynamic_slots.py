@@ -72,7 +72,7 @@ async def test_dynamic_slot_adds_divider_and_row(tmp_path: Path) -> None:
         sidebar = pilot.app.query_one(Sidebar)
         slot = _slot("run1", item_id="42", stage="build")
 
-        await sidebar.update_dynamic_slots([slot])
+        sidebar.active_slots = (slot,)
         await pilot.pause()
 
         list_view = pilot.app.query_one("#sidebar-nav", ListView)
@@ -91,7 +91,7 @@ async def test_dynamic_slot_row_label_format(tmp_path: Path) -> None:
         sidebar = pilot.app.query_one(Sidebar)
         slot = _slot("run1", workflow="implement", item_id="99", stage="review")
 
-        await sidebar.update_dynamic_slots([slot])
+        sidebar.active_slots = (slot,)
         await pilot.pause()
 
         list_view = pilot.app.query_one("#sidebar-nav", ListView)
@@ -109,7 +109,7 @@ async def test_divider_not_shown_when_no_dynamic_slots(tmp_path: Path) -> None:
         await pilot.pause()
         sidebar = pilot.app.query_one(Sidebar)
 
-        await sidebar.update_dynamic_slots([])
+        sidebar.active_slots = ()
         await pilot.pause()
 
         list_view = pilot.app.query_one("#sidebar-nav", ListView)
@@ -123,15 +123,10 @@ async def test_dynamic_slots_renumbered_after_removal(tmp_path: Path) -> None:
         await pilot.pause()
         sidebar = pilot.app.query_one(Sidebar)
         # Two slots
-        await sidebar.update_dynamic_slots(
-            [
-                _slot("r1", item_id="1"),
-                _slot("r2", item_id="2"),
-            ]
-        )
+        sidebar.active_slots = (_slot("r1", item_id="1"), _slot("r2", item_id="2"))
         await pilot.pause()
-        # Remove first slot → r2 should now be at ctrl+6
-        await sidebar.update_dynamic_slots([_slot("r2", item_id="2")])
+        # Remove first slot → r2 should now move to the first dynamic position
+        sidebar.active_slots = (_slot("r2", item_id="2"),)
         await pilot.pause()
 
         list_view = pilot.app.query_one("#sidebar-nav", ListView)

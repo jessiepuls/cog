@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Iterator, Sequence
+from collections.abc import AsyncIterator, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -9,11 +9,13 @@ from typing import Any
 from textual.app import ComposeResult
 from textual.widget import Widget
 
+from cog.core.context import ExecutionContext
 from cog.core.item import Comment, Item
-from cog.core.outcomes import StageResult
+from cog.core.outcomes import Outcome, StageResult
 from cog.core.runner import AgentRunner, ResultEvent, RunEvent, RunResult, ToolUseEvent
 from cog.core.stage import Stage
 from cog.core.tracker import IssueTracker, ItemListFilter, ItemListResult
+from cog.core.workflow import Workflow
 
 _EPOCH = datetime(2024, 1, 1, tzinfo=UTC)
 
@@ -447,3 +449,58 @@ class FakeSubprocessRegistry:
         proc = self._expectations[key]
         self._procs.append(proc)
         return proc
+
+
+class NullSandbox:
+    """Sandbox impl that does nothing. Used by tests."""
+
+    async def prepare(self) -> None:
+        return
+
+    def wrap_argv(self, argv: Sequence[str], cwd: Path | None = None) -> list[str]:
+        return list(argv)
+
+    def wrap_env(self, env: Mapping[str, str]) -> dict[str, str]:
+        return dict(env)
+
+
+class DummyWorkflow(Workflow):
+    name = "dummy"
+    queue_label = "dummy"
+    supports_headless = True
+
+    def __init__(self, runner: AgentRunner) -> None:
+        self._runner = runner
+
+    async def select_item(self, ctx: ExecutionContext) -> Item | None:
+        return Item(
+            tracker_id="dummy",
+            item_id="1",
+            title="hello",
+            body="",
+            labels=(),
+            comments=(),
+            state="open",
+            created_at=datetime.now(UTC),
+            updated_at=datetime.now(UTC),
+            url="",
+        )
+
+    def stages(self, ctx: ExecutionContext) -> list[Stage]:
+        return [
+            Stage(
+                name="one",
+                prompt_source=lambda _c: "hello from one",
+                model="dummy",
+                runner=self._runner,
+            ),
+            Stage(
+                name="two",
+                prompt_source=lambda _c: "hello from two",
+                model="dummy",
+                runner=self._runner,
+            ),
+        ]
+
+    async def classify_outcome(self, ctx: ExecutionContext, results: list[StageResult]) -> Outcome:
+        return "success"

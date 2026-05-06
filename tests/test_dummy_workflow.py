@@ -1,8 +1,7 @@
 """End-to-end test: DummyWorkflow + EchoRunner through StageExecutor."""
 
 from cog.core.workflow import StageExecutor
-from cog.workflows.dummy import DummyWorkflow
-from tests.fakes import EchoRunner
+from tests.fakes import DummyWorkflow, EchoRunner
 
 
 async def test_dummy_workflow_returns_two_stage_results(ctx_factory):

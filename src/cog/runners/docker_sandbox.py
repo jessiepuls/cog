@@ -9,7 +9,7 @@ import time
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
-from cog.core.errors import DockerImageBuildError, DockerUnavailableError, SandboxError
+from cog.core.errors import DockerImageBuildError, DockerUnavailableError
 
 _EXPECTED_IMAGE_VERSION = "3"
 
@@ -124,23 +124,6 @@ class DockerSandbox:
 
     def wrap_env(self, env: Mapping[str, str]) -> dict[str, str]:
         return {k: env[k] for k in ("PATH", "HOME", "USER") if k in env}
-
-    async def smoke_test(self) -> None:
-        """Verify key tools are present in the image. Raises SandboxError on failure."""
-        proc = await asyncio.create_subprocess_exec(
-            "docker",
-            "run",
-            "--rm",
-            self._image,
-            "sh",
-            "-c",
-            "claude --version && gh --version && jq --version && uv --version "
-            "&& python3 -c 'import sys; assert sys.version_info >= (3, 12), "
-            'f"Python 3.12+ required, got {sys.version_info}"\'',
-        )
-        await proc.wait()
-        if proc.returncode != 0:
-            raise SandboxError("smoke test failed: one or more tool version checks failed")
 
     async def _ensure_image_built(self) -> None:
         await self._check_docker_available()

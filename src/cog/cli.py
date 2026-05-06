@@ -25,6 +25,9 @@ def callback(
     version: bool = typer.Option(False, "--version", callback=_version_callback, is_eager=True),
 ) -> None:
     """cog — TUI for managing refine → ralph workflows."""
+    from cog.diagnostics import setup_diagnostics
+
+    setup_diagnostics(Path.cwd())
     if ctx.invoked_subcommand is None:
         from cog.ui.app import _run_main_menu
 
@@ -69,26 +72,6 @@ def ralph(
     except KeyboardInterrupt:
         sys.stderr.write("\naborted.\n")
         exit_code = 130
-    raise typer.Exit(exit_code)
-
-
-@app.command()
-def refine(
-    item: int | None = typer.Option(None, "--item"),
-    project_dir: Path | None = typer.Option(None, "--project-dir"),  # noqa: B008
-) -> None:
-    """Interactive: grill the user about a needs-refinement issue and rewrite it."""
-    from cog.workflows.refine import RefineWorkflow
-
-    exit_code = asyncio.run(
-        build_and_run(
-            RefineWorkflow,
-            project_dir or Path.cwd(),
-            item_id=item,
-            loop=item is None,
-            headless=False,
-        )
-    )
     raise typer.Exit(exit_code)
 
 
