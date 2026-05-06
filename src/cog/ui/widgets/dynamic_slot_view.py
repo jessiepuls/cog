@@ -87,6 +87,8 @@ class DynamicSlotView(Widget, can_focus=True):
     BINDINGS = [
         Binding("x", "abort", "Abort", show=True),
         Binding("x", "review_abandon", "Abandon", show=True),
+        Binding("escape", "end_interview", "End interview", show=True, priority=True),
+        Binding("ctrl+d", "end_interview", "End interview", show=False, priority=True),
         Binding("enter", "dismiss", "Dismiss", show=True),
         Binding("a", "review_accept", "Accept", show=True),
         Binding("e", "review_edit", "Edit", show=True),
@@ -205,12 +207,6 @@ class DynamicSlotView(Widget, can_focus=True):
                 self.focus()
         else:
             self.focus()
-
-    def busy_description(self) -> str | None:
-        if self._substate == "running":
-            wf = self._slot.workflow.capitalize()
-            return f"{wf} #{self._slot.item_id}"
-        return None
 
     # -------------------------------------------------------------------------
     # Workflow dispatch
@@ -484,6 +480,12 @@ class DynamicSlotView(Widget, can_focus=True):
                 str(self._review_state.get("proposed_title", "")),
             )
 
+    def action_end_interview(self) -> None:
+        if self._substate != "running" or self._slot.workflow != "refine":
+            return
+        if self._chat_pane is not None:
+            self._chat_pane._end_interview()
+
     def action_abort(self) -> None:
         if self._substate != "running":
             return
@@ -534,6 +536,8 @@ class DynamicSlotView(Widget, can_focus=True):
             return self._substate == "reviewing" and self._review_future is not None
         if action in ("narrow_pane", "widen_pane"):
             return self._substate in ("running", "reviewing") and self._slot.workflow == "refine"
+        if action == "end_interview":
+            return self._substate == "running" and self._slot.workflow == "refine"
         return True
 
     # -------------------------------------------------------------------------
