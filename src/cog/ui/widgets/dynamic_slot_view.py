@@ -81,13 +81,15 @@ class DynamicSlotView(Widget, can_focus=True):
 
     # All footer-visible bindings use show=True; check_action gates each one
     # by substate so the footer only displays bindings that actually do
-    # something in the current state.
+    # something in the current state. Note `x` is shared between abort
+    # (running) and review_abandon (reviewing) — same semantic, different
+    # state — and check_action ensures only one is active per state.
     BINDINGS = [
         Binding("x", "abort", "Abort", show=True),
+        Binding("x", "review_abandon", "Abandon", show=True),
         Binding("enter", "dismiss", "Dismiss", show=True),
         Binding("a", "review_accept", "Accept", show=True),
         Binding("e", "review_edit", "Edit", show=True),
-        Binding("Q", "review_abandon", "Abandon", show=True, key_display="shift+q"),
         Binding("ctrl+comma", "narrow_pane", "Narrow", show=False),
         Binding("ctrl+full_stop", "widen_pane", "Widen", show=False),
     ]
