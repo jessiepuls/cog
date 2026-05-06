@@ -87,7 +87,7 @@ class DynamicSlotView(Widget, can_focus=True):
         Binding("enter", "dismiss", "Dismiss", show=True),
         Binding("a", "review_accept", "Accept", show=True),
         Binding("e", "review_edit", "Edit", show=True),
-        Binding("shift+q", "review_abandon", "Abandon", show=True),
+        Binding("Q", "review_abandon", "Abandon", show=True, key_display="shift+q"),
         Binding("ctrl+comma", "narrow_pane", "Narrow", show=False),
         Binding("ctrl+full_stop", "widen_pane", "Widen", show=False),
     ]
