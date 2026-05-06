@@ -23,14 +23,12 @@ from cog.ui.widgets._shared import tool_preview
 class ChatPaneWidget(Widget):
     """Multi-turn chat with Claude. Implements RunEventSink + UserInputProvider."""
 
-    # Priority bindings run BEFORE the focused TextArea processes the key, so
+    # Priority binding runs BEFORE the focused TextArea processes the key, so
     # Enter submits instead of being consumed by TextArea as a newline insert.
     # shift+enter is not bound here, so it falls through to TextArea's default
-    # (insert newline).
+    # (insert newline). Esc/Ctrl+D are handled at the slot level.
     BINDINGS = [
         Binding("enter", "submit", "Submit", priority=True),
-        Binding("escape", "end_interview", "End interview", priority=True),
-        Binding("ctrl+d", "end_interview", "End interview", priority=True, show=False),
     ]
 
     DEFAULT_CSS = """
@@ -54,11 +52,6 @@ class ChatPaneWidget(Widget):
     def __init__(self, *args: object, **kwargs: object) -> None:
         super().__init__(*args, **kwargs)  # type: ignore[arg-type]
         self._input_future: asyncio.Future[str | None] | None = None
-        # Sticky flag: an Esc / Ctrl+D press during claude's streaming phase
-        # (before prompt() is called) gets recorded here. prompt() checks it
-        # at entry and returns None immediately if set, so the user's end
-        # signal isn't lost when _ensure_future replaces a done future.
-        self._end_requested: bool = False
 
     def compose(self) -> ComposeResult:
         yield RichLog(id="scrollback", highlight=True, markup=True, wrap=True)
@@ -94,9 +87,6 @@ class ChatPaneWidget(Widget):
     def action_submit(self) -> None:
         self._submit()
 
-    def action_end_interview(self) -> None:
-        self._end_interview()
-
     def _submit(self) -> None:
         area = self.query_one("#input-area", TextArea)
         text = area.text.strip()
@@ -111,12 +101,6 @@ class ChatPaneWidget(Widget):
         future = self._ensure_future()
         if not future.done():
             future.set_result(text)
-
-    def _end_interview(self) -> None:
-        self._end_requested = True
-        future = self._input_future
-        if future is not None and not future.done():
-            future.set_result(None)
 
     async def emit(self, event: RunEvent) -> None:
         if isinstance(event, AssistantTextEvent):
@@ -136,13 +120,8 @@ class ChatPaneWidget(Widget):
             self._append_tool_line(f"[dim]{event.message}[/dim]")
 
     async def prompt(self) -> str | None:
-        """Block until the user submits a message via Enter (str, possibly empty),
-        or ends the interview via Escape / Ctrl+D (None)."""
+        """Block until the user submits a message via Enter."""
         self._hide_thinking_indicator()
-        # If the user pressed Esc/Ctrl+D while claude was still streaming,
-        # the end signal was recorded before prompt() was called. Honor it.
-        if self._end_requested:
-            return None
         future = self._ensure_future()
         result = await future
         self._input_future = None

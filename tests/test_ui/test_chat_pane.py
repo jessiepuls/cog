@@ -107,32 +107,6 @@ async def test_chat_pane_prompt_returns_str_on_enter() -> None:
         assert result == "hello"
 
 
-async def test_chat_pane_prompt_returns_none_on_escape() -> None:
-    async with _ChatApp().run_test(headless=True) as pilot:
-        widget = pilot.app.query_one(ChatPaneWidget)
-
-        async def _escape_after_delay() -> None:
-            await asyncio.sleep(0.05)
-            widget._end_interview()
-
-        pilot.app.run_worker(_escape_after_delay())
-        result = await widget.prompt()
-        assert result is None
-
-
-async def test_chat_pane_prompt_returns_none_on_ctrl_d() -> None:
-    async with _ChatApp().run_test(headless=True) as pilot:
-        widget = pilot.app.query_one(ChatPaneWidget)
-
-        async def _end_after_delay() -> None:
-            await asyncio.sleep(0.05)
-            widget._end_interview()
-
-        pilot.app.run_worker(_end_after_delay())
-        result = await widget.prompt()
-        assert result is None
-
-
 async def test_chat_pane_prompt_submit_clears_textarea_for_next_turn() -> None:
     async with _ChatApp().run_test(headless=True) as pilot:
         widget = pilot.app.query_one(ChatPaneWidget)
