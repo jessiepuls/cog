@@ -53,9 +53,6 @@ class GitHost(ABC):
     async def get_pr_for_branch(self, branch: str) -> PullRequest | None: ...
 
     @abstractmethod
-    async def get_pr_body(self, number: int) -> str: ...
-
-    @abstractmethod
     async def get_open_prs_mentioning_item(self, item: Item) -> list[PullRequest]: ...
 
     @abstractmethod

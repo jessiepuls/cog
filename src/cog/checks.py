@@ -121,64 +121,6 @@ class CheckCleanTree:
         )
 
 
-class CheckDefaultBranch:
-    name: str = "default_branch"
-    level: Literal["error", "warning"] = "error"
-
-    def __init__(self, _create_subprocess: _SubprocessFactory | None = None) -> None:
-        self._create_subprocess = _create_subprocess
-
-    async def run(self, project_dir: Path) -> PreflightResult:
-        rc, origin_out, _ = await _run_cmd(
-            self._create_subprocess,
-            "git",
-            "symbolic-ref",
-            "--short",
-            "refs/remotes/origin/HEAD",
-            cwd=project_dir,
-        )
-        if rc != 0:
-            return PreflightResult(
-                check=self.name,
-                ok=False,
-                level="error",
-                message="run: git remote set-head origin --auto",
-            )
-
-        default_branch = origin_out.decode().strip().removeprefix("origin/")
-
-        rc, head_out, _ = await _run_cmd(
-            self._create_subprocess,
-            "git",
-            "symbolic-ref",
-            "--short",
-            "HEAD",
-            cwd=project_dir,
-        )
-        if rc != 0:
-            return PreflightResult(
-                check=self.name,
-                ok=False,
-                level="error",
-                message="not on any branch (detached HEAD)",
-            )
-
-        current = head_out.decode().strip()
-        if current != default_branch:
-            return PreflightResult(
-                check=self.name,
-                ok=False,
-                level="error",
-                message=f"currently on '{current}'; must be on '{default_branch}'",
-            )
-        return PreflightResult(
-            check=self.name,
-            ok=True,
-            level="error",
-            message=f"on default branch '{default_branch}'",
-        )
-
-
 class CheckGhAuth:
     name: str = "gh_auth"
     level: Literal["error", "warning"] = "error"

@@ -64,10 +64,6 @@ class GitHubGitHost(GitHost):
         # Rare: multiple open PRs for same head (gh orders newest-first); take first.
         return self._to_pr(data[0])
 
-    async def get_pr_body(self, number: int) -> str:
-        data = await self._gh_json(["pr", "view", str(number), "--json", "body"])
-        return data["body"] or ""
-
     async def get_pr_checks(self, number: int) -> PrChecks:
         try:
             stdout = await self._gh_json(

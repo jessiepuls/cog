@@ -72,19 +72,9 @@ async def commits_between(project_dir: Path, from_sha: str, to_sha: str = "HEAD"
     return int(result)
 
 
-async def checkout_branch(project_dir: Path, branch: str) -> None:
-    """`git checkout <branch>`."""
-    await _run(["git", "checkout", branch], project_dir)
-
-
 async def fetch_origin(project_dir: Path) -> None:
     """`git fetch origin`."""
     await _run(["git", "fetch", "origin"], project_dir)
-
-
-async def merge_ff_only(project_dir: Path, ref: str) -> None:
-    """`git merge --ff-only <ref>`. Raises GitError on non-ff state."""
-    await _run(["git", "merge", "--ff-only", ref], project_dir)
 
 
 async def create_branch(project_dir: Path, name: str, start_point: str = "HEAD") -> None:
