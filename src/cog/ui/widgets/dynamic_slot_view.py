@@ -481,6 +481,7 @@ class DynamicSlotView(Widget, can_focus=True):
             )
 
     def action_end_interview(self) -> None:
+        self.app.notify("end_interview action fired", timeout=3)
         if self._substate != "running" or self._slot.workflow != "refine":
             return
         if self._chat_pane is not None:
