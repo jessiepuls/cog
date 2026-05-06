@@ -54,6 +54,11 @@ class ChatPaneWidget(Widget):
     def __init__(self, *args: object, **kwargs: object) -> None:
         super().__init__(*args, **kwargs)  # type: ignore[arg-type]
         self._input_future: asyncio.Future[str | None] | None = None
+        # Sticky flag: an Esc / Ctrl+D press during claude's streaming phase
+        # (before prompt() is called) gets recorded here. prompt() checks it
+        # at entry and returns None immediately if set, so the user's end
+        # signal isn't lost when _ensure_future replaces a done future.
+        self._end_requested: bool = False
 
     def compose(self) -> ComposeResult:
         yield RichLog(id="scrollback", highlight=True, markup=True, wrap=True)
@@ -108,8 +113,9 @@ class ChatPaneWidget(Widget):
             future.set_result(text)
 
     def _end_interview(self) -> None:
-        future = self._ensure_future()
-        if not future.done():
+        self._end_requested = True
+        future = self._input_future
+        if future is not None and not future.done():
             future.set_result(None)
 
     async def emit(self, event: RunEvent) -> None:
@@ -133,6 +139,10 @@ class ChatPaneWidget(Widget):
         """Block until the user submits a message via Enter (str, possibly empty),
         or ends the interview via Escape / Ctrl+D (None)."""
         self._hide_thinking_indicator()
+        # If the user pressed Esc/Ctrl+D while claude was still streaming,
+        # the end signal was recorded before prompt() was called. Honor it.
+        if self._end_requested:
+            return None
         future = self._ensure_future()
         result = await future
         self._input_future = None
