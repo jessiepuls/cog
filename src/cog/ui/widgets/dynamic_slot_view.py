@@ -79,12 +79,15 @@ class DynamicSlotView(Widget, can_focus=True):
     exactly like them.
     """
 
+    # All footer-visible bindings use show=True; check_action gates each one
+    # by substate so the footer only displays bindings that actually do
+    # something in the current state.
     BINDINGS = [
         Binding("x", "abort", "Abort", show=True),
-        Binding("enter", "dismiss", "Dismiss", show=False),
-        Binding("a", "review_accept", "Accept", show=False),
-        Binding("e", "review_edit", "Edit", show=False),
-        Binding("shift+q", "review_abandon", "Abandon", show=False),
+        Binding("enter", "dismiss", "Dismiss", show=True),
+        Binding("a", "review_accept", "Accept", show=True),
+        Binding("e", "review_edit", "Edit", show=True),
+        Binding("shift+q", "review_abandon", "Abandon", show=True),
         Binding("ctrl+comma", "narrow_pane", "Narrow", show=False),
         Binding("ctrl+full_stop", "widen_pane", "Widen", show=False),
     ]
@@ -517,20 +520,18 @@ class DynamicSlotView(Widget, can_focus=True):
             pass
 
     def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:
+        # Return False (not None) when an action doesn't apply so the footer
+        # hides its binding entirely. Returning None defaults to "shown +
+        # enabled," which surfaces non-applicable actions (e.g. `x Abort`
+        # in review state).
         if action == "abort":
-            return True if self._substate == "running" else None
+            return self._substate == "running"
         if action == "dismiss":
-            return True if self._substate == "post_run" else None
+            return self._substate == "post_run"
         if action in ("review_accept", "review_edit", "review_abandon"):
-            return (
-                True if self._substate == "reviewing" and self._review_future is not None else None
-            )
+            return self._substate == "reviewing" and self._review_future is not None
         if action in ("narrow_pane", "widen_pane"):
-            return (
-                True
-                if self._substate in ("running", "reviewing") and self._slot.workflow == "refine"
-                else None
-            )
+            return self._substate in ("running", "reviewing") and self._slot.workflow == "refine"
         return True
 
     # -------------------------------------------------------------------------
