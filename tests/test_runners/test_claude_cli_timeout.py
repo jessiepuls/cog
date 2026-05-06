@@ -4,7 +4,7 @@ import pytest
 
 from cog.core.errors import RunnerTimeoutError
 from cog.runners.claude_cli import ClaudeCliRunner
-from cog.runners.sandbox import NullSandbox
+from tests.fakes import NullSandbox
 from tests.test_runners.helpers import hanging_proc, patch_exec
 
 

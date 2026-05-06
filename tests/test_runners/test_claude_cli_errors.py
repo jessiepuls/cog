@@ -5,7 +5,7 @@ import pytest
 from cog.core.errors import StreamJsonParseError
 from cog.core.runner import AssistantTextEvent
 from cog.runners.claude_cli import ClaudeCliRunner
-from cog.runners.sandbox import NullSandbox
+from tests.fakes import NullSandbox
 from tests.test_runners.helpers import fixture_proc, patch_exec
 
 
