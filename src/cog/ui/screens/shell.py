@@ -326,21 +326,9 @@ class CogShellScreen(Screen):
             desc = widget.busy_description()
             if desc:
                 busy.append(desc)
-        # Count active dynamic slots (running or awaiting dismiss)
         for slot in self._registry.active_slots:
-            try:
-                view = self.query_one(f"#view-slot-{slot.run_id}")
-            except Exception:  # noqa: BLE001
-                continue
-            if hasattr(view, "busy_description"):
-                desc = view.busy_description()
-                if desc:
-                    busy.append(desc)
-        n_dynamic = self._registry.active_count()
-        if n_dynamic > 0 and not busy:
-            busy.append(
-                f"{n_dynamic} active run(s). Active worktrees and branches will remain on disk."
-            )
+            wf = slot.workflow.capitalize()
+            busy.append(f"{wf} #{slot.item_id}")
         if not busy:
             self.app.exit()
             return
